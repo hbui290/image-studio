@@ -41,7 +41,7 @@ Read [reviewer setup](references/reviewer.md) before running it. `scripts/review
 ```bash
 uv run --with pillow --with jsonschema python scripts/review.py \
   --brief brief.json --candidate candidate.png --source source.png \
-  --out review-round-0 --model gpt-5.6-luna
+  --out review-round-0 --model <vision-model>
 ```
 
 For generation-only briefs, omit `--source`. For repairs, pass `--previous previous-round/report.json` and `--repairs-used 1` (then 2, then 3). Read `decision.json`; if it says `repair`, execute `repair-prompt.txt` with the appropriate clean image and repeat the review. The passed repair count must equal the number of image repair calls already made. Stop conditions also apply to manual/alternate reviewer paths.

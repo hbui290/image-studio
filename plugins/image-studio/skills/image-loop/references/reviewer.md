@@ -10,7 +10,7 @@
 
 Keep the existing CLI provider configuration. The adapter uses it without editing it. It requests a read-only, ephemeral execution and instructs the reviewer to use only the attached images and brief. User-installed CLI skills/configuration may add context and usage; this is not a hermetically isolated inference call.
 
-The test setup found GPT-5.6 Luna executable through its configured CLI. A preliminary `--ignore-user-config` GPT-5.4 Mini probe was rejected by the direct ChatGPT backend. That is evidence about this route, not a universal model-availability claim. Consult the example reports for the actual models used.
+Pass a vision model your Codex account can actually run; there is no automatic model fallback. The live examples record the models used when they were produced.
 
 If the reviewer requires authentication, use the host's normal login process. Never paste credentials into a prompt, brief, repository, or report. The adapter does not copy credentials or write global configuration. Existing account usage is consumed; no dollar savings are inferred from the model name.
 
@@ -21,7 +21,7 @@ uv run --with pillow --with jsonschema python plugins/image-studio/skills/image-
   --brief examples/product/brief.json \
   --source examples/product/source.png \
   --candidate examples/product/source.png \
-  --out work/product-round-0 --model gpt-5.6-luna
+  --out work/product-round-0 --model <vision-model>
 ```
 
 This intentionally reviews the unchanged source against the requested revision, which should identify missing edits. It is a controlled revision test, not a claim of generation failure.

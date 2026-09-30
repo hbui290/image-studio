@@ -18,22 +18,20 @@ For web delivery, also check the real page in a browser and run the project's bu
 
 For local repairs with multiple review rounds or exact protected pixels, [the optional candidate audit](../../image-verify/references/candidate-audit.md) validates a structured visual report and measures decoded pixel changes. It needs Python 3 and Pillow only when selected. A separate human or image-capable reviewer still judges visible meaning. These are **review** dependencies, not image-editing capabilities, and no part is installed automatically.
 
-**Recorded Jadebound example:** the historical hero repair used three principal restoration tools across its stages: ChatGPT ImageGen for replacement crop candidates, ImageMagick for crops/masks/composites/export, and Real-ESRGAN for an early resolution pass. `cwebp` encoded early WebP candidates; `sips` measured dimensions on macOS; image viewing and browser/Vite checks covered delivery. Grounded SAM 2 was studied later as an optional mask-proposal tool; it was not used to produce that hero. Another task may need fewer or different tools.
-
 ## Tool sources
 
 Use the official project or maintainer source when setup is needed. A repository link identifies the project; it does not prove that its code is installed, compatible with the machine, or already used in a repair.
 
-| Tool | Source | Role and historical status |
+| Tool | Role | Source |
 | --- | --- | --- |
-| ChatGPT ImageGen | [Official OpenAI image help](https://help.openai.com/en/articles/11084440-images-in-chatgpt) and [image generation documentation](https://developers.openai.com/api/docs/guides/tools-image-generation); **no public GitHub repository for the hosted model** | Generated Jadebound replacement candidates; verify access in the new agent instead of looking for a model download. |
-| ImageMagick `magick` | [GitHub repository](https://github.com/ImageMagick/ImageMagick) · [official installation guide](https://imagemagick.org/download/) | Cropped, masked, composited, compared, and exported the hero. |
-| Real-ESRGAN | [GitHub repository](https://github.com/xinntao/Real-ESRGAN) | Used for early resolution passes; optional for future repairs. Obtain a compatible executable and model weights when selected. |
-| Grounded SAM 2 | [GitHub repository](https://github.com/IDEA-Research/Grounded-SAM-2) · [installation guide](https://github.com/IDEA-Research/Grounded-SAM-2/blob/main/INSTALL.md) | Optional grounded object detection plus mask proposal; researched, not run on the hero. |
-| SAM 2 | [GitHub repository](https://github.com/facebookresearch/sam2) | Optional segmentation component; not run on the hero. |
-| `cwebp` / libwebp | [GitHub repository](https://github.com/webmproject/libwebp) | Used for early WebP encoding; optional when the selected editor exports WebP. |
+| Host image generator (for example ChatGPT/Codex image generation) | Proposes pixels for missing detail from a crop and references | [OpenAI image generation](https://developers.openai.com/api/docs/guides/tools-image-generation); hosted, so verify access instead of downloading a model |
+| ImageMagick `magick` | Exact crops, masks, composites, comparisons, export | [GitHub](https://github.com/ImageMagick/ImageMagick) · [install](https://imagemagick.org/download/) |
+| Real-ESRGAN | Super-resolution when recognizable detail needs more pixels | [GitHub](https://github.com/xinntao/Real-ESRGAN) |
+| Grounded SAM 2 | Grounded detection plus mask proposals for crowded scenes | [GitHub](https://github.com/IDEA-Research/Grounded-SAM-2) · [install](https://github.com/IDEA-Research/Grounded-SAM-2/blob/main/INSTALL.md) |
+| SAM 2 | Segmentation masks | [GitHub](https://github.com/facebookresearch/sam2) |
+| `cwebp` / libwebp | WebP encoding when the editor cannot export it | [GitHub](https://github.com/webmproject/libwebp) |
 
-Other conditional examples named in [repair-and-composite.md](repair-and-composite.md): [LaMa](https://github.com/advimman/lama) for inpainting, [CodeFormer](https://github.com/sczhou/CodeFormer) for face restoration, and [Diffusers](https://github.com/huggingface/diffusers) for model-based inpainting. The Jadebound website used [Vite](https://github.com/vitejs/vite) for its build checks; Vite is not an image-editing dependency. macOS `sips` is an operating-system utility rather than a separate project repository. These links are options and provenance, not a command to install the entire list.
+Other conditional examples named in [repair-and-composite.md](repair-and-composite.md): [LaMa](https://github.com/advimman/lama) for inpainting, [CodeFormer](https://github.com/sczhou/CodeFormer) for face restoration, and [Diffusers](https://github.com/huggingface/diffusers) for model-based inpainting. These links are options and provenance, not a command to install the entire list.
 
 ## What must travel to a new machine or agent?
 
