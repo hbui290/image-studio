@@ -9,7 +9,7 @@ Collect references → name their ingredients → combine selected traits → ge
 
 ## Invoke
 
-Claude Code: `/image-inspiration [brief] --mode batch|loop --judge human|llm|hybrid --count 4 --rounds 3 --max-images 12`.
+Claude Code: `/image-inspiration` (`/image-studio:image-inspiration` as a plugin) `[brief] --mode batch|loop --judge human|llm|hybrid --count 4 --rounds 3 --max-images 12`.
 Codex: `$image-inspiration` with the same instructions. These are arguments interpreted by the host agent, not a standalone slash-command executable. Default: `batch`, `human`, four images. Use one to eight candidates per batch; larger requests need separate bounded batches. `--loop` means `--mode loop`; `--no-loop` means `--mode batch`. Conflicting options require clarification. In loop mode, three rounds includes the first batch; twelve images includes every generation, edit, repair, and failed generation attempt. Before every batch, reduce its size to the remaining image slots; at zero, stop. Never exceed either cap. Smaller user limits take precedence.
 
 `human` asks the person to choose. `llm` uses an available independent vision model. `hybrid` shows that model's ranking and waits for the person's selection. Do not silently switch judges. A model must actually see the candidate images. Read [judging and iteration](references/judging.md) for the loop and decision helper.
@@ -44,3 +44,7 @@ Stop on a human stop, satisfied brief, exhausted budget, two rounds without impr
 ## Deliver
 
 Show clean candidate images labeled by ID, their ingredient recipes, check results, the judge's preference and reason, and any uncertainty. Link the board, prompts, lineage, and call ledger. Say whether the result is human-selected or model-ranked. Do not claim originality, exact font recovery, or cost savings as a measured fact. The planner and decision helper enforce bounded mechanics; the host agent performs extraction, generation, and judging.
+
+## Running the scripts
+
+In commands, `<skill-dir>` means this skill's folder (the host shows it when the skill loads); run them from your working folder. They need only Python 3; no extra packages.

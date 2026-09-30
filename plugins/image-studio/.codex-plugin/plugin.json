@@ -1,8 +1,12 @@
 {
   "name": "image-studio",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Create, edit, inspect, repair, and verify images with numbered maps, reference mixing, bounded review loops, and source-pixel audits.",
-  "author": {"name": "hbui290", "url": "https://github.com/hbui290"},
+  "author": {
+    "name": "hbui290",
+    "url": "https://github.com/hbui290"
+  },
+  "license": "MIT",
   "repository": "https://github.com/hbui290/image-studio",
   "homepage": "https://github.com/hbui290/image-studio",
   "skills": "./skills/",

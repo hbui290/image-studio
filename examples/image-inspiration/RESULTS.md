@@ -34,9 +34,9 @@ The three successful reviewer/judge calls record account usage. Their monetary c
 From the repository root, choose new output paths:
 
 ```bash
-python plugins/image-studio/skills/image-inspiration/scripts/combine.py examples/inspiration/board.json \
+python plugins/image-studio/skills/image-inspiration/scripts/combine.py examples/image-inspiration/board.json \
   --count 2 --seed 7 --out my-plan.json
-python plugins/image-studio/skills/image-inspiration/scripts/advance.py examples/inspiration/state-loop.json \
+python plugins/image-studio/skills/image-inspiration/scripts/advance.py examples/image-inspiration/state-loop.json \
   --out my-decision.json
 uv run --with pillow --with jsonschema python -m unittest discover -s tests -v
 ```

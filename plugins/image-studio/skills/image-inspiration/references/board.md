@@ -2,7 +2,7 @@
 
 Keep the full reverse-engineered inventory separate from the selected generation axes. An ingredient is a property of a named element, not an entire source image. For example, the font appearance of R1's headline and the wording of that headline are different ingredients. Hex colors, font families, and grading settings inferred from appearance are estimates.
 
-`board.json` has these required fields (see the repository's `examples/inspiration/board.json` for a runnable example):
+`board.json` has these required fields (a runnable example is `examples/image-inspiration/board.json` in the source repository):
 
 ```json
 {
@@ -19,7 +19,7 @@ Keep the full reverse-engineered inventory separate from the selected generation
 Source paths are relative to the board file unless absolute. Source can also be an inspected URL or a clearly labeled `user-note:` reference. Save access/inspection evidence with the full inventory. Trait IDs are globally unique. Axis names are arbitrary, nonempty property names; prefer the vocabulary in SKILL.md. Confidence is `high`, `medium`, `low`, or `unknown`; unknown traits may be inventoried but cannot participate in generation. An axis containing only unknown traits needs user clarification. A fixed trait must belong to its named axis. Incompatible pairs are lists of two distinct known trait IDs, such as `["R1:flat-medium", "R2:photographic-reflection"]`.
 
 ```bash
-python plugins/image-studio/skills/image-inspiration/scripts/combine.py board.json --count 4 --seed 7 --out plan.json
+python3 <skill-dir>/scripts/combine.py board.json --count 4 --seed 7 --out plan.json
 ```
 
 The Python standard-library helper validates the board, applies fixed selections and incompatible pairs, and returns unique combinations with source provenance. It evaluates at most 5,000 tuples and keeps a pool of at most 512; greedy Hamming distance spreads selected traits. It never generates images. If the requested count cannot be found, it returns fewer with an explicit note. On large constrained spaces, a shortfall does not prove no other valid combinations exist. Same board, count, and seed produce the same plan. IDs `C001` etc. are local to that plan; prefix them with the round (`r1-C001`) in the run ledger.

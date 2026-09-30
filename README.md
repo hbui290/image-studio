@@ -2,7 +2,7 @@
 
 **Fix or create images with AI, change only what you name, and prove the rest stayed the same.**
 
-A plugin of nine skills plus one reviewer agent for Claude Code and Codex. It includes no image model: your agent's image tool draws the pixels, and Image Studio plans the edit, checks the result, and decides whether to accept, repair, or stop.
+A plugin of nine skills for Claude Code and Codex, plus a reviewer agent in the Claude Code plugin. It includes no image model: your agent's image tool draws the pixels, and Image Studio plans the edit, checks the result, and decides whether to accept, repair, or stop.
 
 ## Skills
 
@@ -18,7 +18,7 @@ A plugin of nine skills plus one reviewer agent for Claude Code and Codex. It in
 | `image-repair` | Fixes one region through a mask and leaves the rest untouched |
 | `image-verify` | Reviews each criterion and audits pixels outside the mask |
 
-Agent `image-reviewer` grades a candidate independently, so the editing agent does not grade its own work.
+The `image-reviewer` agent (Claude Code plugin) grades a candidate independently, so the editing agent does not grade its own work. Other hosts get the same instructions in `image-verify/references/independent-review.md` for a fresh reviewer session.
 
 Example: in a picture of ten characters, `/image-repair` fixes the two distorted faces. `image-verify` then confirms that zero pixels changed on the other eight.
 
@@ -37,7 +37,7 @@ codex plugin add image-studio@image-studio
 python3 scripts/install.py --to <your-skills-directory>
 ```
 
-Start a new session afterwards. Use one install method per agent, and remove older copies of the same skills.
+Start a new session afterwards. As a Claude Code plugin the skills appear as `/image-studio:image-repair` and so on; in a skills folder as `/image-repair`; in Codex as `$image-repair`. You can also just describe the task. Use one install method per agent, and remove older copies of the same skills. `install.py --replace` deletes the existing folders of these nine skills, including files you added inside them.
 
 ## Tools
 
@@ -58,23 +58,24 @@ The details and a pre-flight checklist are in [tool readiness](plugins/image-stu
 ## How checking works
 
 1. Every requested change and every protected region gets an ID and a pass condition.
-2. A reviewer marks each ID `pass`, `fail`, or `uncertain`. The reviewer can be the `image-reviewer` agent, a Codex vision model, or a person.
+2. A reviewer marks each ID `pass`, `fail`, or `uncertain`. The reviewer can be the `image-reviewer` agent, a fresh session given the independent review instructions, a Codex vision model, or a person.
 3. `audit_candidate.py` compares decoded pixels. A single changed pixel outside the mask rejects the candidate, whatever the reviewer said.
-4. A failure produces a repair prompt with exact source coordinates. The loop stops on uncertainty, a repeated failure, or the repair limit.
+4. A failure produces a repair prompt with exact source coordinates. The loop stops on uncertainty, on the same failure twice in a row, or at the repair limit. Both review scripts use the same decisions: see [decisions](plugins/image-studio/skills/image-verify/references/decisions.md).
 
 ## Test
 
 ```bash
-python3 -m pip install pillow jsonschema
+python3 -m pip install pillow jsonschema   # or: uv run --with pillow --with jsonschema python3 -m unittest discover -s tests
 python3 -m unittest discover -s tests
 ```
 
-These offline tests call no model. They check the logic, not image quality.
+These offline tests call no model and skip themselves when Pillow or jsonschema is missing. They check the logic, not image quality.
 
 ## Limits
 
 - Vision reviewers can miss small text and fine spatial details.
 - A flat image does not reveal its original prompt, fonts, or layers.
+- Pixel audits compare 8-bit color and 16-bit grayscale exactly; Pillow reads 16-bit-per-channel color PNGs as 8-bit.
 - `accepted_by_checks` means the stated checks passed. It is not human approval.
 
 MIT license. See [NOTICE](NOTICE) for sources.

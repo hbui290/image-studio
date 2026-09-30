@@ -32,7 +32,7 @@ If tools do not allow concurrent image calls, serialize generation while agents 
 
 For each attempt keep: neutral ID, condition, full prompt, reference file/version/order/role, clean starting version, actual tool, exposed model/settings/seed, output file and metadata, call count, and result checks. Use `not exposed` rather than guessing. Optional timestamps, cost and latency help compare efficiency when genuinely available. Do not silently discard inconvenient outputs.
 
-Evaluate existence before dependent attributes and relationships. Each hard criterion receives `pass`, `fail`, `uncertain` or `not_evaluated` with visible evidence. `Uncertain` and `not_evaluated` do not count as passes. If a required planter is missing, its leaf color cannot pass. A diagram's aesthetics do not compensate for a wrong arrow direction.
+Evaluate existence before dependent attributes and relationships. Each hard criterion receives `pass`, `fail`, `uncertain` or `not_evaluated` with visible evidence. `Uncertain` and `not_evaluated` do not count as passes. `not_evaluated` belongs only in these experiment records; the review scripts (`audit_candidate.py`, `review.py`) accept `pass`, `fail`, or `uncertain`, so write `uncertain` there. If a required planter is missing, its leaf color cannot pass. A diagram's aesthetics do not compensate for a wrong arrow direction.
 
 If useful, score each soft preference on a predefined 0–4 scale: 0 absent, 1 poor, 2 partial, 3 good, 4 strong. Compute a weighted mean only among eligible, evaluated preferences. Weights rank preferences; they never soften hard requirements. Report raw criterion checks and the number of hard passes alongside any average. A human aesthetic judgment is still subjective and should be labeled accordingly.
 

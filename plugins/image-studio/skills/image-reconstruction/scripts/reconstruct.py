@@ -305,6 +305,11 @@ def validate(spec):
             require(groups[target]["bbox"] is not None, f"{target}: group move needs original bounds")
         if action == "restyle":
             require("bbox" not in selection["properties"], f"{target}: use move for bounding-box changes")
+        if action == "move":
+            require(set(selection["properties"]) <= {"bbox"},
+                    f"{target}: move changes only bbox; restyle other properties in a separate selection")
+        if action in ("keep", "remove"):
+            require(not selection["properties"], f"{target}: {action} takes no properties")
         for reference in selection["reference_ids"]:
             require(reference in sources and sources[reference]["selected_for_use"],
                     f"{target}: reference {reference} is missing or not selected for use")

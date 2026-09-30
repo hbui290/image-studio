@@ -8,8 +8,8 @@ Keep three records so the old appearance does not leak into the requested result
 
 | Record | What belongs here | Example |
 | --- | --- | --- |
-| Clean-source observations | Visible objects, source dimensions, measured or estimated bounds, materials, text, overlaps, and confidence | `A:07 mug has a broken-looking handle; the knight's fingers cross its left edge` |
-| Edit decisions | Target ID, property and requested change, protected properties, allowed physical consequences | `Repair A:07 handle; keep the knight's hand; allow a local contact shadow on the mug` |
+| Clean-source observations | Visible objects, source dimensions, measured or estimated bounds, materials, text, overlaps, and confidence | `A:#7 mug has a broken-looking handle; the knight's fingers cross its left edge` |
+| Edit decisions | Target ID, property and requested change, protected properties, allowed physical consequences | `Repair A:#7 handle; keep the knight's hand; allow a local contact shadow on the mug` |
 | Result checks | Required outcome, protected invariants, objective file checks, optional preferences | `One continuous handle; no extra fingers; source pixels outside the acceptance mask remain unchanged` |
 
 Mark each observation `visible`, `inferred`, or `unknown`. A flat image cannot establish an object's hidden back, original layers, exact font, or missing facial details. Keep source observations unchanged when the user revises a target; revise the edit decision and its affected result checks instead. Do not weaken a check just because a candidate failed it.
@@ -28,7 +28,7 @@ When a requested target is absent or its identity is uncertain, inspect the sour
 
 ## Compile only the current edit
 
-Build a concise instruction from the clean source, target ID and description, requested delta, permitted consequences, protected properties, reference roles, and observable checks. Resolve IDs to words and coordinates; a generator cannot infer what `A:07` means from the ID alone. Do not feed it a full inventory full of obsolete target descriptions. For example, if the source record says a cloak is blue and the user asks for green, keep `blue` in the source record but instruct the generator to make the cloak green while preserving its folds and attachment points.
+Build a concise instruction from the clean source, target ID and description, requested delta, permitted consequences, protected properties, reference roles, and observable checks. Resolve IDs to words and coordinates; a generator cannot infer what `A:#7` means from the ID alone. Do not feed it a full inventory full of obsolete target descriptions. For example, if the source record says a cloak is blue and the user asks for green, keep `blue` in the source record but instruct the generator to make the cloak green while preserving its folds and attachment points.
 
 Before submission, inspect the instruction for contradictions: old color versus requested color, `keep everything unchanged` versus a moved object and its shadow, or a style reference that would replace a protected face. If layout or pose is difficult, a simple sketch with source-matched aspect ratio can specify silhouettes and overlap; label construction marks so they do not appear in the final art. Review geometry before surface detail.
 

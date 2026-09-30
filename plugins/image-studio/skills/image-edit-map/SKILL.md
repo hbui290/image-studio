@@ -1,6 +1,6 @@
 ---
 name: image-edit-map
-description: Guide image edits through questions, numbered visual maps, named elements, and preservation checks. Reverse-engineer reference images into structured JSON for typography, palette, composition, inferred layers, grading, and image types. Use for image editing, visual breakdowns, and reference analysis. For a JSON-only breakdown prefer image-reverse-engineer; for defect diagnosis prefer image-inspect.
+description: "Plan an edit with the user: ask only needed questions, build a numbered visual map of named elements, and turn the choice into an edit brief with preservation checks. Use when the user wants to change parts of an image and must pick targets. Its reverse-engineering protocol is also used by image-reverse-engineer; for defect diagnosis use image-inspect."
 ---
 
 # Image Edit Map
@@ -77,3 +77,7 @@ Before delivery, use [the verification checklist](references/verification.md). W
 If the person explicitly requests the author's technical-editorial look, offer dark or paper-light ground, predominantly white/black content, restrained blue emphasis, readable typography, and meaningful diagram connections. Confirm the chosen direction; never apply a historical palette, 5:2 canvas, brand, or layout to an unrelated person's image by default.
 
 This workflow combines a numbered editing interface with lessons from targeted image revisions. General prompting guidance also informed it: [OpenAI image prompting](https://developers.openai.com/api/docs/guides/image-prompting). Verify current tool capabilities separately; this skill deliberately does not freeze model names or API settings.
+
+## Running the scripts
+
+In commands, `<skill-dir>` means this skill's folder (the host shows it when the skill loads); run them from your working folder. They need Python 3 with jsonschema (and Pillow for `--image`): `python3 -m pip install pillow jsonschema`, or prefix the command with `uv run --with pillow --with jsonschema`.

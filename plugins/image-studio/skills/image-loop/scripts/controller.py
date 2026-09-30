@@ -1,4 +1,8 @@
-"""Pure review policy shared by the CLI and offline tests."""
+"""Pure review policy shared by the CLI and offline tests.
+
+Action names and their order match image-verify's audit_candidate.decide;
+see image-verify/references/decisions.md.
+"""
 import json
 
 
@@ -24,12 +28,12 @@ def decide(brief, report, checks, repairs_used=0, max_repairs=3, previous=None):
         raise ValueError('Repair counts must be nonnegative.')
     failing = [c for c in report['criteria'] if c['status'] == 'fail']
     uncertain = [c for c in report['criteria'] if c['status'] == 'uncertain']
-    if uncertain:
-        return {'action': 'escalate', 'reason': 'Uncertain evidence requires stronger inspection.',
-                'ids': [c['id'] for c in uncertain]}
     if not checks['passed']:
-        return {'action': 'stop_file_checks', 'reason': 'Resolve output-file failures before acceptance or further generative edits.',
-                'failures': checks['failures']}
+        return {'action': 'reject_technical', 'reason': 'Resolve output-file failures before acceptance or further generative edits.',
+                'issues': checks['failures']}
+    if uncertain:
+        return {'action': 'hold_for_inspection', 'reason': 'Uncertain evidence requires stronger inspection.',
+                'ids': [c['id'] for c in uncertain]}
     if not failing:
         return {'action': 'accepted_by_checks', 'reason': 'All requested and protected criteria and file checks passed.'}
     if repairs_used >= max_repairs:
@@ -37,11 +41,12 @@ def decide(brief, report, checks, repairs_used=0, max_repairs=3, previous=None):
     if previous is not None and repairs_used > 0:
         old = {c['id'] for c in previous['criteria'] if c['status'] == 'fail'}
         if old == {c['id'] for c in failing}:
-            return {'action': 'escalate', 'reason': 'Same failure set persisted after a repair.', 'ids': sorted(old)}
+            return {'action': 'stop_repeated_failure', 'reason': 'Same failure set persisted after a repair.', 'ids': sorted(old)}
     protected = {c['id'] for c in brief['criteria'] if c['kind'] == 'protected'}
     return {'action': 'repair', 'reason': 'Repair only the failed requirements; recheck all criteria.',
             'ids': [c['id'] for c in failing],
-            'protected_failed': [c['id'] for c in failing if c['id'] in protected]}
+            'protected_failed': [c['id'] for c in failing if c['id'] in protected],
+            'start_from': 'last accepted clean source or candidate; never this candidate if protected_failed is not empty'}
 
 
 def repair_prompt(brief, report, decision):

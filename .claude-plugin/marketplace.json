@@ -10,7 +10,7 @@
       "name": "image-studio",
       "source": "./plugins/image-studio",
       "description": "Create, edit, inspect, repair, and verify images with evidence.",
-      "version": "2.0.0",
+      "version": "2.1.0",
       "category": "productivity"
     }
   ]

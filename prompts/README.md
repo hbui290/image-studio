@@ -13,7 +13,7 @@ These are controlled revision tests: the unchanged original was deliberately che
 
 ## Additional recipes
 
-For reference mixing, see the two [tested inspiration combinations](../examples/inspiration/RESULTS.md), their [ingredient board](../examples/inspiration/board.json), and [generated prompts](../examples/inspiration/plan.json). These combine independently selected composition and palette traits while holding lighting, typography, and medium fixed.
+For reference mixing, see the two [tested inspiration combinations](../examples/image-inspiration/RESULTS.md), their [ingredient board](../examples/image-inspiration/board.json), and [generated prompts](../examples/image-inspiration/plan.json). These combine independently selected composition and palette traits while holding lighting, typography, and medium fixed.
 
 [Eight complete generation prompts and four targeted edit prompts](recipes.md). These are new, ready-to-adapt prompts; **they have not been image-tested in this repository**. Each has concrete checks so users can test it through Image Loop.
 

@@ -17,16 +17,16 @@ If the reviewer requires authentication, use the host's normal login process. Ne
 ## Run one round
 
 ```bash
-uv run --with pillow --with jsonschema python plugins/image-studio/skills/image-loop/scripts/review.py \
-  --brief examples/product/brief.json \
-  --source examples/product/source.png \
-  --candidate examples/product/source.png \
-  --out work/product-round-0 --model <vision-model>
+python3 <skill-dir>/scripts/review.py \
+  --brief brief.json --source source.png --candidate candidate.png \
+  --out round-0 --model <vision-model>
 ```
 
-This intentionally reviews the unchanged source against the requested revision, which should identify missing edits. It is a controlled revision test, not a claim of generation failure.
+Use `--report report.json` instead of `--model` when the `image-reviewer` agent or a person already wrote the review; both `criteria` and `results` formats are accepted.
 
-For an actual candidate, supply that file with `--candidate`. For the next round add `--previous work/product-round-0/report.json --repairs-used 1`. The original source remains the reference for protected criteria. Never feed the numbered annotation copy as the clean source.
+For the next round, add `--previous round-0` (the folder, or its `report.json`). The script continues only when that round decided `repair`, and it counts repairs from the round history; `--repairs-used` is an optional cross-check. The original source remains the reference for protected criteria. Never feed the numbered annotation copy as the clean source.
+
+A repository checkout includes a controlled revision test in `examples/product/`: reviewing the unchanged source against the requested revision should identify the missing edits.
 
 ## Files
 
@@ -38,7 +38,7 @@ For an actual candidate, supply that file with `--candidate`. For the next round
 - `run.json`: requested model, account usage as exposed, elapsed time, image hashes, and retry settings. Dollar cost remains unknown unless independently calculated.
 - `.private/`: CLI diagnostics, excluded from publication. These can include local paths and installed skill metadata; do not upload them unreviewed.
 
-The script refuses to overwrite a previous round. Invalid output, missing IDs, duplicate IDs, uncertainty, provider failure, and failed file checks stop acceptance. Limits: at most three repairs by default; repeated identical failure sets escalate. The host agent must keep the repair count and previous-report chain accurate and retain the best protected candidate.
+The script refuses to overwrite a previous round. Invalid output, missing IDs, duplicate IDs, uncertainty, provider failure, and failed file checks stop acceptance. Limits: at most three repairs by default; repeated identical failure sets stop (`stop_repeated_failure`). The script derives the repair count from the `--previous` round folders, so keep each round in its own folder and retain the best protected candidate.
 
 ## What the reviewer can and cannot establish
 

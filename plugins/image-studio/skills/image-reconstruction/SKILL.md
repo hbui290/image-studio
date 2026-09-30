@@ -1,6 +1,6 @@
 ---
 name: image-reconstruction
-description: Analyze image references into named visual elements and reconstruction JSON, then compile prompts for recreating, remixing, or selectively editing them. Use when the user wants to understand a reference, reuse its visual decisions, or preserve specific parts during an edit.
+description: Split a reference into named parts and reconstruction JSON, then compile prompts that recreate it, remix it, or change selected parts while keeping the rest. Use when the user wants a new image built from a reference's decisions. For a read-only breakdown use image-reverse-engineer.
 ---
 
 # Image reconstruction
@@ -81,8 +81,8 @@ After an edit, review the compiler's `review_flags`. These identify baseline sce
 From the extracted skill folder, validate and compile with Python 3:
 
 ```sh
-python3 scripts/reconstruct.py validate examples/vellum.reconstruction.json
-python3 scripts/reconstruct.py compile examples/vellum.reconstruction.json --format json --output compiled.json
+python3 <skill-dir>/scripts/reconstruct.py validate <skill-dir>/examples/vellum.reconstruction.json
+python3 <skill-dir>/scripts/reconstruct.py compile <skill-dir>/examples/vellum.reconstruction.json --format json --output compiled.json
 ```
 
 The output separates `rendering_prompt`, `attachments`, requested output, criteria, and warnings. Resolve relative attachment paths against the input JSON file's directory. Send the rendering prompt and actual image attachments to an available image-generation tool. Use only supported tool settings; record unavailable model or seed information as `not exposed`.
@@ -114,7 +114,11 @@ The [exact compiled prompt](examples/vellum-reconstruction-prompt.txt) and sourc
 The full prompt library is separate from this skill. The small synthetic JSON fixture is included only for the compiler's internal checks.
 
 ```sh
-python3 scripts/reconstruct.py self-check
+python3 <skill-dir>/scripts/reconstruct.py self-check
 ```
 
 Deliver the clean result, exact prompt, actual inputs, map or selection record, reconstruction JSON, and concise remaining limitations as appropriate to the user's task.
+
+## Running the scripts
+
+In commands, `<skill-dir>` means this skill's folder (the host shows it when the skill loads); run them from your working folder. They need only Python 3; no extra packages.

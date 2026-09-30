@@ -6,6 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from deps import needs_jsonschema
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'plugins/image-studio/skills/image-loop/scripts'))
 from controller import decide, repair_prompt
@@ -31,9 +33,9 @@ class LoopTests(unittest.TestCase):
             r['criteria']=[dict(r['criteria'][0],id=i) for i in ids]
             self.assertEqual(decide(self.brief,r,self.checks)['action'],'stop_invalid_review')
 
-    def test_uncertainty_escalates(self):
+    def test_uncertainty_holds_for_inspection(self):
         self.report['criteria'][1]['status']='uncertain'
-        self.assertEqual(decide(self.brief,self.report,self.checks)['action'],'escalate')
+        self.assertEqual(decide(self.brief,self.report,self.checks)['action'],'hold_for_inspection')
 
     def test_protected_failure_requires_repair(self):
         self.report['criteria'][1]['status']='fail'
@@ -48,7 +50,7 @@ class LoopTests(unittest.TestCase):
 
     def test_repeated_failure_stops(self):
         self.report['criteria'][0]['status']='fail'
-        self.assertEqual(decide(self.brief,self.report,self.checks,1,3,self.report)['action'],'escalate')
+        self.assertEqual(decide(self.brief,self.report,self.checks,1,3,self.report)['action'],'stop_repeated_failure')
 
     def test_improving_failure_set_can_continue(self):
         previous=copy.deepcopy(self.report)
@@ -57,7 +59,7 @@ class LoopTests(unittest.TestCase):
         self.assertEqual(decide(self.brief,self.report,self.checks,1,3,previous)['action'],'repair')
 
     def test_file_failure_blocks_acceptance(self):
-        self.assertEqual(decide(self.brief,self.report,{'passed':False,'failures':['wrong size']})['action'],'stop_file_checks')
+        self.assertEqual(decide(self.brief,self.report,{'passed':False,'failures':['wrong size']})['action'],'reject_technical')
 
     def test_file_decode_and_alpha(self):
         from PIL import Image
@@ -81,14 +83,16 @@ class LoopTests(unittest.TestCase):
             self.assertEqual(marker.read_text(),'user work')
             with self.assertRaises(ValueError):m.install(ROOT/'plugins/image-studio/skills',ROOT/'plugins/image-studio/skills',replace=True)
 
+    @needs_jsonschema
     def test_extraction_dimension_guard(self):
         script=ROOT/'plugins/image-studio/skills/image-edit-map/scripts/validate_spec.py'
         image=ROOT/'examples/product/source.png'
         for filename, expected in [('raw-extraction.json',1),('image-spec.json',0)]:
-            result=subprocess.run([sys.executable,str(script),str(ROOT/'examples/reverse-engineer'/filename),
+            result=subprocess.run([sys.executable,str(script),str(ROOT/'examples/image-reverse-engineer'/filename),
                                    '--image',str(image)],capture_output=True,text=True)
             self.assertEqual(result.returncode,expected,result.stdout+result.stderr)
 
+    @needs_jsonschema
     def test_protected_review_needs_source_before_model_call(self):
         with tempfile.TemporaryDirectory() as tmp:
             out=Path(tmp)/'review'

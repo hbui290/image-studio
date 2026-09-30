@@ -48,6 +48,9 @@ class PackageTest(unittest.TestCase):
             meta = frontmatter(SKILLS / name / "SKILL.md")
             self.assertEqual(meta.get("name"), name)
             self.assertGreater(len(meta.get("description", "")), 40, name)
+            description = meta["description"]
+            # An unquoted ": " breaks YAML, and hosts then load the skill with no metadata.
+            self.assertTrue(": " not in description or description.startswith('"'), name)
 
     def test_repository_links_resolve(self):
         self.assertEqual(broken_links(ROOT), [])
@@ -77,6 +80,43 @@ class PackageTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             module.install(SKILLS, Path(tmp))
             self.assertEqual(broken_links(Path(tmp)), [])
+
+
+SCRIPT_REF = re.compile(r"python3? (<skill-dir>/[^\s`]+\.py)")
+OLD_TERMS = re.compile(r"(?<![\w-])(/reverse-engineer|\$reverse-engineer|/inspiration|\$inspiration)\b"
+                       r"|\b(escalate|stop_file_checks|stop_limit|reject_protected)\b|display_name: \"Inspiration\"")
+
+
+class DocsTest(unittest.TestCase):
+    def skill_docs(self):
+        for doc in sorted(SKILLS.rglob("*")):
+            if doc.suffix in (".md", ".yaml"):
+                yield doc, doc.relative_to(SKILLS).parts[0], doc.read_text(encoding="utf-8")
+
+    def test_skill_commands_use_paths_that_exist_in_every_install(self):
+        for doc, skill, text in self.skill_docs():
+            self.assertNotIn("plugins/image-studio", text, doc)
+            for ref in SCRIPT_REF.findall(text):
+                self.assertTrue((SKILLS / skill / ref.replace("<skill-dir>/", "")).resolve().is_file(), f"{doc}: {ref}")
+
+    def test_no_bare_python_launcher(self):
+        docs = list(self.skill_docs()) + [(ROOT / "README.md", None, (ROOT / "README.md").read_text())]
+        for doc, _, text in docs:
+            for line in text.splitlines():
+                stripped = line.strip().strip("`|")
+                self.assertFalse(re.match(r"python\s", stripped), f"{doc}: {line.strip()}")
+
+    def test_no_retired_names(self):
+        for doc, _, text in self.skill_docs():
+            self.assertIsNone(OLD_TERMS.search(text), f"{doc}: {OLD_TERMS.search(text) and OLD_TERMS.search(text).group(0)}")
+
+    def test_reviewer_instructions_ship_with_every_install(self):
+        agent = (PLUGIN / "agents/image-reviewer.md").read_text().split("---\n", 2)[2].strip()
+        self.assertIn(agent, (SKILLS / "image-verify/references/independent-review.md").read_text())
+
+    def test_every_skill_has_codex_metadata(self):
+        for name in skill_names():
+            self.assertTrue((SKILLS / name / "agents/openai.yaml").is_file(), name)
 
 
 if __name__ == "__main__":

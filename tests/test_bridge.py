@@ -8,7 +8,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from deps import needs_jsonschema
+
+try:
+    from PIL import Image, ImageDraw
+except ImportError:  # pragma: no cover
+    raise unittest.SkipTest("Pillow is not installed")
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILLS = ROOT / "plugins/image-studio/skills"
@@ -65,6 +70,7 @@ class BridgeTest(unittest.TestCase):
                    "--candidate", self.dir / "candidate.png", "--mask", self.dir / "mask.png",
                    "--review", review, "--out", self.dir / out)
 
+    @needs_jsonschema
     def test_brief_matches_image_loop_schema(self):
         from jsonschema import Draft202012Validator
         result = run(CONVERT, self.contract, "--out", self.dir / "brief.json")
@@ -91,6 +97,7 @@ class BridgeTest(unittest.TestCase):
         self.assertIn("K1: Corner mark unchanged", prompt)
         self.assertIn("restored from the source", prompt)
 
+    @needs_jsonschema
     def test_full_pipeline_with_stub_reviewer(self):
         bin_dir = self.dir / "bin"
         bin_dir.mkdir()
@@ -114,6 +121,7 @@ class BridgeTest(unittest.TestCase):
         return run(REVIEW, "--brief", self.dir / "brief.json", "--source", self.dir / "source.png",
                    "--candidate", self.dir / "candidate.png", "--out", self.dir / out, "--report", path)
 
+    @needs_jsonschema
     def test_image_loop_decides_from_external_report_without_codex(self):
         env_path = os.environ["PATH"]
         result = self.loop_review(self.report(c1="fail"), "external")
@@ -123,6 +131,7 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(run_record["adapter"], "external report")
         self.assertTrue((self.dir / "external/repair-prompt.txt").exists())
 
+    @needs_jsonschema
     def test_external_report_missing_an_id_is_invalid(self):
         report = self.report()
         report["criteria"].pop()
@@ -130,6 +139,7 @@ class BridgeTest(unittest.TestCase):
         decision = json.loads((self.dir / "partial/decision.json").read_text())
         self.assertEqual(decision["action"], "stop_invalid_review")
 
+    @needs_jsonschema
     def test_model_and_report_are_mutually_exclusive(self):
         run(CONVERT, self.contract, "--out", self.dir / "brief.json")
         result = run(REVIEW, "--brief", self.dir / "brief.json", "--candidate", self.dir / "candidate.png",

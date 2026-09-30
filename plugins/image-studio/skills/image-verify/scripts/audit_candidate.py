@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Audit a local image edit against a scene contract and a visual review.
 
-The script never generates pixels or decides what an image depicts. Any nonzero
-pixel in an optional acceptance mask permits changes, including a feathered edge;
-pure black pixels lock them.
+The script never generates pixels or decides what an image depicts. Any nonzero,
+non-transparent pixel in an optional acceptance mask permits changes, including a
+feathered edge; pure black or fully transparent pixels lock them. Decision names are
+shared with image-loop's controller; see references/decisions.md.
 """
 
 import argparse
@@ -47,8 +48,8 @@ def positive_int(value, label):
 def validate_contract(contract, source_size):
     exact_fields(contract, {"version", "mode", "intent", "canvas", "targets", "checks"},
                  {"pixel_lock_outside_mask", "max_repairs"}, "contract")
-    if contract["version"] != 1 or contract["mode"] not in {"repair", "create"}:
-        raise ValueError("contract requires version 1 and mode repair or create")
+    if type(contract["version"]) is not int or contract["version"] != 1 or contract["mode"] not in ("repair", "create"):
+        raise ValueError("contract requires integer version 1 and mode repair or create")
     nonempty(contract["intent"], "intent")
     if contract["mode"] == "repair" and source_size is None:
         raise ValueError("repair mode requires --source")
@@ -89,10 +90,12 @@ def validate_contract(contract, source_size):
     for item in contract["checks"]:
         exact_fields(item, {"id", "target_id", "kind", "requirement"}, set(), "check")
         check_id = nonempty(item["id"], "check.id")
-        if check_id in checks or item["target_id"] not in targets:
+        if check_id in checks or not isinstance(item["target_id"], str) or item["target_id"] not in targets:
             raise ValueError(f"{check_id}: duplicate ID or unknown target")
-        if item["kind"] not in {"change", "keep"}:
+        if item["kind"] not in ("change", "keep"):
             raise ValueError(f"{check_id}: kind must be change or keep")
+        if item["kind"] == "keep" and contract["mode"] == "create":
+            raise ValueError(f"{check_id}: keep checks compare against a source; create mode has none, so use change checks")
         nonempty(item["requirement"], f"{check_id}.requirement")
         checks[check_id] = item
     return targets, checks, locked, limit
@@ -118,7 +121,7 @@ def validate_review(review, checks):
         check_id = nonempty(item["id"], "result.id")
         if check_id in results or check_id not in checks:
             raise ValueError(f"{check_id}: duplicate or unknown review ID")
-        if item["status"] not in {"pass", "fail", "uncertain"}:
+        if item["status"] not in ("pass", "fail", "uncertain"):
             raise ValueError(f"{check_id}: invalid status")
         nonempty(item["evidence"], f"{check_id}.evidence")
         if "acknowledged_changed_pixels" in item:
@@ -139,19 +142,55 @@ def digest(path):
     return value.hexdigest()
 
 
-def inspect_pixels(source, candidate, mask, targets):
+HIGH_PRECISION = {"I", "I;16", "I;16B", "I;16L", "I;16N", "F"}
+
+
+def open_image(path):
+    """Decode an image as displayed (EXIF orientation applied) and keep its file format."""
+    from PIL import Image, ImageOps
+
+    image = Image.open(path)
+    image_format = image.format
+    return ImageOps.exif_transpose(image), image_format
+
+
+def editable_mask(image):
+    """255 where the final acceptance mask permits change: nonzero luminance and not transparent."""
     from PIL import ImageChops
 
+    rgba = image.convert("RGBA")
+    visible = rgba.getchannel("A").point(lambda value: 255 if value else 0)
+    return ImageChops.darker(rgba.convert("L").point(lambda value: 255 if value else 0), visible)
+
+
+def changed_map(source, candidate):
+    """255 where the decoded pixels differ, compared without reducing 16-bit or float precision."""
+    from PIL import ImageChops, ImageMath
+
+    if source.mode in HIGH_PRECISION or candidate.mode in HIGH_PRECISION:
+        # ponytail: single-channel wide compare; 32-bit integers beyond int32 range are not expected in images.
+        mode = "F" if "F" in (source.mode, candidate.mode) else "I"
+        first, second = source.convert(mode), candidate.convert(mode)
+        if hasattr(ImageMath, "lambda_eval"):
+            out = ImageMath.lambda_eval(lambda env: (abs(env["a"] - env["b"]) > 0) * 255, a=first, b=second)
+        else:
+            out = ImageMath.eval("(abs(a - b) > 0) * 255", a=first, b=second)
+        return out.convert("L")
     source, candidate = source.convert("RGBA"), candidate.convert("RGBA")
-    delta = ImageChops.difference(source, candidate)
-    channels = delta.split()
+    channels = ImageChops.difference(source, candidate).split()
     changed = channels[0]
     for channel in channels[1:]:
         changed = ImageChops.lighter(changed, channel)
     changed = changed.point(lambda value: 255 if value else 0)
     # Hidden RGB under alpha 0 in both images is invisible, so it is not a change.
     any_alpha = ImageChops.lighter(source.getchannel("A"), candidate.getchannel("A"))
-    changed = ImageChops.darker(changed, any_alpha.point(lambda value: 255 if value else 0))
+    return ImageChops.darker(changed, any_alpha.point(lambda value: 255 if value else 0))
+
+
+def inspect_pixels(source, candidate, mask, targets):
+    from PIL import ImageChops
+
+    changed = changed_map(source, candidate)
     counts = {}
     for target_id, (x, y, width, height) in targets.items():
         counts[target_id] = changed.crop((x, y, x + width, y + height)).histogram()[255]
@@ -176,28 +215,28 @@ def unacknowledged_keep_changes(checks, results, pixels):
 
 
 def decide(checks, results, technical_issues, repairs_used, max_repairs, previous, keep_changes=None):
+    """Same order and action names as image-loop's controller.decide (references/decisions.md)."""
     if technical_issues:
-        return {"action": "reject_technical", "issues": technical_issues}
+        return {"action": "reject_technical", "reason": "File or pixel checks failed.", "issues": technical_issues}
     uncertain = [item["id"] for item in results.values() if item["status"] == "uncertain"]
     if uncertain or keep_changes:
-        decision = {"action": "hold_for_inspection", "check_ids": uncertain + sorted(keep_changes or {})}
+        decision = {"action": "hold_for_inspection", "reason": "Evidence needs stronger inspection.",
+                    "ids": uncertain + sorted(keep_changes or {})}
         if keep_changes:
             decision["changed_keep_pixels"] = keep_changes
         return decision
     failed = [item["id"] for item in results.values() if item["status"] == "fail"]
-    protected = [check_id for check_id in failed if checks[check_id]["kind"] == "keep"]
-    if protected:
-        return {"action": "reject_protected", "check_ids": protected}
     if not failed:
-        return {"action": "accepted_by_checks", "check_ids": []}
+        return {"action": "accepted_by_checks", "reason": "All specified checks passed.", "ids": []}
     if repairs_used >= max_repairs:
-        return {"action": "stop_limit", "check_ids": failed}
-    if previous:
+        return {"action": "stop_budget", "reason": "Repair limit reached.", "ids": failed}
+    if previous is not None:
         old = {item["id"] for item in previous.values() if item["status"] == "fail"}
         if old == set(failed):
-            return {"action": "stop_repeated_failure", "check_ids": failed}
-    return {"action": "repair", "check_ids": failed,
-            "reinspect_ids": list(checks), "start_from": "last accepted clean source or candidate"}
+            return {"action": "stop_repeated_failure", "reason": "Same failure set persisted after a repair.", "ids": sorted(old)}
+    return {"action": "repair", "reason": "Repair only the failed checks; recheck all checks.", "ids": failed,
+            "protected_failed": [check_id for check_id in failed if checks[check_id]["kind"] == "keep"],
+            "start_from": "last accepted clean source or candidate; never this candidate if protected_failed is not empty"}
 
 
 def repair_prompt(contract, targets, checks, results, decision):
@@ -209,7 +248,7 @@ def repair_prompt(contract, targets, checks, results, decision):
         return f"{names[target_id]} ({target_id}) at source box x={x}, y={y}, width={width}, height={height}"
 
     lines = ["Edit the supplied clean source image. Intent: " + contract["intent"], "", "Correct only these failed checks:"]
-    for check_id in decision["check_ids"]:
+    for check_id in decision["ids"]:
         check, result = checks[check_id], results[check_id]
         lines += [f"- {check_id}: {check['requirement']} ({where(check['target_id'])})",
                   f"  Reviewer observation: {result['evidence']}"]
@@ -232,47 +271,52 @@ def main():
         parser.add_argument(f"--{name}", required=True, type=Path)
     for name in ("source", "mask", "previous"):
         parser.add_argument(f"--{name}", type=Path)
-    parser.add_argument("--repairs-used", type=int, default=0)
+    parser.add_argument("--repairs-used", type=int,
+                        help="Optional cross-check; derived from --previous (previous round + 1), else 0")
     args = parser.parse_args()
     if args.out.exists():
         parser.error("output directory already exists; keep each round separate")
-    if args.repairs_used < 0 or bool(args.repairs_used) != bool(args.previous):
-        parser.error("use --previous and a positive --repairs-used together")
     try:
-        from PIL import Image
+        import PIL  # noqa: F401
     except ImportError:
-        parser.error("Pillow is required for decoded image and pixel checks")
+        parser.error("Pillow is required for decoded image and pixel checks: python3 -m pip install pillow")
     try:
         contract = load_json(args.contract)
         review = load_json(args.review)
-        source = Image.open(args.source) if args.source else None
-        candidate = Image.open(args.candidate)
+        source, _ = open_image(args.source) if args.source else (None, None)
+        candidate, candidate_format = open_image(args.candidate)
         source_size = source.size if source else None
         targets, checks, locked, limit = validate_contract(contract, source_size)
         results = validate_review(review, checks)
-        previous = None
+        previous, repairs_used = None, 0
         if args.previous:
-            prior_evidence = load_json(args.previous / "evidence.json")
+            folder = args.previous if args.previous.is_dir() else args.previous.parent
+            prior_evidence = load_json(folder / "evidence.json")
             if (prior_evidence.get("contract_sha256") != digest(args.contract)
                     or prior_evidence.get("source_sha256") != (digest(args.source) if args.source else None)):
                 raise ValueError("previous round uses a different contract or source")
-            previous = validate_review(load_json(args.previous / "review.json"), checks)
+            prior_action = load_json(folder / "decision.json").get("action")
+            if prior_action != "repair":
+                raise ValueError(f"previous round decided {prior_action!r}; only a repair decision starts another round")
+            repairs_used = prior_evidence.get("repairs_used", 0) + 1
+            previous = validate_review(load_json(folder / "review.json"), checks)
+        if args.repairs_used is not None and args.repairs_used != repairs_used:
+            raise ValueError(f"--repairs-used {args.repairs_used} does not match the round history ({repairs_used})")
         if locked != bool(args.mask):
             raise ValueError("--mask is required exactly when pixel_lock_outside_mask is true")
-        mask = Image.open(args.mask).convert("L") if args.mask else None
+        mask = editable_mask(open_image(args.mask)[0]) if args.mask else None
         if mask and mask.size != candidate.size:
             raise ValueError("acceptance mask dimensions differ from the candidate")
-        if mask:
-            # A feathered edge is editable: every nonzero pixel permits change, only pure black locks.
-            mask = mask.point(lambda value: 255 if value else 0)
         issues = []
         canvas = contract["canvas"]
         if candidate.size != (canvas["width"], canvas["height"]):
             issues.append("candidate dimensions differ from the contract")
-        if candidate.format != canvas["format"]:
+        if candidate_format != canvas["format"]:
             issues.append("candidate decoded format differs from the contract")
         if source and candidate.size != source.size:
             issues.append("source and candidate dimensions differ; source-coordinate comparison is invalid")
+        if source and (source.mode in HIGH_PRECISION) != (candidate.mode in HIGH_PRECISION):
+            issues.append(f"source ({source.mode}) and candidate ({candidate.mode}) bit depth differ")
         pixels = None
         if source and source.size == candidate.size:
             pixels = inspect_pixels(source, candidate, mask, targets)
@@ -286,9 +330,10 @@ def main():
                     "candidate_sha256": digest(args.candidate),
                     "mask_sha256": digest(args.mask) if args.mask else None,
                     "candidate": {"width": candidate.width, "height": candidate.height,
-                                  "format": candidate.format}, "pixels": pixels,
+                                  "format": candidate_format, "mode": candidate.mode}, "pixels": pixels,
+                    "repairs_used": repairs_used, "max_repairs": limit,
                     "technical_issues": issues}
-        decision = decide(checks, results, issues, args.repairs_used, limit, previous,
+        decision = decide(checks, results, issues, repairs_used, limit, previous,
                           unacknowledged_keep_changes(checks, results, pixels))
         args.out.mkdir(parents=True)
         (args.out / "evidence.json").write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
@@ -299,8 +344,8 @@ def main():
                 repair_prompt(contract, targets, checks, results, decision), encoding="utf-8")
         print(json.dumps(decision))
         return 0
-    except (OSError, ValueError, json.JSONDecodeError) as error:
-        parser.error(str(error))
+    except (OSError, ValueError, TypeError, KeyError) as error:
+        parser.error(f"{type(error).__name__}: {error}")
 
 
 if __name__ == "__main__":

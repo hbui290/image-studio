@@ -17,10 +17,13 @@ FORMATS = {"PNG", "JPEG", "WEBP"}
 
 
 def to_brief(contract, alpha_required=False):
-    targets, checks, _, _ = validate_contract(contract, None if contract["mode"] == "create" else
-                                              (contract["canvas"]["width"], contract["canvas"]["height"]))
+    canvas = contract.get("canvas") if isinstance(contract, dict) else None
+    if not isinstance(canvas, dict):
+        raise ValueError("contract.canvas must be an object")
+    # Repair contracts are checked as if a source of canvas size were supplied.
+    size = None if contract.get("mode") == "create" else (canvas.get("width"), canvas.get("height"))
+    targets, checks, _, _ = validate_contract(contract, size)
     names = {item["id"]: item["name"] for item in contract["targets"]}
-    canvas = contract["canvas"]
     criteria = []
     for check_id, check in checks.items():
         x, y, width, height = targets[check["target_id"]]
@@ -50,8 +53,8 @@ def main():
         parser.error("output file already exists")
     try:
         brief = to_brief(load_json(args.contract), args.alpha_required)
-    except (OSError, ValueError, KeyError) as error:
-        parser.error(str(error))
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        parser.error(f"{type(error).__name__}: {error}")
     args.out.write_text(json.dumps(brief, indent=2) + "\n", encoding="utf-8")
     print(args.out)
     return 0

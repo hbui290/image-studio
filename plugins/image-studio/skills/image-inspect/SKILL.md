@@ -1,6 +1,6 @@
 ---
 name: image-inspect
-description: Diagnose a supplied image, locate named or repeated objects, and prepare a source-grounded edit contract without changing pixels. Use for critique, defect mapping, or unclear edit targets. Not for numbered edit planning (image-edit-map) or JSON style extraction (image-reverse-engineer).
+description: Diagnose what is wrong with a supplied image (crop, CSS, compression, softness, broken faces or geometry) and locate the exact object to fix, without changing pixels. Use before image-repair or for critique. Not for planning general edits (image-edit-map), JSON style extraction (image-reverse-engineer), or rebuilding a reference (image-reconstruction).
 ---
 
 # Image inspection

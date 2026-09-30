@@ -36,11 +36,11 @@ Both examples passed all five visual criteria after one repair and passed decode
 
 ## Reverse engineering exposed a real error
 
-The independent model returned [raw JSON](reverse-engineer/raw-extraction.json) that passed schema/geometry/reference validation. But it incorrectly claimed a measured size of 1248×1248; the actual file is 1254×1254. It also suggested locks not supplied by the user and assigned numbers independently from the annotation map.
+The independent model returned [raw JSON](image-reverse-engineer/raw-extraction.json) that passed schema/geometry/reference validation. But it incorrectly claimed a measured size of 1248×1248; the actual file is 1254×1254. It also suggested locks not supplied by the user and assigned numbers independently from the annotation map.
 
 The package now requires separate file-metadata verification when a local source is available. The validator's `--image` check rejects those incorrect dimensions. The protocol also requires existing ID manifests to be carried into extraction and separates preservation suggestions from user-imposed locks.
 
-The [corrected specification](reverse-engineer/image-spec.json) uses decoded dimensions, aligns IDs with the map, and removes unsolicited locks. [Correction record](reverse-engineer/corrections.json). This was explicit postprocessing after inspection, not a second successful model extraction. Other visual properties remain observations or estimates; no original font file, editable layers, or grading recipe was recovered.
+The [corrected specification](image-reverse-engineer/image-spec.json) uses decoded dimensions, aligns IDs with the map, and removes unsolicited locks. [Correction record](image-reverse-engineer/corrections.json). This was explicit postprocessing after inspection, not a second successful model extraction. Other visual properties remain observations or estimates; no original font file, editable layers, or grading recipe was recovered.
 
 ## Model access and cost
 

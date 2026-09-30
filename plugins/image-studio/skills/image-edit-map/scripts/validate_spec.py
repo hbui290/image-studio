@@ -78,7 +78,9 @@ def main():
     args = parser.parse_args()
     schema_path = Path(__file__).resolve().parents[1] / 'references/image-spec.schema.json'
     try:
-        data = json.loads(args.spec.read_text())
+        def reject_constant(value):
+            raise ValueError(f'Non-JSON constant {value} is not allowed')
+        data = json.loads(args.spec.read_text(), parse_constant=reject_constant)
         schema = json.loads(schema_path.read_text())
         errors = validate(data, schema)
         if args.image and not errors:

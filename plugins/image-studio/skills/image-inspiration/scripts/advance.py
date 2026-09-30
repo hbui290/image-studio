@@ -70,7 +70,8 @@ def decide(state):
     if state['rounds_completed'] >= state['max_rounds'] or state['images_used'] >= state['max_images']:
         return dict(result, action='stop_budget')
     if state['rounds_completed'] > 1 and judgment['improved'] is None:
-        return dict(result, action='stop_uncertain_comparison')
+        # Improvement is not established, so the incumbent is retained; the new favourite is only reported.
+        return dict(result, action='stop_uncertain_comparison', winner_id=incumbent or winner, ranked_first=winner)
     stalled = 0 if judgment['improved'] is True else state['no_improvement_rounds'] + int(judgment['improved'] is False)
     if stalled >= 2:
         return dict(result, action='stop_no_improvement', no_improvement_rounds=stalled)

@@ -23,7 +23,7 @@ advance = module('advance')
 
 class InspirationTests(unittest.TestCase):
     def setUp(self):
-        self.board = json.loads((ROOT/'examples/inspiration/board.json').read_text())
+        self.board = json.loads((ROOT/'examples/image-inspiration/board.json').read_text())
         self.state = dict(mode='loop', judge='llm', rounds_completed=1, max_rounds=3,
                           images_used=2, max_images=8, no_improvement_rounds=0, incumbent_id=None,
                           candidates=[dict(id='C1', checks='pass'), dict(id='C2', checks='pass')],
@@ -155,7 +155,7 @@ class InspirationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)/'plan.json'
             cmd = [sys.executable, str(ROOT/'plugins/image-studio/skills/image-inspiration/scripts/combine.py'),
-                   str(ROOT/'examples/inspiration/board.json'), '--out', str(out)]
+                   str(ROOT/'examples/image-inspiration/board.json'), '--out', str(out)]
             self.assertEqual(subprocess.run(cmd, capture_output=True).returncode, 0)
             first = out.read_bytes()
             self.assertNotEqual(subprocess.run(cmd, capture_output=True).returncode, 0)

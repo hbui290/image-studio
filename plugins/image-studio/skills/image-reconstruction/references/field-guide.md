@@ -111,9 +111,9 @@ The exported `review_flags` must match the current revision and selected edits; 
 Run the script from anywhere by giving its path; resource paths inside it resolve relative to the package. Python 3.9 or later is sufficient.
 
 ```sh
-python3 scripts/reconstruct.py validate path/to/reconstruction.json
-python3 scripts/reconstruct.py compile path/to/reconstruction.json --format json --output compiled.json
-python3 scripts/reconstruct.py compile path/to/selected-edit.json --mode edit --format json --output selected-edit-prompt.json
+python3 <skill-dir>/scripts/reconstruct.py validate path/to/reconstruction.json
+python3 <skill-dir>/scripts/reconstruct.py compile path/to/reconstruction.json --format json --output compiled.json
+python3 <skill-dir>/scripts/reconstruct.py compile path/to/selected-edit.json --mode edit --format json --output selected-edit-prompt.json
 ```
 
 JSON output separates `rendering_prompt`, actual attachment records, requested output, criteria and warnings. Text output separates the same sections for copying. Pass the rendering prompt and actual attachments to the image tool; apply only supported output settings. Paths are data and are never executed. Compilation has no network call or image-generation side effect and does not overwrite its input JSON.

@@ -1,6 +1,6 @@
 ---
 name: image-reverse-engineer
-description: Extract a supplied image into structured JSON with typography, palette, grading, composition, named elements, inferred layers, lighting, and evidence confidence. Use for JSON-only analysis without editing; to recreate or remix a reference use image-reconstruction.
+description: Extract a supplied image into structured JSON (typography, palette, grading, composition, named elements, inferred layers, lighting) with evidence confidence, without editing anything. Use when the user wants a JSON or written breakdown. To recreate or remix the reference use image-reconstruction; to plan an edit use image-edit-map.
 ---
 
 # Reverse Engineer an Image
@@ -11,4 +11,4 @@ A bare invocation requests a comprehensive visual breakdown. Ask for an image if
 
 Offer the numbered map or an edit only after satisfying the extraction request. Do not generate or modify artwork during a JSON-only analysis.
 
-Claude Code: `/image-reverse-engineer`. Codex: `$image-reverse-engineer` or select the skill through `/skills` where available.
+Claude Code: `/image-reverse-engineer` (`/image-studio:image-reverse-engineer` as a plugin). Codex: `$image-reverse-engineer` or select the skill through `/skills` where available.

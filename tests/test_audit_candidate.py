@@ -7,7 +7,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+try:
+    from PIL import Image, ImageDraw
+except ImportError:  # pragma: no cover
+    raise unittest.SkipTest("Pillow is not installed")
 
 SCRIPT = Path(__file__).resolve().parents[1] / "plugins/image-studio/skills/image-verify/scripts/audit_candidate.py"
 SIZE = (100, 100)
@@ -119,7 +122,7 @@ class AuditTest(unittest.TestCase):
         self.contract(max_repairs=1)
         _, _, out = self.run_audit(candidate, self.review(c1="fail"))
         _, decision, _ = self.run_audit(candidate, self.review(c1="fail"), previous=out, repairs_used=1)
-        self.assertEqual(decision["action"], "stop_limit")
+        self.assertEqual(decision["action"], "stop_budget")
 
     def test_previous_round_with_other_contract_is_refused(self):
         candidate = self.standard()
@@ -144,7 +147,7 @@ class AuditTest(unittest.TestCase):
         candidate = self.image("candidate.png", boxes=[((10, 10, 45, 45), "blue")])
         _, decision, out = self.run_audit(candidate, self.review())
         self.assertEqual(decision["action"], "hold_for_inspection")
-        self.assertEqual(decision["check_ids"], ["K1"])
+        self.assertEqual(decision["ids"], ["K1"])
         evidence = json.loads((out / "evidence.json").read_text())
         self.assertEqual(evidence["pixels"]["changed_by_target"]["B"], 100)
 

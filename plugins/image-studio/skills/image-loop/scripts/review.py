@@ -28,13 +28,26 @@ def write_json(path, value):
     Path(path).write_text(json.dumps(value, indent=2, ensure_ascii=False)+'\n')
 
 
+def normalize_report(report):
+    """Accept the audit's `results` review too, so one hand-written review works for both scripts."""
+    if isinstance(report, dict) and 'results' in report and 'criteria' not in report:
+        report = {'criteria': report['results'], 'summary': report.get('reviewer', 'External review.')}
+    if isinstance(report, dict) and isinstance(report.get('criteria'), list):
+        report = dict(report, summary=report.get('summary', 'External review.'),
+                      criteria=[{k: c.get(k, '') for k in ('id', 'status', 'evidence', 'suggested_fix')}
+                                if isinstance(c, dict) else c for c in report['criteria']])
+    return report
+
+
 def check_file(path, expected):
-    from PIL import Image
-    with Image.open(path) as im:
-        im.load()
+    from PIL import Image, ImageOps
+    with Image.open(path) as opened:
+        opened.load()
+        image_format = opened.format
+        im = ImageOps.exif_transpose(opened)
         alpha = 'A' in im.getbands() or 'transparency' in im.info
         transparent = im.convert('RGBA').getchannel('A').getextrema()[0] < 255 if alpha else False
-        actual = {'width': im.width, 'height': im.height, 'format': im.format,
+        actual = {'width': im.width, 'height': im.height, 'format': image_format,
                   'alpha_channel': alpha, 'has_transparent_pixels': transparent,
                   'sha256': hashlib.sha256(Path(path).read_bytes()).hexdigest()}
     failures = [f'{k}: expected {expected[k]}, got {actual[k]}'
@@ -54,33 +67,48 @@ def main():
     reviewer = p.add_mutually_exclusive_group(required=True)
     reviewer.add_argument('--model', help='Explicit image-input reviewer available to your Codex account')
     reviewer.add_argument('--report', type=Path, help='Existing review report from another independent reviewer; no Codex call')
-    p.add_argument('--previous', type=Path)
-    p.add_argument('--repairs-used', type=int, default=0)
+    p.add_argument('--previous', type=Path, help='Previous round folder (or its report.json)')
+    p.add_argument('--repairs-used', type=int, help='Optional cross-check; derived from --previous (previous round + 1), else 0')
     p.add_argument('--max-repairs', type=int, default=3)
     p.add_argument('--timeout', type=int, default=180)
     args = p.parse_args()
-    from jsonschema import Draft202012Validator
-    if args.repairs_used < 0 or args.max_repairs < 0 or args.timeout <= 0:
-        p.error('Repair counts must be nonnegative and timeout positive.')
-    brief = read_json(args.brief)
-    Draft202012Validator(read_json(BASE/'references/brief.schema.json')).validate(brief)
-    if len({c['id'] for c in brief['criteria']}) != len(brief['criteria']):
-        p.error('Duplicate brief criterion IDs.')
-    candidate = args.candidate.resolve(strict=True)
-    source = args.source.resolve(strict=True) if args.source else None
-    if source is None and any(c['kind'] == 'protected' for c in brief['criteria']):
-        p.error('Protected comparison criteria require --source; use requested criteria for a generation-only brief.')
-    if args.report and not args.report.is_file():
-        p.error(f'Report not found: {args.report}')
-    if args.repairs_used and args.previous is None:
-        p.error('--previous is required after a repair.')
-    previous = read_json(args.previous) if args.previous else None
-    review_schema = read_json(BASE/'references/review.schema.json')
-    if previous is not None:
-        Draft202012Validator(review_schema).validate(previous)
-        errors = coverage_errors(brief, previous)
-        if errors:
-            p.error(' '.join(errors))
+    try:
+        from jsonschema import Draft202012Validator, ValidationError
+    except ImportError:
+        p.error('jsonschema is required: python3 -m pip install jsonschema pillow')
+    if args.max_repairs < 0 or args.timeout <= 0:
+        p.error('Repair limit must be nonnegative and timeout positive.')
+    try:
+        brief = read_json(args.brief)
+        Draft202012Validator(read_json(BASE/'references/brief.schema.json')).validate(brief)
+        if len({c['id'] for c in brief['criteria']}) != len(brief['criteria']):
+            p.error('Duplicate brief criterion IDs.')
+        candidate = args.candidate.resolve(strict=True)
+        source = args.source.resolve(strict=True) if args.source else None
+        if source is None and any(c['kind'] == 'protected' for c in brief['criteria']):
+            p.error('Protected comparison criteria require --source; use requested criteria for a generation-only brief.')
+        if args.report and not args.report.is_file():
+            p.error(f'Report not found: {args.report}')
+        review_schema = read_json(BASE/'references/review.schema.json')
+        previous, repairs_used = None, 0
+        if args.previous:
+            folder = args.previous if args.previous.is_dir() else args.previous.parent
+            prior_action = read_json(folder/'decision.json').get('action')
+            if prior_action != 'repair':
+                p.error(f'Previous round decided {prior_action!r}; only a repair decision starts another round.')
+            repairs_used = read_json(folder/'run.json').get('repairs_used', 0) + 1
+            previous = normalize_report(read_json(folder/'report.json'))
+            Draft202012Validator(review_schema).validate(previous)
+            errors = coverage_errors(brief, previous)
+            if errors:
+                p.error(' '.join(errors))
+        if args.repairs_used is not None and args.repairs_used != repairs_used:
+            p.error(f'--repairs-used {args.repairs_used} does not match the round history ({repairs_used}).')
+        args.repairs_used = repairs_used
+    except ValidationError as exc:
+        p.error(f'Invalid JSON structure: {exc.message}')
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        p.error(f'{type(exc).__name__}: {exc}')
     if args.out.exists():
         p.error('Output directory exists; choose a new round to avoid overwriting evidence.')
     args.out.mkdir(parents=True)
@@ -88,12 +116,18 @@ def main():
     checks = check_file(candidate, brief['file_checks'])
     write_json(out/'file-checks.json', checks)
     if not checks['passed']:
-        write_json(out/'decision.json', {'action':'stop_file_checks','reason':'Fix file constraints before spending reviewer usage.','failures':checks['failures']})
-        print('stop_file_checks')
+        decision = {'action':'reject_technical','reason':'Fix file constraints before spending reviewer usage.','issues':checks['failures']}
+        write_json(out/'decision.json', decision)
+        print(json.dumps(decision))
         return 0
     if args.report:
         # Another independent reviewer (the image-reviewer agent or a person) already inspected the images.
-        (out/'report.json').write_text(args.report.read_text())
+        try:
+            write_json(out/'report.json', normalize_report(read_json(args.report)))
+        except (ValueError, OSError) as exc:
+            write_json(out/'decision.json', {'action':'stop_invalid_review','reason':f'{type(exc).__name__}: {exc}'})
+            print('stop_invalid_review', file=sys.stderr)
+            return 2
         write_json(out/'run.json', {'adapter':'external report','report_source':str(args.report),
                                   'source_sha256':hashlib.sha256(source.read_bytes()).hexdigest() if source else None,
                                   'candidate_sha256':checks['actual']['sha256'],
@@ -158,6 +192,9 @@ def finish(out, brief, review_schema, checks, args, previous):
         print('stop_invalid_review', file=sys.stderr)
         return 2
     write_json(out/'decision.json',decision)
+    if decision['action'] == 'stop_invalid_review':
+        print(json.dumps(decision))
+        return 2
     if decision['action'] == 'repair':
         (out/'repair-prompt.txt').write_text(repair_prompt(brief,report,decision))
     print(json.dumps(decision))
