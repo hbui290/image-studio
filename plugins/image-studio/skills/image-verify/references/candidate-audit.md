@@ -77,4 +77,4 @@ To test the helper itself, run `python -m unittest discover -s tests` from the r
 
 ## Origin of the approach
 
-The bounded review idea was informed by [Image Loop](https://github.com/codejunkie99/image-loop) and stable IDs by [Image Edit Map](https://github.com/codejunkie99/image-loop/blob/main/skills/image-edit-map/SKILL.md). This helper and contract were written for the local mask/composite workflow of the earlier image-processing skill; Image Studio connects it to the Image Loop reviewer through `contract_to_brief.py` and the shared `criteria` review format.
+The bounded review idea was informed by [Image Loop](../../image-loop/SKILL.md) and stable IDs by [Image Edit Map](../../image-edit-map/SKILL.md). This helper and contract were written for the local mask/composite workflow of the earlier image-processing skill; Image Studio connects it to the Image Loop reviewer through `contract_to_brief.py` and the shared `criteria` review format.
