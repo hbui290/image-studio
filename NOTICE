@@ -5,9 +5,12 @@ Image Studio combines two projects, released here under the MIT License:
   image-reverse-engineer (was "reverse-engineer"), prompts/, examples/,
   scripts/install.py, tests/test_loop.py, tests/test_inspiration.py.
   The prompt-lab collection stays in that repository.
-- hbui290/image-processing-skill (commit 1e6d651, v1.4.0 plus fixes):
+- hbui290/image-processing-skill (v1.4.1, commit a9f1a2f, plus audit fixes d5aea6a;
+  repository retired after this merge):
   image-inspect, image-create, image-repair, image-verify and their references,
-  audit_candidate.py, tests/test_audit_candidate.py.
+  audit_candidate.py, tests/test_audit_candidate.py. Its standalone SKILL.md now
+  lives in image-inspect/references/diagnosis.md, image-verify/references/acceptance.md,
+  and the "Control generated edits" section of repair-and-composite.md.
 
 New in Image Studio: contract_to_brief.py, review.py --report, the
 image-reviewer agent, audit support for the image-loop report format and

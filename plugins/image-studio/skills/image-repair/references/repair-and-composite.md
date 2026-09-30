@@ -2,6 +2,14 @@
 
 Read this when an image needs a generative patch, removal, outpaint, or controlled replacement. Adapt the geometry and tools to the input; none of the sample dimensions are universal.
 
+## Control generated edits
+
+- Supply the relevant crop and approved references, identifying what each controls. Specify the exact change and protected subjects, count, pose, product markings, typography, perspective, and layout. Composite approved logos or exact text from their source art.
+- Prefer local repair when the composition is sound. Branch from the approved source rather than feeding each generated output into the next edit. A prompt alone cannot protect pixels outside the requested change.
+- Use a crop with context for lighting and geometry, then accept only reviewed pixels through a final mask. Keep the model's input mask separate from the final acceptance mask; check polarity, full object coverage, neighboring subjects, alignment, feathered edges, and seams.
+- When only an object's interior needs rebuilding, use nested masks: an outer acceptance boundary and inner protection for silhouettes, line work, logos, or other exact details. A protected exterior alone does not preserve details inside the edited object. Inspect both the protected islands and newly accepted pixels for doubled edges.
+- Treat novel details as proposed art, not recovered facts. If reference material cannot establish an identity-critical feature, report the uncertainty or request a better reference instead of inventing a canonical answer.
+
 ## Before the edit
 
 Record:
@@ -21,6 +29,8 @@ For a connected structure, trace it before generating pixels: supports and attac
 Before editing repeated objects, record a small map with `ID`, plain-language label, source-pixel box or crop, neighbors to protect, and edit status. `lantern-1` and `lantern-2` may share a label but must remain different targets. A box is only a locator; preview the actual mask at native pixels before accepting it. Check holes, thin parts, shadows, overlaps, and whether the mask includes a neighboring hand, face, label, or structural joint. When objects overlap, decide which one is in front and which pixels belong to each before compositing.
 
 Manual selection is sufficient when there are few clear objects. Automatic masks can speed up a dense scene, but remain proposals: [SAM 2](https://github.com/facebookresearch/sam2) provides segmentation, while [Grounded SAM 2](https://github.com/IDEA-Research/Grounded-SAM-2) shows an open pipeline combining grounded detection with segmentation. These are optional examples, not required dependencies or evidence of a proprietary editor's internal algorithm. Verify each proposed label, ID, and boundary against the original image. If the object is missed, draw or correct its mask manually.
+
+Before selecting an automatic mask, check that the runtime, weights, and a sample inference actually work on this machine. If they do not, draw a manual mask or use a reviewed color/geometry selection. Record the method actually used. A named model in a setup guide is not evidence that it ran.
 
 For a very small object in a high-resolution scene, crop around it at source resolution before requesting a mask or edit. If using overlapping tiles, retain overlap wider than the object's edge context, record every tile origin, and convert a tile-local point `(u, v)` back to source coordinates `(tile_x + u, tile_y + v)`. Reconcile duplicate detections in the overlap by visual inspection; do not merge two same-label instances only because their boxes touch. The accepted mask is drawn in source-crop coordinates after the target is chosen.
 
@@ -66,6 +76,8 @@ Check polarity separately for the generation tool and the final composite. For e
 
 Include the complete old silhouette inside the white area with a small margin where possible. A mask that cuts through an object can leave duplicate edges, partial bottles, stray foliage, or a hanging timber end. Keep protected neighbors black. If the needed mask would cut through a protected object, regenerate or redraw that edge rather than hiding the mismatch with a wider blur.
 
+If the requested repair is **inside** an object, the outer acceptance mask is insufficient. Make a second mask for protected interior features (for example an emblem silhouette, ring, hand, or printed mark). Subtract this protection mask from the outer acceptance mask before compositing. Feather only the new boundary, check that the source and candidate features align, and reject visible ghost or doubled edges. Color thresholds may propose a mask, but inspect missed antialias pixels and similarly colored neighbors at 100% before accepting it.
+
 ```bash
 magick candidate-sized.png patch-mask.png \
   -alpha off -compose CopyOpacity -composite patch-with-alpha.png
@@ -100,7 +112,7 @@ Record a small evidence ledger for handoff: source and approved references; crop
 
 ## Common decisions
 
-- **Upscaling:** Use only when more display pixels help. Select a model and denoising level suited to the medium, then compare candidates at target size for lost line art, oversmoothing and halos. The [Real-ESRGAN README](https://github.com/xinntao/Real-ESRGAN/blob/master/README.md) distinguishes general, anime image and anime video models. An upscaler does not establish an unknown face, product mark, or letter.
+- **Upscaling:** A 4K file can still contain soft or missing detail. Test a representative crop with a model suited to the medium, then resize the result and original to identical dimensions and compare at 100% and actual display size. Keep it only if recognizable detail improves without halos, lost line art, or invented geometry. The [Real-ESRGAN README](https://github.com/xinntao/Real-ESRGAN/blob/master/README.md) distinguishes general, anime image and anime video models. An upscaler does not establish an unknown face, product mark, or letter.
 - **Portraits and characters:** Use identity references; inspect eyes, mouth, hairline, ears, hands, costume, and neighboring subjects. Keep identity and pose separate in the prompt. If using a face restorer, record the model and any fidelity setting; reject identity or hair-boundary drift. [CodeFormer](https://github.com/sczhou/CodeFormer/blob/master/README.md) documents a quality/fidelity weight and warns that whole-image face fusion can damage hair boundaries; do not assume a photoreal face model suits stylized art.
 - **Products:** Verify dimensions, material, branding, labels, handles, ports, and reflected features against a real reference. A visually plausible extra part is a defect.
 - **Architecture and backgrounds:** Inspect straight lines, repeated units, vanishing points, object contact, and continuity across the crop boundary.

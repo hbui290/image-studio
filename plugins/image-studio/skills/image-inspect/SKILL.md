@@ -5,7 +5,7 @@ description: Diagnose a supplied image, locate named or repeated objects, and pr
 
 # Image inspection
 
-Inspect the actual clean image at native pixels and at its intended display size. Check layout, crop, CSS effects, export quality, and source resolution before attributing softness to image generation. Report visible defects and uncertainty; do not edit for an assessment-only request.
+Inspect the actual clean image at native pixels and at its intended display size. Check layout, crop, CSS effects, export quality, and source resolution before attributing softness to image generation. Report visible defects and uncertainty; do not edit for an assessment-only request. Read [diagnosis.md](references/diagnosis.md) for the image contract and the defect-to-first-action table.
 
 When the user points to one of several similar objects, assign stable IDs such as `A:#7` and record their locations against the **original clean image**, not the resized preview. If useful, record normalized top-left `[x, y, width, height]` boxes and separate arrow targets; mark measured versus estimated coordinates. Make a separate numbered review copy and matching legend only when that helps disambiguate the target. For a dense scene, map groups first and use close-ups with the same IDs. Retire an ID when its object is removed; never recycle it. Re-map after a changed source or crop. Keep the untouched source as the editing input; a bounding box is not a segmentation mask. Inspect connected structures through supports, openings, overlaps, and paths beyond the proposed crop.
 
