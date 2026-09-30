@@ -1,0 +1,12 @@
+{
+  "name": "image-studio",
+  "interface": {"displayName": "Image Studio"},
+  "plugins": [
+    {
+      "name": "image-studio",
+      "source": {"source": "local", "path": "./plugins/image-studio"},
+      "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
+      "category": "Productivity"
+    }
+  ]
+}

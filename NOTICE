@@ -1,0 +1,15 @@
+Image Studio combines two projects by the same author, released here under the MIT License:
+
+- codejunkie99/image-loop (commit 77a1b78): image-loop, image-edit-map,
+  image-reconstruction, image-inspiration (was "inspiration"),
+  image-reverse-engineer (was "reverse-engineer"), prompts/, examples/,
+  scripts/install.py, tests/test_loop.py, tests/test_inspiration.py.
+  The prompt-lab collection stays in that repository.
+- hbui290/image-processing-skill (commit 1e6d651, v1.4.0 plus fixes):
+  image-inspect, image-create, image-repair, image-verify and their references,
+  audit_candidate.py, tests/test_audit_candidate.py.
+
+New in Image Studio: contract_to_brief.py, review.py --report, the
+image-reviewer agent, audit support for the image-loop report format and
+coordinate-based repair prompts, Claude Code and Codex plugin manifests,
+tests/test_bridge.py, tests/test_package.py.

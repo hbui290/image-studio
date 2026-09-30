@@ -1,0 +1,17 @@
+{
+  "name": "image-studio",
+  "owner": {
+    "name": "hbui290",
+    "url": "https://github.com/hbui290"
+  },
+  "description": "Image Studio: evidence-first image creation, editing, repair, and verification skills.",
+  "plugins": [
+    {
+      "name": "image-studio",
+      "source": "./plugins/image-studio",
+      "description": "Create, edit, inspect, repair, and verify images with evidence.",
+      "version": "2.0.0",
+      "category": "productivity"
+    }
+  ]
+}
