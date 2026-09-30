@@ -62,6 +62,6 @@ Return JSON only if requested. Otherwise also provide a short readable legend an
 
 ## Validation
 
-The schema is JSON Schema draft 2020-12. Use an available schema validator to check structural conformance. `scripts/validate_spec.py` additionally checks bounds and references; it requires Python 3 and `jsonschema`. Pass `--image source.png` (and `--image-id A` for multiple images) to cross-check reported dimensions using Pillow. Neither structural validation nor dimension checks prove visual descriptions: inspect those independently. A live test produced schema-valid but incorrect "measured" dimensions, so metadata verification is a separate required check when a local source is available.
+The schema is JSON Schema draft 2020-12. Use an available schema validator to check structural conformance. `python3 <skills>/image-edit-map/scripts/validate_spec.py image-spec.json` additionally checks bounds and references; it requires Python 3 and `jsonschema`. Pass `--image source.png` (and `--image-id A` for multiple images) to cross-check reported dimensions using Pillow. Neither structural validation nor dimension checks prove visual descriptions: inspect those independently. A live test produced schema-valid but incorrect "measured" dimensions, so metadata verification is a separate required check when a local source is available.
 
 The example is a deliberately partial, synthetic specification for a fictional banner, not an extraction from a real image. Never reuse its coordinates, text, palette, or confidence claims on a user's photograph.

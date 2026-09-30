@@ -9,6 +9,18 @@ def require(condition, message):
     if not condition:
         raise ValueError(message)
 
+def load_strict(path):
+    """JSON without NaN/Infinity or duplicate keys, which would otherwise pass silently."""
+    def reject_constant(value):
+        raise ValueError(f'Non-JSON constant {value} is not allowed.')
+
+    def unique_keys(pairs):
+        keys = [key for key, _ in pairs]
+        require(len(keys) == len(set(keys)), 'Duplicate JSON keys are not allowed.')
+        return dict(pairs)
+    return json.loads(path.read_text(encoding='utf-8'), parse_constant=reject_constant, object_pairs_hook=unique_keys)
+
+
 
 def decide(state):
     require(isinstance(state, dict), 'State must be an object.')
@@ -72,7 +84,8 @@ def decide(state):
     if state['rounds_completed'] > 1 and judgment['improved'] is None:
         # Improvement is not established, so the incumbent is retained; the new favourite is only reported.
         return dict(result, action='stop_uncertain_comparison', winner_id=incumbent or winner, ranked_first=winner)
-    stalled = 0 if judgment['improved'] is True else state['no_improvement_rounds'] + int(judgment['improved'] is False)
+    # Without an incumbent there is nothing to improve on, so round 1 never counts as a stall.
+    stalled = 0 if judgment['improved'] is True or incumbent is None else state['no_improvement_rounds'] + int(judgment['improved'] is False)
     if stalled >= 2:
         return dict(result, action='stop_no_improvement', no_improvement_rounds=stalled)
     return dict(result, action='iterate', parent_id=winner, no_improvement_rounds=stalled,
@@ -86,7 +99,7 @@ def main():
     p.add_argument('--out', type=Path, required=True)
     a = p.parse_args()
     try:
-        result = decide(json.loads(a.state.read_text()))
+        result = decide(load_strict(a.state))
         with a.out.open('x') as f:
             json.dump(result, f, indent=2, allow_nan=False)
             f.write('\n')

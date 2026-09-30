@@ -11,6 +11,18 @@ def require(condition, message):
     if not condition:
         raise ValueError(message)
 
+def load_strict(path):
+    """JSON without NaN/Infinity or duplicate keys, which would otherwise pass silently."""
+    def reject_constant(value):
+        raise ValueError(f'Non-JSON constant {value} is not allowed.')
+
+    def unique_keys(pairs):
+        keys = [key for key, _ in pairs]
+        require(len(keys) == len(set(keys)), 'Duplicate JSON keys are not allowed.')
+        return dict(pairs)
+    return json.loads(path.read_text(encoding='utf-8'), parse_constant=reject_constant, object_pairs_hook=unique_keys)
+
+
 
 def nonempty(value):
     return isinstance(value, str) and bool(value.strip())
@@ -108,7 +120,7 @@ def main():
     p.add_argument('--out', type=Path, required=True)
     a = p.parse_args()
     try:
-        result = plan(json.loads(a.board.read_text()), a.count, a.seed)
+        result = plan(load_strict(a.board), a.count, a.seed)
         with a.out.open('x') as f:
             json.dump(result, f, indent=2, allow_nan=False)
             f.write('\n')

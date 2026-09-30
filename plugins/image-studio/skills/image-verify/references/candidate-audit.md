@@ -33,7 +33,7 @@ Save a `contract.json` tied to the **original clean source**, not a screenshot o
 
 Each box is `[x, y, width, height]` in source pixels. The **final acceptance mask** is the same size as the image: every nonzero pixel, including a feathered edge, permits candidate pixels; pure black locks source pixels, and so does any fully transparent pixel of an RGBA mask. It is distinct from a generator's input mask. Write `canvas.format` as the uppercase name Pillow decodes, such as `PNG`, `JPEG`, or `WEBP`. When `pixel_lock_outside_mask` is false or omitted, omit `--mask`; the script will not claim exact preservation outside a region. For new artwork use `mode: "create"`, omit `--source` and the pixel lock, use only `change` checks (a `keep` check needs a source to compare with), and map targets on the output canvas.
 
-Boxes from a numbered map are often normalized `[x, y, width, height]` fractions of the image. Convert them to source pixels before writing the contract: `x_px = round(x * source_width)`, `y_px = round(y * source_height)`, `width_px = round(width * source_width)`, `height_px = round(height * source_height)`, then clamp to the canvas.
+Boxes from a numbered map are often normalized `[x, y, width, height]` fractions of the image. Convert them to source pixels before writing the contract with the same rule as the reconstruction field guide, so no edge pixel is lost: `left = floor(x × W)`, `top = floor(y × H)`, `right = ceil((x + width) × W)`, `bottom = ceil((y + height) × H)`, clamp to the canvas, then `bbox = [left, top, right − left, bottom − top]`.
 
 After looking at the actual images, save `review.json` with one result for every check:
 
@@ -58,7 +58,7 @@ Any of these produce a review the audit accepts unchanged:
 | A person | Write `review.json` as above | None |
 | Fresh reviewer session (any host) | Give it [independent-review.md](independent-review.md) and the file paths; it writes the `criteria` format | Session usage |
 | Claude Code `image-reviewer` agent (plugin install only) | Ask the agent to review `source.png`, `candidate.png` against `contract.json` and write `review.json`; it writes the `criteria` format | Session usage |
-| Codex vision model | `python3 <skill-dir>/scripts/contract_to_brief.py contract.json --out brief.json`, then run the [image-loop reviewer](../../image-loop/references/reviewer.md) with `--brief brief.json --model <vision model>`; pass its `report.json` here as `--review` | Codex account usage |
+| Codex vision model | `python3 <skills>/image-verify/scripts/contract_to_brief.py contract.json --out brief.json`, then `python3 <skills>/image-loop/scripts/review.py --brief brief.json --source source.png --candidate candidate.png --out vision-0 --model <vision model>` ([reviewer setup](../../image-loop/references/reviewer.md)); pass `vision-0/report.json` here as `--review` | Codex account usage |
 
 The `criteria` format is `{"criteria": [{"id", "status", "evidence", "suggested_fix"}], "summary": "..."}`. The model's verdict never overrides the pixel checks: a vision `pass` with a changed pixel outside the mask is still `reject_technical`.
 
@@ -67,14 +67,14 @@ A protected box often overlaps the editable area; in the example above, the hand
 ## Run and interpret
 
 ```bash
-python3 <skill-dir>/scripts/audit_candidate.py \
+python3 <skills>/image-verify/scripts/audit_candidate.py \
   --contract contract.json --source source.png --candidate candidate.png \
   --mask final-acceptance-mask.png --review review.json --out round-0
 ```
 
 Omit `--mask` when the contract does not require a pixel lock. For the next repair round, pass `--previous round-0` and a new output folder. The helper checks that the previous round used the same contract and original source hashes and decided `repair`, and it counts repairs from that history (`--repairs-used` is only an optional cross-check). Repair from the last accepted clean source or candidate, not an annotated review copy or a chain of rejected outputs.
 
-Read `evidence.json` for file hashes, decoded dimensions, changed-pixel counts by target, and any pixels changed outside the mask. Read `decision.json`; its actions, their order, and the next step for each are in [decisions.md](decisions.md), shared with the image-loop reviewer. A `repair` decision lists failed `ids` and `protected_failed`, writes `repair-prompt.txt` naming each failed and protected target by its source-pixel box, and requires another complete review. `accepted_by_checks` means the **specified** checks passed; it is not user approval. Pixel equality is checked on decoded pixels after applying EXIF orientation, not by comparing file bytes: 8-bit images as RGBA, and 16-bit or floating-point grayscale at full precision. A change of bit depth between source and candidate is a technical failure. Pillow decodes 16-bit-per-channel color PNGs as 8-bit, so for those files the comparison is 8-bit. It does not certify color-profile appearance or hidden layers. A pixel that is fully transparent in both images counts as unchanged even when its hidden color values differ.
+Read `evidence.json` for file hashes, decoded dimensions, changed-pixel counts by target, and any pixels changed outside the mask. Read `decision.json`; its actions, their order, and the next step for each are in [decisions.md](decisions.md), shared with the image-loop reviewer. A `repair` decision lists failed `ids` and `protected_failed`, writes `repair-prompt.txt` naming each failed and protected target by its source-pixel box, and requires another complete review. `accepted_by_checks` means the **specified** checks passed; it is not user approval. Pixel equality is checked on decoded pixels after applying EXIF orientation, not by comparing file bytes: 8-bit images as RGBA, and 16-bit or floating-point grayscale at full precision. A change of bit depth between source and candidate is a technical failure. Pillow decodes 16-bit-per-channel color PNGs as 8-bit, so the audit refuses them with `reject_technical` instead of comparing them inexactly; audit 8-bit or 16-bit grayscale copies. It does not certify color-profile appearance or hidden layers. A pixel that is fully transparent in both images counts as unchanged even when its hidden color values differ.
 
 In a repository checkout, `python3 -m unittest discover -s tests` tests these helpers.
 

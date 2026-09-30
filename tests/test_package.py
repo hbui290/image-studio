@@ -82,7 +82,7 @@ class PackageTest(unittest.TestCase):
             self.assertEqual(broken_links(Path(tmp)), [])
 
 
-SCRIPT_REF = re.compile(r"python3? (<skill-dir>/[^\s`]+\.py)")
+SCRIPT_REF = re.compile(r"<skills>/([^\s`]+)")
 OLD_TERMS = re.compile(r"(?<![\w-])(/reverse-engineer|\$reverse-engineer|/inspiration|\$inspiration)\b"
                        r"|\b(escalate|stop_file_checks|stop_limit|reject_protected)\b|display_name: \"Inspiration\"")
 
@@ -96,8 +96,9 @@ class DocsTest(unittest.TestCase):
     def test_skill_commands_use_paths_that_exist_in_every_install(self):
         for doc, skill, text in self.skill_docs():
             self.assertNotIn("plugins/image-studio", text, doc)
+            self.assertNotIn("<skill-dir>", text, doc)
             for ref in SCRIPT_REF.findall(text):
-                self.assertTrue((SKILLS / skill / ref.replace("<skill-dir>/", "")).resolve().is_file(), f"{doc}: {ref}")
+                self.assertTrue((SKILLS / ref).is_file(), f"{doc}: <skills>/{ref}")
 
     def test_no_bare_python_launcher(self):
         docs = list(self.skill_docs()) + [(ROOT / "README.md", None, (ROOT / "README.md").read_text())]

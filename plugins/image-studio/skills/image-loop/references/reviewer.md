@@ -17,7 +17,7 @@ If the reviewer requires authentication, use the host's normal login process. Ne
 ## Run one round
 
 ```bash
-python3 <skill-dir>/scripts/review.py \
+python3 <skills>/image-loop/scripts/review.py \
   --brief brief.json --source source.png --candidate candidate.png \
   --out round-0 --model <vision-model>
 ```

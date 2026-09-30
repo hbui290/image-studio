@@ -80,20 +80,28 @@ def main():
     try:
         def reject_constant(value):
             raise ValueError(f'Non-JSON constant {value} is not allowed')
-        data = json.loads(args.spec.read_text(), parse_constant=reject_constant)
+
+        def unique_keys(pairs):
+            keys = [key for key, _ in pairs]
+            if len(keys) != len(set(keys)):
+                raise ValueError(f'Duplicate JSON keys: {sorted({k for k in keys if keys.count(k) > 1})}')
+            return dict(pairs)
+        if args.image_id and not args.image:
+            raise ValueError('--image-id needs --image')
+        data = json.loads(args.spec.read_text(encoding='utf-8'), parse_constant=reject_constant, object_pairs_hook=unique_keys)
         schema = json.loads(schema_path.read_text())
         errors = validate(data, schema)
         if args.image and not errors:
-            from PIL import Image
+            from PIL import Image, ImageOps
             selected = [x for x in data['images'] if x['id'] == args.image_id] if args.image_id else data['images']
             if len(selected) != 1:
                 errors.append('Select exactly one image with --image-id for metadata verification.')
             else:
-                with Image.open(args.image) as im:
-                    im.load()
+                with Image.open(args.image) as opened:
+                    im = ImageOps.exif_transpose(opened)  # compare displayed dimensions
                     for key, actual in [('width_px', im.width), ('height_px', im.height)]:
                         claim = selected[0]['metadata'].get(key, {}).get('value')
-                        if claim is not None and claim != actual:
+                        if claim is not None and (type(claim) is not int or claim != actual):
                             errors.append(f'{key}: extracted value {claim} differs from decoded file {actual}')
     except ImportError:
         print('Missing dependency: install jsonschema, and Pillow when using --image.', file=sys.stderr)

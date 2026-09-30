@@ -47,4 +47,4 @@ Show clean candidate images labeled by ID, their ingredient recipes, check resul
 
 ## Running the scripts
 
-In commands, `<skill-dir>` means this skill's folder (the host shows it when the skill loads); run them from your working folder. They need only Python 3; no extra packages.
+In commands, `<skills>` means the folder that holds the Image Studio skill folders, which is this skill's parent folder (the host shows the skill's path when it loads); run commands from your working folder. `combine.py` and `advance.py` need only Python 3. Screening candidates with the image-loop reviewer (`review.py`) needs Pillow and jsonschema: `python3 -m pip install pillow jsonschema`.

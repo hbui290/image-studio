@@ -14,6 +14,8 @@
 
 A `repair` decision lists the failed check `ids` and `protected_failed`. When `protected_failed` is not empty, the candidate damaged something that had to stay, so never build the next repair on it.
 
+One intended exception: with `review.py --model`, the file checks run before the Codex call so a broken file does not spend reviewer usage, and a failure there is `reject_technical` without a review. With `--report`, the supplied review is validated first, as in the audit.
+
 Only `review.py` can also return `stop_provider`, when the Codex reviewer call fails or times out. The inspiration loop (`image-inspiration/scripts/advance.py`) judges between candidates, not against checks, and has its own actions described in [judging.md](../../image-inspiration/references/judging.md).
 
 ## Rounds
@@ -21,4 +23,5 @@ Only `review.py` can also return `stop_provider`, when the Codex reviewer call f
 - Round 0 has no `--previous`. Every later round passes `--previous <previous round folder>`.
 - A round continues only when the previous round decided `repair`. The repair count is the previous count plus one; `--repairs-used`, if given, must match it.
 - Every round re-reviews all checks, not only the ones that failed.
-- The default limit is three repairs after the first candidate (`max_repairs` in a contract, `--max-repairs` for `review.py`).
+- The default limit is three repairs after the first candidate. Set it with `max_repairs` in a contract; `contract_to_brief.py` copies it into the brief, and `review.py` uses the brief's value unless `--max-repairs` is given (the two must agree).
+- The contract or brief, the source image, and the limit must stay the same for every round of one loop; both scripts refuse a changed one.

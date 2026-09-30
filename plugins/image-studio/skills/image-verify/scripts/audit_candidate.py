@@ -18,7 +18,13 @@ def load_json(path):
     def reject_constant(value):
         raise ValueError(f"Invalid JSON constant: {value}")
 
-    value = json.loads(path.read_text(encoding="utf-8"), parse_constant=reject_constant)
+    def unique_keys(pairs):
+        keys = [key for key, _ in pairs]
+        if len(keys) != len(set(keys)):
+            raise ValueError(f"{path}: duplicate JSON keys {sorted({k for k in keys if keys.count(k) > 1})}")
+        return dict(pairs)
+
+    value = json.loads(path.read_text(encoding="utf-8"), parse_constant=reject_constant, object_pairs_hook=unique_keys)
     if not isinstance(value, dict):
         raise ValueError(f"{path}: expected a JSON object")
     return value
@@ -145,6 +151,13 @@ def digest(path):
 HIGH_PRECISION = {"I", "I;16", "I;16B", "I;16L", "I;16N", "F"}
 
 
+def wide_color_png(path):
+    """True for 16-bit-per-channel color PNGs, which Pillow decodes to 8 bits and so cannot compare exactly."""
+    with open(path, "rb") as stream:
+        header = stream.read(26)
+    return header[:8] == b"\x89PNG\r\n\x1a\n" and header[24] == 16 and header[25] in (2, 4, 6)
+
+
 def open_image(path):
     """Decode an image as displayed (EXIF orientation applied) and keep its file format."""
     from PIL import Image, ImageOps
@@ -158,9 +171,17 @@ def editable_mask(image):
     """255 where the final acceptance mask permits change: nonzero luminance and not transparent."""
     from PIL import ImageChops
 
+    from PIL import ImageMath
+
+    if image.mode in HIGH_PRECISION:
+        wide = image.convert("F")
+        if hasattr(ImageMath, "lambda_eval"):
+            return ImageMath.lambda_eval(lambda env: (env["m"] != 0) * 255, m=wide).convert("L")
+        return ImageMath.eval("(m != 0) * 255", m=wide).convert("L")
     rgba = image.convert("RGBA")
-    visible = rgba.getchannel("A").point(lambda value: 255 if value else 0)
-    return ImageChops.darker(rgba.convert("L").point(lambda value: 255 if value else 0), visible)
+    red, green, blue, alpha = (band.point(lambda value: 255 if value else 0) for band in rgba.split())
+    # Any nonzero color channel permits change, unless that mask pixel is fully transparent.
+    return ImageChops.darker(ImageChops.lighter(ImageChops.lighter(red, green), blue), alpha)
 
 
 def changed_map(source, candidate):
@@ -290,6 +311,8 @@ def main():
         results = validate_review(review, checks)
         previous, repairs_used = None, 0
         if args.previous:
+            if not args.previous.exists():
+                raise ValueError(f"--previous {args.previous} does not exist")
             folder = args.previous if args.previous.is_dir() else args.previous.parent
             prior_evidence = load_json(folder / "evidence.json")
             if (prior_evidence.get("contract_sha256") != digest(args.contract)
@@ -298,7 +321,10 @@ def main():
             prior_action = load_json(folder / "decision.json").get("action")
             if prior_action != "repair":
                 raise ValueError(f"previous round decided {prior_action!r}; only a repair decision starts another round")
-            repairs_used = prior_evidence.get("repairs_used", 0) + 1
+            prior_count = prior_evidence.get("repairs_used")
+            if type(prior_count) is not int or prior_count < 0:
+                raise ValueError("previous evidence.json has no valid repairs_used; start again from round 0")
+            repairs_used = prior_count + 1
             previous = validate_review(load_json(folder / "review.json"), checks)
         if args.repairs_used is not None and args.repairs_used != repairs_used:
             raise ValueError(f"--repairs-used {args.repairs_used} does not match the round history ({repairs_used})")
@@ -315,6 +341,10 @@ def main():
             issues.append("candidate decoded format differs from the contract")
         if source and candidate.size != source.size:
             issues.append("source and candidate dimensions differ; source-coordinate comparison is invalid")
+        for label, path in (("source", args.source), ("candidate", args.candidate)):
+            if path and wide_color_png(path):
+                issues.append(f"{label} is a 16-bit-per-channel color PNG; Pillow reads it as 8-bit, so exact comparison "
+                              "is not possible. Compare 8-bit or 16-bit grayscale copies instead.")
         if source and (source.mode in HIGH_PRECISION) != (candidate.mode in HIGH_PRECISION):
             issues.append(f"source ({source.mode}) and candidate ({candidate.mode}) bit depth differ")
         pixels = None

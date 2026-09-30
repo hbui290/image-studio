@@ -37,16 +37,16 @@ Example: “Make the title blue” is a local color change. “Give the photo co
 
 ## Conversational commands
 
-These are instructions recognized **inside this skill**, not automatically installed host slash commands. If the host intercepts slash commands, invoke `$image-edit-map` and give the command in plain language.
+These are instructions recognized **inside this skill**, not automatically installed host slash commands. If the host treats a leading slash as its own command, invoke this skill (`/image-edit-map`, `/image-studio:image-edit-map` as a Claude Code plugin, or `$image-edit-map` in Codex) and give the command in plain language, such as "map" or "lock A:#3".
 
 | Command | Behavior |
 | --- | --- |
 | `/map` | Number and name the visible sections/elements; show a separate annotated review image and legend |
 | `/inspect A:#3` | Explain that element's editable properties in everyday language |
 | `/edit A:#3 ...` | Apply the specified change with all other properties preserved |
-| `/lock A:#3` or `/lock section B` | Protect specified elements/regions; clarify visual similarity versus exact pixels if needed |
+| `/lock A:#3` or `/lock A:S1` (a section) | Protect specified elements/regions; clarify visual similarity versus exact pixels if needed |
 | `/unlock A:#3` | Remove that requested protection without changing the artwork |
-| `/image-reverse-engineer` | Extract a structured visual specification; follow [the reverse-engineering protocol](references/reverse-engineer.md) |
+| `/spec` | Extract a structured visual specification with [the reverse-engineering protocol](references/reverse-engineer.md); for a JSON-only request outside an edit, the `image-reverse-engineer` skill does the same |
 | `/compare` | Compare named versions against the requested edit and protected content |
 | `/export` | Resolve dimensions, crop policy, background, and format; verify the saved file |
 | `/help` | Show the control menu and two example commands suitable for the current image |
@@ -80,4 +80,4 @@ This workflow combines a numbered editing interface with lessons from targeted i
 
 ## Running the scripts
 
-In commands, `<skill-dir>` means this skill's folder (the host shows it when the skill loads); run them from your working folder. They need Python 3 with jsonschema (and Pillow for `--image`): `python3 -m pip install pillow jsonschema`, or prefix the command with `uv run --with pillow --with jsonschema`.
+In commands, `<skills>` means the folder that holds the Image Studio skill folders, which is this skill's parent folder (the host shows the skill's path when it loads); run commands from your working folder. They need Python 3 with jsonschema (and Pillow for `--image`): `python3 -m pip install pillow jsonschema`, or prefix the command with `uv run --with pillow --with jsonschema`.

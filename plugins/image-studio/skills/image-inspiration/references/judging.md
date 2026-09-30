@@ -24,7 +24,7 @@ Set `improved` to null on the first round, true/false for an evidenced incumbent
   "rounds_completed": 1, "max_rounds": 3,
   "images_used": 4, "max_images": 12,
   "no_improvement_rounds": 0, "incumbent_id": null,
-  "candidates": [{"id": "r1-C001", "checks": "pass"}],
+  "candidates": [{"id": "C001", "checks": "pass"}],
   "judgment": null
 }
 ```
@@ -36,7 +36,7 @@ After a real judgment, replace null with:
 ```json
 {
   "by": "human",
-  "ranking": ["r1-C001"],
+  "ranking": ["C001"],
   "reason": "The type is easier to read and the shadow feels more natural.",
   "feedback": "Keep the layout. Try a cooler background.",
   "stop": false,
@@ -47,7 +47,7 @@ After a real judgment, replace null with:
 `by` is `human` or `llm`. An LLM `ranking` must contain every eligible ID exactly once, best first. A human may give a full ranking or just a winning ID: save that single ID in the ranking and leave the others unranked. Do not invent preferences on their behalf. A stop request requires no ranking. A fully checked candidate may still have uncertain aesthetic preference: leave judgment null, record the uncertainty and stop or ask the user; never fabricate a ranking to pass this helper.
 
 ```bash
-python3 <skill-dir>/scripts/advance.py state.json --out decision.json
+python3 <skills>/image-inspiration/scripts/advance.py state.json --out decision.json
 ```
 
 The gate stops batch mode without ever returning `iterate`, blocks ineligible parents and incomplete rankings, waits for human/hybrid input, respects image/round caps, and stops after two no-improvement rounds. For `iterate`, generate at most `remaining_images` and the configured batch size, whichever is smaller. Keep liked axes fixed and change one or two named axes; use `parent_id` and preserve the incumbent until its replacement passes checks and wins the comparison. Save the returned no-improvement count only once per round. New images need new IDs and a fresh judgment.

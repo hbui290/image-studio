@@ -1,0 +1,6 @@
+interface:
+  display_name: "Image Verify"
+  short_description: "Check a candidate and audit protected pixels"
+  default_prompt: "Use $image-verify to check this candidate against its source and requirements and audit pixels outside the mask."
+policy:
+  allow_implicit_invocation: true

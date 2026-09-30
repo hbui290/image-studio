@@ -34,6 +34,7 @@ def to_brief(contract, alpha_required=False):
             "requirement": check["requirement"],
         })
     return {
+        "max_repairs": contract.get("max_repairs", 3),
         "name": contract["intent"][:80],
         "intent": contract["intent"],
         "criteria": criteria,

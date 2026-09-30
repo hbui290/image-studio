@@ -78,11 +78,11 @@ After an edit, review the compiler's `review_flags`. These identify baseline sce
 
 ## Compile and generate
 
-From the extracted skill folder, validate and compile with Python 3:
+Validate and compile with Python 3:
 
 ```sh
-python3 <skill-dir>/scripts/reconstruct.py validate <skill-dir>/examples/vellum.reconstruction.json
-python3 <skill-dir>/scripts/reconstruct.py compile <skill-dir>/examples/vellum.reconstruction.json --format json --output compiled.json
+python3 <skills>/image-reconstruction/scripts/reconstruct.py validate <skills>/image-reconstruction/examples/vellum.reconstruction.json
+python3 <skills>/image-reconstruction/scripts/reconstruct.py compile <skills>/image-reconstruction/examples/vellum.reconstruction.json --format json --output compiled.json
 ```
 
 The output separates `rendering_prompt`, `attachments`, requested output, criteria, and warnings. Resolve relative attachment paths against the input JSON file's directory. Send the rendering prompt and actual image attachments to an available image-generation tool. Use only supported tool settings; record unavailable model or seed information as `not exposed`.
@@ -114,11 +114,11 @@ The [exact compiled prompt](examples/vellum-reconstruction-prompt.txt) and sourc
 The full prompt library is separate from this skill. The small synthetic JSON fixture is included only for the compiler's internal checks.
 
 ```sh
-python3 <skill-dir>/scripts/reconstruct.py self-check
+python3 <skills>/image-reconstruction/scripts/reconstruct.py self-check
 ```
 
 Deliver the clean result, exact prompt, actual inputs, map or selection record, reconstruction JSON, and concise remaining limitations as appropriate to the user's task.
 
 ## Running the scripts
 
-In commands, `<skill-dir>` means this skill's folder (the host shows it when the skill loads); run them from your working folder. They need only Python 3; no extra packages.
+In commands, `<skills>` means the folder that holds the Image Studio skill folders, which is this skill's parent folder (the host shows the skill's path when it loads); run commands from your working folder. They need only Python 3; no extra packages.

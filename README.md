@@ -75,7 +75,7 @@ These offline tests call no model and skip themselves when Pillow or jsonschema 
 
 - Vision reviewers can miss small text and fine spatial details.
 - A flat image does not reveal its original prompt, fonts, or layers.
-- Pixel audits compare 8-bit color and 16-bit grayscale exactly; Pillow reads 16-bit-per-channel color PNGs as 8-bit.
+- Pixel audits compare 8-bit color and 16-bit grayscale exactly. 16-bit-per-channel color PNGs are refused, because Pillow reads them as 8-bit.
 - `accepted_by_checks` means the stated checks passed. It is not human approval.
 
 MIT license. See [NOTICE](NOTICE) for sources.

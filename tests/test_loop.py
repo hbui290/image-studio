@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from deps import needs_jsonschema
+from deps import needs_jsonschema, needs_pillow
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'plugins/image-studio/skills/image-loop/scripts'))
@@ -61,6 +61,7 @@ class LoopTests(unittest.TestCase):
     def test_file_failure_blocks_acceptance(self):
         self.assertEqual(decide(self.brief,self.report,{'passed':False,'failures':['wrong size']})['action'],'reject_technical')
 
+    @needs_pillow
     def test_file_decode_and_alpha(self):
         from PIL import Image
         with tempfile.TemporaryDirectory() as tmp:

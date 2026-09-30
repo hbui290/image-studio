@@ -3,18 +3,19 @@
 import copy
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from deps import needs_jsonschema
+from deps import needs_jsonschema, needs_pillow
 
 try:
     from PIL import Image, ImageDraw
-except ImportError:  # pragma: no cover
-    raise unittest.SkipTest("Pillow is not installed")
+except ImportError:  # pragma: no cover - only the pixel tests need Pillow
+    Image = ImageDraw = None
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILLS = ROOT / "plugins/image-studio/skills"
@@ -100,6 +101,7 @@ class Case(unittest.TestCase):
         return result, (json.loads(result.stdout) if result.returncode == 0 else None), out
 
 
+@needs_pillow
 class PixelTests(Case):
     def test_16bit_change_in_protected_half_is_caught(self):
         self.contract()
@@ -200,6 +202,7 @@ class SharedDecisionTests(unittest.TestCase):
             self.assertIn("never this candidate", decision["start_from"])
 
 
+@needs_pillow
 class HistoryAndInputTests(Case):
     def setUp(self):
         super().setUp()
@@ -274,6 +277,31 @@ class HistoryAndInputTests(Case):
             result = run(*common, "--out", self.dir / name, "--report", report)
             self.assertEqual(result.returncode, 2, (name, result.stdout, result.stderr))
             self.assertEqual(json.loads((self.dir / name / "decision.json").read_text())["action"], "stop_invalid_review")
+
+    @needs_jsonschema
+    def test_invalid_review_is_reported_before_file_checks(self):
+        brief = self.dir / "brief.json"
+        run(CONVERT, self.dir / "contract.json", "--out", brief)
+        Image.new("RGB", (100, 100), "white").save(self.dir / "c.jpg", "JPEG")
+        partial = self.dir / "partial.json"
+        partial.write_text(json.dumps({"results": [{"id": "C1", "status": "pass", "evidence": "seen"}]}))
+        result = run(REVIEW, "--brief", brief, "--source", self.dir / "s.png", "--candidate", self.dir / "c.jpg",
+                     "--out", self.dir / "order", "--report", partial)
+        self.assertEqual((result.returncode, json.loads(result.stdout)["action"]), (2, "stop_invalid_review"))
+
+    @needs_jsonschema
+    def test_one_review_file_works_for_both_scripts(self):
+        brief = self.dir / "brief.json"
+        run(CONVERT, self.dir / "contract.json", "--out", brief)
+        shared = self.dir / "shared.json"
+        shared.write_text(json.dumps({"reviewer": "person at 100%", "criteria": [
+            {"id": "C1", "status": "pass", "evidence": "seen", "suggested_fix": ""},
+            {"id": "K1", "status": "pass", "evidence": "seen", "suggested_fix": ""}], "summary": "ok"}))
+        loop = run(REVIEW, "--brief", brief, "--source", self.dir / "s.png", "--candidate", self.dir / "c.png",
+                   "--out", self.dir / "shared-loop", "--report", shared)
+        self.assertEqual(json.loads(loop.stdout)["action"], "accepted_by_checks", loop.stderr)
+        _, decision, _ = self.audit(self.dir / "s.png", self.dir / "c.png", shared, self.mask)
+        self.assertEqual(decision["action"], "accepted_by_checks")
 
     @needs_jsonschema
     def test_review_py_missing_candidate_is_a_clean_error(self):
@@ -378,3 +406,176 @@ class InheritedScriptTests(unittest.TestCase):
                          ("stop_uncertain_comparison", "A", "B"))
         # Overshooting a budget is a safe stop, as test_inspiration.test_budget_and_parent expects.
         self.assertEqual(advance.decide(dict(state, rounds_completed=5))['action'], 'stop_budget')
+
+
+def write_rgb48_png(path, pixels, width, height):
+    """Minimal 16-bit-per-channel RGB PNG writer (Pillow cannot write this mode)."""
+    import struct
+    import zlib
+
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+    rows = b"".join(b"\x00" + b"".join(struct.pack(">HHH", *pixels[y * width + x]) for x in range(width))
+                    for y in range(height))
+    path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 16, 2, 0, 0, 0))
+                     + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+
+
+@needs_pillow
+class SecondAuditTests(Case):
+    def setUp(self):
+        super().setUp()
+        self.contract()
+        Image.new("RGB", (100, 100), "white").save(self.dir / "s.png")
+        candidate = Image.new("RGB", (100, 100), "white")
+        ImageDraw.Draw(candidate).rectangle((10, 10, 20, 20), fill="blue")
+        candidate.save(self.dir / "c.png")
+        self.mask = self.left_mask()
+
+    def test_16bit_color_png_is_refused_not_silently_compared_at_8_bits(self):
+        width = height = 100
+        write_rgb48_png(self.dir / "s48.png", [(1000, 1000, 1000)] * (width * height), width, height)
+        changed = [(1000, 1000, 1000)] * (width * height)
+        changed[60 * width + 60] = (1001, 1000, 1000)  # below 8-bit resolution, inside the keep half
+        write_rgb48_png(self.dir / "c48.png", changed, width, height)
+        _, decision, _ = self.audit(self.dir / "s48.png", self.dir / "c48.png", self.review(), self.mask)
+        self.assertEqual(decision["action"], "reject_technical")
+        self.assertIn("16-bit-per-channel color PNG", " ".join(decision["issues"]))
+
+    def test_colored_and_float_masks_are_editable_where_nonzero(self):
+        for name, mask in (("rgb", Image.new("RGB", (100, 100), (0, 0, 0))), ("f", Image.new("F", (100, 100), 0.0))):
+            ImageDraw.Draw(mask).rectangle((0, 0, 49, 99), fill=(1, 0, 0) if name == "rgb" else 0.4)
+            path = self.dir / f"mask-{name}.{'png' if name == 'rgb' else 'tif'}"
+            mask.save(path)
+            _, decision, _ = self.audit(self.dir / "s.png", self.dir / "c.png", self.review(), path)
+            self.assertEqual(decision["action"], "accepted_by_checks", name)
+
+    def test_forged_or_missing_history_is_refused(self):
+        _, first, out = self.audit(self.dir / "s.png", self.dir / "c.png", self.review(c1="fail"), self.mask)
+        evidence = json.loads((out / "evidence.json").read_text())
+        evidence["repairs_used"] = -50
+        (out / "evidence.json").write_text(json.dumps(evidence))
+        forged, _, _ = self.audit(self.dir / "s.png", self.dir / "c.png", self.review(c1="fail"), self.mask, previous=out)
+        self.assertIn("no valid repairs_used", forged.stderr)
+        missing, _, _ = self.audit(self.dir / "s.png", self.dir / "c.png", self.review(), self.mask,
+                                   previous=out / "does-not-exist")
+        self.assertIn("does not exist", missing.stderr)
+
+    def test_duplicate_json_keys_are_refused(self):
+        review = self.dir / "dup.json"
+        review.write_text('{"results": [{"id": "C1", "status": "fail", "status": "pass", "evidence": "e"},'
+                          ' {"id": "K1", "status": "pass", "evidence": "e"}]}')
+        result, _, _ = self.audit(self.dir / "s.png", self.dir / "c.png", review, self.mask)
+        self.assertIn("duplicate JSON keys", result.stderr)
+
+    @needs_jsonschema
+    def test_contract_repair_limit_reaches_review_py(self):
+        self.contract(max_repairs=0)
+        brief = self.dir / "brief.json"
+        run(CONVERT, self.dir / "contract.json", "--out", brief)
+        result = run(REVIEW, "--brief", brief, "--source", self.dir / "s.png", "--candidate", self.dir / "c.png",
+                     "--out", self.dir / "limit", "--report", self.review(c1="fail"))
+        _, audit_decision, _ = self.audit(self.dir / "s.png", self.dir / "c.png", self.review(c1="fail"), self.mask)
+        self.assertEqual(json.loads(result.stdout)["action"], "stop_budget")
+        self.assertEqual(audit_decision["action"], "stop_budget")
+
+    @needs_jsonschema
+    def test_review_py_rounds_must_keep_brief_and_source(self):
+        brief = self.dir / "brief.json"
+        run(CONVERT, self.dir / "contract.json", "--out", brief)
+        common = ["--source", self.dir / "s.png", "--candidate", self.dir / "c.png"]
+        run(REVIEW, "--brief", brief, *common, "--out", self.dir / "r0", "--report", self.review(c1="fail"))
+        data = json.loads(brief.read_text())
+        data["intent"] = "Something else"
+        (self.dir / "brief2.json").write_text(json.dumps(data))
+        result = run(REVIEW, "--brief", self.dir / "brief2.json", *common, "--out", self.dir / "r1",
+                     "--report", self.review(c1="fail"), "--previous", self.dir / "r0")
+        self.assertIn("different brief", result.stderr)
+
+    @needs_jsonschema
+    def test_review_py_non_image_candidate_is_a_clean_error_without_output(self):
+        brief = self.dir / "brief.json"
+        run(CONVERT, self.dir / "contract.json", "--out", brief)
+        (self.dir / "note.png").write_text("not an image")
+        result = run(REVIEW, "--brief", brief, "--source", self.dir / "s.png", "--candidate", self.dir / "note.png",
+                     "--out", self.dir / "bad", "--report", self.review())
+        self.assertEqual(result.returncode, 2)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertFalse((self.dir / "bad").exists())
+
+
+class SecondInstallerTests(unittest.TestCase):
+    def setUp(self):
+        self.installer = load("installer", ROOT / "scripts/install.py")
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dest = Path(self.tmp.name) / "skills"
+
+    def tearDown(self):
+        for path in self.dest.rglob("*"):
+            if path.is_dir():
+                path.chmod(0o755)
+        self.tmp.cleanup()
+
+    def test_locked_old_folder_still_gives_a_complete_new_install(self):
+        self.installer.install(SKILLS, self.dest)
+        (self.dest / "image-verify/scripts/marker.txt").write_text("old")
+        locked = self.dest / "image-verify/references"
+        locked.chmod(0o500)
+        self.installer.install(SKILLS, self.dest, replace=True)
+        self.assertEqual(sorted(p.name for p in self.dest.iterdir() if not p.name.startswith(".")), sorted(self.installer.NAMES))
+        self.assertFalse((self.dest / "image-verify/scripts/marker.txt").exists())
+        self.assertTrue((self.dest / "image-verify/references/decisions.md").is_file())
+
+    def test_other_spelling_of_the_repository_is_refused(self):
+        other = Path(str(ROOT).swapcase())
+        if not other.exists() or not os.path.samefile(other, ROOT):
+            self.skipTest("case-sensitive filesystem")
+        with self.assertRaises(ValueError):
+            self.installer.install(SKILLS, other / "tmp-install", replace=True)
+
+
+class SecondInheritedTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_dense_criterion_dependencies_validate_quickly(self):
+        import time
+        recon = load("reconstruct", SKILLS / "image-reconstruction/scripts/reconstruct.py")
+        spec = json.loads((SKILLS / "image-reconstruction/examples/synthetic-scene.json").read_text())
+        target = spec["elements"][0]["id"]
+        spec["criteria"]["hard"] = [{**spec["criteria"]["hard"][0], "id": f"H{i:02d}", "target_ids": [target],
+                                     "depends_on": [f"H{j:02d}" for j in range(i)]} for i in range(60)]
+        start = time.monotonic()
+        try:
+            recon.validate(spec)
+        except Exception:
+            pass  # other rules may reject the synthetic set; only the running time matters here
+        self.assertLess(time.monotonic() - start, 5)
+
+    def test_reconstruct_non_utf8_input_is_a_clean_error(self):
+        path = self.dir / "latin1.json"
+        path.write_bytes(b'{"name": "caf\xe9"}')
+        result = run(SKILLS / "image-reconstruction/scripts/reconstruct.py", "validate", path)
+        self.assertEqual(result.returncode, 2)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_first_round_without_incumbent_is_not_a_stall(self):
+        advance = load("advance", SKILLS / "image-inspiration/scripts/advance.py")
+        state = {"mode": "loop", "judge": "llm", "rounds_completed": 1, "max_rounds": 3, "images_used": 2,
+                 "max_images": 9, "no_improvement_rounds": 0, "incumbent_id": None,
+                 "candidates": [{"id": "A", "checks": "pass"}, {"id": "B", "checks": "pass"}],
+                 "judgment": {"by": "llm", "improved": False, "stop": False, "ranking": ["A", "B"],
+                              "reason": "A is closer", "feedback": ""}}
+        self.assertEqual(advance.decide(state)["no_improvement_rounds"], 0)
+
+    @needs_jsonschema
+    def test_validate_spec_image_checks(self):
+        script = SKILLS / "image-edit-map/scripts/validate_spec.py"
+        example = SKILLS / "image-edit-map/examples/image-spec.example.json"
+        result = run(script, example, "--image-id", "A")
+        self.assertIn("--image-id needs --image", result.stderr)
+        self.assertEqual(result.returncode, 2)

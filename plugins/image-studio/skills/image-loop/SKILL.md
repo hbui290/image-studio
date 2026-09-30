@@ -12,6 +12,7 @@ Convert an image brief into checkable requirements, generate a candidate, review
 - Claude Code: `/image-loop [brief]` (shown as `/image-studio:image-loop` when installed as a plugin), or describe the task and let the skill load.
 - Codex: `$image-loop [brief]` or select through `/skills` where supported. Do not claim a custom `/image-loop` command is registered on every host.
 - Analysis only: a JSON breakdown of an image belongs to the companion `image-reverse-engineer` skill; defect diagnosis belongs to `image-inspect`.
+- Fixing one region of an accepted image while every other pixel must stay: use `image-repair` with the `image-verify` audit; this skill covers new images and whole-image edits.
 - For multiple inspirations and combination search, route to the companion `image-inspiration` skill. It supports one batch or a bounded human/vision-judged loop and reuses this skill's hard checks.
 
 ## Establish the brief
@@ -39,7 +40,7 @@ Continue through generation and repair during the active task; do not stop at wr
 Read [reviewer setup](references/reviewer.md) before running it. `scripts/review.py` uses an authenticated Codex CLI with an explicitly selected vision model and attached local images. It saves structured review results, file checks, and a decision. No OpenAI API key is required for an existing ChatGPT-authenticated CLI. Calls consume the user's account usage.
 
 ```bash
-python3 <skill-dir>/scripts/review.py \
+python3 <skills>/image-loop/scripts/review.py \
   --brief brief.json --candidate candidate.png --source source.png \
   --out review-round-0 --model <vision-model>
 ```
@@ -58,4 +59,4 @@ The public prompt library and example results are in the repository. General pro
 
 ## Running the scripts
 
-In commands, `<skill-dir>` means this skill's folder (the host shows it when the skill loads); run them from your working folder. They need Python 3 with Pillow and jsonschema: `python3 -m pip install pillow jsonschema`, or prefix the command with `uv run --with pillow --with jsonschema`.
+In commands, `<skills>` means the folder that holds the Image Studio skill folders, which is this skill's parent folder (the host shows the skill's path when it loads); run commands from your working folder. They need Python 3 with Pillow and jsonschema: `python3 -m pip install pillow jsonschema`, or prefix the command with `uv run --with pillow --with jsonschema`.

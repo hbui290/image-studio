@@ -15,4 +15,5 @@ Image Studio combines two projects, released here under the MIT License:
 New in Image Studio: contract_to_brief.py, review.py --report, the
 image-reviewer agent, audit support for the image-loop report format and
 coordinate-based repair prompts, Claude Code and Codex plugin manifests,
-tests/test_bridge.py, tests/test_package.py.
+tests/test_bridge.py, tests/test_package.py, tests/test_regressions.py, tests/deps.py,
+image-verify/references/decisions.md and independent-review.md.

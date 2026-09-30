@@ -276,10 +276,16 @@ def validate(spec):
     for criterion in spec["criteria"]["hard"]:
         require(set(criterion["depends_on"]) <= hard_ids,
                 f"{criterion['id']}: hard requirements cannot depend on soft preference scores")
+    done = set()
+
     def check_dependencies(current, trail):
+        # Visit each criterion once; a dense dependency graph stays linear instead of exponential.
         require(current not in trail, f"Criterion dependency cycle involving {current}")
+        if current in done:
+            return
         for dep in criteria[current]["depends_on"]:
             check_dependencies(dep, trail | {current})
+        done.add(current)
     for criterion_id in criteria:
         check_dependencies(criterion_id, set())
     selected = {}
@@ -683,7 +689,7 @@ def main():
             output.write_text(result, encoding="utf-8")
         else:
             sys.stdout.write(result)
-    except (Invalid, OSError, json.JSONDecodeError, RecursionError) as error:
+    except (Invalid, OSError, json.JSONDecodeError, UnicodeDecodeError, RecursionError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         sys.exit(2)
 

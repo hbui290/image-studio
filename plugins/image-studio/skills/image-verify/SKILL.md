@@ -13,4 +13,4 @@ Decision names and their order are in [decisions.md](references/decisions.md). R
 
 ## Running the scripts
 
-In commands, `<skill-dir>` means this skill's folder (the host shows it when the skill loads); run them from your working folder. They need Python 3 with Pillow: `python3 -m pip install pillow jsonschema`, or prefix the command with `uv run --with pillow --with jsonschema`.
+In commands, `<skills>` means the folder that holds the Image Studio skill folders, which is this skill's parent folder (the host shows the skill's path when it loads); run commands from your working folder. `audit_candidate.py` needs Python 3 with Pillow (`python3 -m pip install pillow`); `contract_to_brief.py` needs only Python 3. Prefixing a command with `uv run --with pillow` also works.

@@ -9,7 +9,7 @@
     {
       "name": "image-studio",
       "source": "./plugins/image-studio",
-      "description": "Create, edit, inspect, repair, and verify images with evidence.",
+      "description": "Create, edit, inspect, repair, and verify images with numbered maps, reference mixing, bounded review loops, and source-pixel audits.",
       "version": "2.1.0",
       "category": "productivity"
     }
