@@ -2,7 +2,7 @@
 
 ## Separate checks from preference
 
-First give each candidate the original requirements and file checks using the sibling `image-loop` reviewer, with `--max-repairs 0`. Map only `accepted_by_checks` to `checks: pass`; concrete failures to `fail`; uncertainty, invalid reports, missing files, and reviewer errors to `uncertain`. Provider errors stop the run rather than prompting retries. A model's high taste score cannot waive a failed requirement.
+First give each candidate the original requirements and file checks using the [image-loop](../../image-loop/SKILL.md) reviewer with a repair limit of zero: set `max_repairs: 0` in the screening brief. Do not pass `--max-repairs 0` when the brief sets another `max_repairs` value; `review.py` then stops with "contradicts the brief's max_repairs" and exit code 2. Map only `accepted_by_checks` to `checks: pass`; concrete failures to `fail`; uncertainty, invalid reports, missing files, and reviewer errors to `uncertain`. Provider errors stop the run rather than prompting retries. A model's high taste score cannot waive a failed requirement.
 
 For human review, show the images and hard-check results, then ask: which ID wins, what should stay, what should change, or stop? A person can revise the brief explicitly; record that as a brief revision and recheck candidates before using them as parents. Do not equate model screening with human selection.
 
@@ -47,9 +47,9 @@ After a real judgment, replace null with:
 `by` is `human` or `llm`. An LLM `ranking` must contain every eligible ID exactly once, best first. A human may give a full ranking or just a winning ID: save that single ID in the ranking and leave the others unranked. Do not invent preferences on their behalf. A stop request requires no ranking. A fully checked candidate may still have uncertain aesthetic preference: leave judgment null, record the uncertainty and stop or ask the user; never fabricate a ranking to pass this helper.
 
 ```bash
-python3 <skills>/image-inspiration/scripts/advance.py state.json --out decision.json
+python3 <skills>/image-inspiration/scripts/advance.py state.json --out r1/decision.json
 ```
 
-The gate stops batch mode without ever returning `iterate`, blocks ineligible parents and incomplete rankings, waits for human/hybrid input, respects image/round caps, and stops after two no-improvement rounds. For `iterate`, generate at most `remaining_images` and the configured batch size, whichever is smaller. Keep liked axes fixed and change one or two named axes; use `parent_id` and preserve the incumbent until its replacement passes checks and wins the comparison. Save the returned no-improvement count only once per round. New images need new IDs and a fresh judgment.
+Use the current round's folder in `--out` (`r2/decision.json` for round 2): the script never overwrites an existing file and exits 1 with `File exists`. The gate stops batch mode without ever returning `iterate`, blocks ineligible parents and incomplete rankings, waits for human/hybrid input, respects image/round caps, and stops after two no-improvement rounds. For `iterate`, generate at most `remaining_images` and the configured batch size, whichever is smaller. Keep liked axes fixed and change one or two named axes; use `parent_id` and preserve the incumbent until its replacement passes checks and wins the comparison. Save the returned no-improvement count only once per round. New images need new IDs and a fresh judgment.
 
 The helper does not invoke a model, establish evidence authenticity, schedule future work, or generate images. The host agent performs those actions in the active task, observing the returned gate and the host's permissions. A pending human choice is a pause, never a background continuation timer.

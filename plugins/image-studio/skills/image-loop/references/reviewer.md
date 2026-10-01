@@ -5,7 +5,7 @@
 `review.py` takes exactly one reviewer: `--model <vision model>` calls Codex; `--report report.json` uses a report already written by the Claude Code `image-reviewer` agent or a person and makes no model call.
 
 - An image-enabled host agent/tool for generation and editing. The review script does not generate images.
-- Python 3, Pillow, and jsonschema. Examples use `uv run --with pillow --with jsonschema python ...`; a virtual environment with those packages also works.
+- Python 3, Pillow, and jsonschema. The examples run `python3 <skills>/image-loop/scripts/review.py ...`; to supply the packages, prefix the command with `uv run --with pillow --with jsonschema`, or install them once with `python3 -m pip install pillow jsonschema`.
 - For `--model`: an authenticated Codex CLI and an explicit reviewer model that accepts images on **your configured route**. Verify with an actual image review. A model appearing in a catalog is not proof that a given account/backend can execute it.
 
 Keep the existing CLI provider configuration. The adapter uses it without editing it. It requests a read-only, ephemeral execution and instructs the reviewer to use only the attached images and brief. User-installed CLI skills/configuration may add context and usage; this is not a hermetically isolated inference call.
@@ -26,6 +26,21 @@ Use `--report report.json` instead of `--model` when the `image-reviewer` agent 
 
 For the next round, add `--previous round-0` (the folder, or its `report.json`). The script continues only when that round decided `repair`, and it counts repairs from the round history; `--repairs-used` is an optional cross-check. The original source remains the reference for protected criteria. Never feed the numbered annotation copy as the clean source.
 
+## Flags
+
+| Flag | Required | Meaning |
+| --- | --- | --- |
+| `--brief BRIEF` | yes | The `brief.json` for this loop. |
+| `--candidate CANDIDATE` | yes | The clean candidate image to review. |
+| `--out OUT` | yes | New output folder for this round; the script refuses an existing folder. |
+| `--model MODEL` | one of these two | Image-input reviewer model to call through the Codex CLI. |
+| `--report REPORT` | one of these two | Review already written by another reviewer; no Codex call. |
+| `--source SOURCE` | no | Clean original source. Omit for a generation-only brief. |
+| `--previous PREVIOUS` | no | Previous round folder (or its `report.json`). Required for every round after round 0. |
+| `--repairs-used N` | no | Optional cross-check. The script derives the count from `--previous` (previous round + 1, else 0) and exits with code 2 if this value differs. |
+| `--max-repairs N` | no | Repair limit, 0 or more. Defaults to the brief's `max_repairs`, else 3; if both are given they must agree. |
+| `--timeout SECONDS` | no | Time limit for the Codex call, in whole seconds. Default 180; must be positive. A timeout ends the round with `stop_provider`. |
+
 A repository checkout includes a controlled revision test in `examples/product/`: reviewing the unchanged source against the requested revision should identify the missing edits.
 
 ## Files
@@ -35,7 +50,7 @@ A repository checkout includes a controlled revision test in `examples/product/`
 - `decision.json`: deterministic controller outcome.
 - `repair-prompt.txt`: generated only when a repair is warranted.
 - `reviewer-prompt.txt`: exact prompt used with attached images.
-- `run.json`: requested model, account usage as exposed, elapsed time, image hashes, and retry settings. Dollar cost remains unknown unless independently calculated.
+- `run.json`: requested model, account usage as exposed, elapsed time, source, brief, and candidate hashes, and the repair count and limit. Dollar cost remains unknown unless independently calculated. It is not written when file checks fail (`reject_technical`) or when the Codex call times out or cannot start (`stop_provider`).
 - `.private/`: CLI diagnostics, excluded from publication. These can include local paths and installed skill metadata; do not upload them unreviewed.
 
 The script refuses to overwrite a previous round. Invalid output, missing IDs, duplicate IDs, uncertainty, provider failure, and failed file checks stop acceptance. Limits: at most three repairs by default; repeated identical failure sets stop (`stop_repeated_failure`). The script derives the repair count from the `--previous` round folders, so keep each round in its own folder and retain the best protected candidate.

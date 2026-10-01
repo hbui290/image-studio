@@ -33,7 +33,7 @@ Save a `contract.json` tied to the **original clean source**, not a screenshot o
 
 Each box is `[x, y, width, height]` in source pixels. The **final acceptance mask** is the same size as the image: every nonzero pixel, including a feathered edge, permits candidate pixels; pure black locks source pixels, and so does any fully transparent pixel of an RGBA mask. It is distinct from a generator's input mask. Write `canvas.format` as the uppercase name Pillow decodes, such as `PNG`, `JPEG`, `WEBP`, or `TIFF`, and add `"alpha_required": true` to `canvas` when the result must have real transparent pixels. Animated files are rejected; audit one still frame. When `pixel_lock_outside_mask` is false or omitted, omit `--mask`; the script will not claim exact preservation outside a region. For new artwork use `mode: "create"`, omit `--source` and the pixel lock, use only `change` checks (a `keep` check needs a source to compare with), and map targets on the output canvas.
 
-Boxes from a numbered map are often normalized `[x, y, width, height]` fractions of the image. Convert them to source pixels before writing the contract with the same rule as the reconstruction field guide, so no edge pixel is lost: `left = floor(x × W)`, `top = floor(y × H)`, `right = ceil((x + width) × W)`, `bottom = ceil((y + height) × H)`, clamp to the canvas, then `bbox = [left, top, right − left, bottom − top]`.
+Boxes from a numbered map are often normalized `[x, y, width, height]` fractions of the image. Convert them to source pixels before writing the contract with the same rule as the [reconstruction field guide](../../image-reconstruction/references/field-guide.md), so no edge pixel is lost: `left = floor(x × W)`, `top = floor(y × H)`, `right = ceil((x + width) × W)`, `bottom = ceil((y + height) × H)`, clamp to the canvas, then `bbox = [left, top, right − left, bottom − top]`.
 
 After looking at the actual images, save `review.json` with one result for every check:
 
@@ -47,7 +47,7 @@ After looking at the actual images, save `review.json` with one result for every
 }
 ```
 
-Use `pass`, `fail`, or `uncertain`. Evidence must describe what was seen or why it could not be resolved. A passed `change` whose target barely moved (under 0.5% of the box changed by 8 or more levels) is held as possibly invisible; if a tiny fix is really intended and visible, add `"visible_change_confirmed": true` and say in the evidence what was compared at display size. The script validates IDs and coverage, but cannot prove the reviewer's visual claim. Keep the reviewer independent of the editor when the image warrants it. An optional `suggested_fix` text on a result is copied into the repair prompt.
+Use `pass`, `fail`, or `uncertain`. Evidence must describe what was seen or why it could not be resolved. A passed `change` whose target barely moved is held as possibly invisible: the count of pixels that changed by 8 or more levels on some channel is below 0.5% of the box area, with a minimum threshold of 4 pixels for small boxes; if a tiny fix is really intended and visible, add `"visible_change_confirmed": true` and say in the evidence what was compared at display size. The script validates IDs and coverage, but cannot prove the reviewer's visual claim. Keep the reviewer independent of the editor when the image warrants it. An optional `suggested_fix` text on a result is copied into the repair prompt.
 
 ## Who writes the review
 
@@ -80,4 +80,4 @@ In a repository checkout, `python3 -m unittest discover -s tests` tests these he
 
 ## Origin of the approach
 
-The bounded review idea was informed by [Image Loop](../../image-loop/SKILL.md) and stable IDs by [Image Edit Map](../../image-edit-map/SKILL.md). This helper and contract were written for the local mask/composite workflow of the earlier image-processing skill; Image Studio connects it to the Image Loop reviewer through `contract_to_brief.py` and the shared `criteria` review format.
+The bounded review idea was informed by [Image Loop](../../image-loop/SKILL.md) and stable IDs by [Image Edit Map](../../image-edit-map/SKILL.md). This helper and contract were written for the local mask/composite workflow of the earlier `image-processing-skill` project (`hbui290/image-processing-skill`, listed in the repository's NOTICE), not a skill in this plugin; Image Studio connects it to the Image Loop reviewer through `contract_to_brief.py` and the shared `criteria` review format.

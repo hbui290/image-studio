@@ -5,8 +5,31 @@ description: Correct a specific defect in an existing image with a local edit, a
 
 # Local image repair
 
-Start from an untouched clean source and identify the exact target, permitted change, protected neighbors, and required output. If the target is ambiguous, use a source-coordinate map before editing. Read [scene-contract.md](../image-inspect/references/scene-contract.md) when references conflict, objects overlap, or geometry depends on nearby structures.
+This skill fixes one region of an accepted image and keeps every other pixel. Use a sibling skill instead when:
 
-Choose the smallest operation that solves the defect. If the whole image is soft rather than one object wrong, use [image-enhance](../image-enhance/SKILL.md) first; it tests upscalers and proves the gain at display size. Missing eyes, fused objects, broken joins, and false text need new pixels or manual retouch. When generation is needed, give the editor a crop with context and approved identity or product references. Keep observations about the old source separate from the requested result. Branch from the accepted clean source rather than chaining rejected candidates.
+- The whole image is soft rather than one object wrong: [image-enhance](../image-enhance/SKILL.md) first; it tests upscalers and proves the gain at display size.
+- The target or the defect is not yet clear: [image-inspect](../image-inspect/SKILL.md) finds it and numbers the objects.
+- The image is new, or the whole image must be regenerated with automated review rounds: [image-loop](../image-loop/SKILL.md).
 
-Read [repair-and-composite.md](references/repair-and-composite.md) for object IDs, masks, crop alignment, perspective, exact artwork, and a compositing recipe. Treat a model input mask as guidance. Accept only reviewed pixels through a separate final mask; protect required shapes inside that boundary with a second mask, then inspect seams, occlusion, contact, shadows, and neighboring subjects. Use [tool-readiness.md](references/tool-readiness.md) on an unfamiliar machine; optional segmenters, upscalers, and face models are not prerequisites. Hand the candidate, source, mask, and change record to image verification before claiming success. Use at most three repair rounds and the stop rules in [decisions.md](../image-verify/references/decisions.md). For new images or whole-image edits that need automated review rounds, use `image-loop` instead; this skill is for one region of an accepted image.
+Tools: ImageMagick 7 `magick` for crops, masks, and composites; an image generator that accepts a crop and reference images, when new pixels are needed. Optional segmenters, upscalers, and face models are not prerequisites; check an unfamiliar machine with [tool-readiness.md](references/tool-readiness.md).
+
+## Steps
+
+1. **Fix the target.** Start from an untouched clean source. Record the exact target, permitted change, protected neighbors, and required output. If the target is ambiguous, use the `A:#7` source-coordinate map from image-inspect before editing. Read [scene-contract.md](../image-inspect/references/scene-contract.md) when references conflict, objects overlap, or geometry depends on nearby structures.
+2. **Choose the smallest operation** that solves the defect. Missing eyes, fused objects, broken joins, and false text need new pixels or manual retouch; an upscaler cannot supply them.
+3. **Generate or draw the patch.** Give the editor a crop with context and approved identity or product references. Keep observations about the old source separate from the requested result. Branch from the accepted clean source rather than chaining rejected candidates. Read [repair-and-composite.md](references/repair-and-composite.md) for object IDs, masks, crop alignment, perspective, exact artwork, and the compositing recipe.
+4. **Composite through a final mask.** Treat a model input mask as guidance. Accept only reviewed pixels through a separate final acceptance mask; protect required shapes inside that boundary with a second mask. Inspect seams, occlusion, contact, shadows, and neighboring subjects at 100% and at display size.
+5. **Verify** with [image-verify](../image-verify/SKILL.md) before claiming success. For protected pixels or several rounds, write `contract.json` and `review.json` as described in [candidate-audit.md](../image-verify/references/candidate-audit.md), then run:
+   ```bash
+   python3 <skills>/image-verify/scripts/audit_candidate.py \
+     --contract contract.json --source source.png --candidate review.png \
+     --mask final-acceptance-mask.png --review review.json --out round-0
+   ```
+   It needs Python 3 with Pillow: prefix the command with `uv run --with pillow`, or install it with `python3 -m pip install pillow`. `<skills>` is the folder that holds the skill folders. Read `decision.json` and follow [decisions.md](../image-verify/references/decisions.md).
+6. **Repeat or stop.** Use at most three repair rounds and the stop rules in [decisions.md](../image-verify/references/decisions.md). When two candidates repeat the same failure, change the approach (crop, reference, mask, or a deterministic edit) instead of rewording the prompt.
+
+## Outputs
+
+- `review.png`: the uncompressed full-size composite; export WebP or JPEG only after it passes.
+- The patch, the crop-local and full-size final acceptance masks, and the audit folder (`evidence.json`, `decision.json`) when the audit was run.
+- An evidence ledger (sources, crop, candidate, mask, tool actually used, dimensions, rejected variants, reviews); its contents are listed at the end of the masked composite section in [repair-and-composite.md](references/repair-and-composite.md#masked-composite).

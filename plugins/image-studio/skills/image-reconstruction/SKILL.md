@@ -1,11 +1,22 @@
 ---
 name: image-reconstruction
-description: Split a reference into named parts and reconstruction JSON, then compile prompts that recreate it, remix it, or change selected parts while keeping the rest. Use when the user wants a new image built from a reference's decisions. For a read-only breakdown use image-reverse-engineer; to fix a defect in an existing image use image-repair.
+description: Split a reference into named parts and reconstruction JSON, then compile prompts that recreate it, remix it, or change selected parts while keeping the rest. Use when the user wants a new image built from a reference's decisions. Not for a read-only breakdown (image-reverse-engineer), planning an in-place edit with a numbered map (image-edit-map), combining several references into variants (image-inspiration), a new image from a brief alone (image-create), or fixing a defect in an existing image (image-repair).
 ---
 
 # Image reconstruction
 
 Turn a reference into decisions the user can see and an agent can reuse: named elements, their relationships, explicit changes, a rendering prompt, and checks against the result.
+
+## When to use this skill or a sibling
+
+- **image-reconstruction (this skill):** rebuild or remix one reference from a full inventory of its parts, then compile a prompt.
+- Not for a read-only breakdown: use [image-reverse-engineer](../image-reverse-engineer/SKILL.md).
+- Not for planning an edit of an existing image with a numbered element map: use [image-edit-map](../image-edit-map/SKILL.md).
+- Not for combining several references into traceable variants: use [image-inspiration](../image-inspiration/SKILL.md).
+- Not for a new image from a brief with no reference to rebuild: use [image-create](../image-create/SKILL.md).
+- Not for fixing one defect in an existing image: use [image-repair](../image-repair/SKILL.md).
+
+An image-spec file from image-edit-map or image-reverse-engineer uses different field names; convert it with the [field mapping table](references/field-guide.md#converting-from-an-image-spec-file).
 
 Use this workflow for the user's requested scope. A simple image comment can supply enough information for a local edit. A detailed map and JSON are useful for reconstruction, multiple selectable elements, reference combinations, or a handoff. Do not require another approval for a clear, already authorized edit.
 
@@ -46,7 +57,7 @@ A rectangular source crop may contain neighboring pixels. Call it a **bounding c
 
 For a native comment or region selection, resolve the target and use the same contract: **target → change → preserve → allow**. A comment pin does not guarantee unchanged pixels outside the selected area.
 
-The included [VELLUM map](visual-map.html) provides 15 named elements over a luxury product photograph. It reuses the original map's selection, bounding-crop previews, keep/change/remove controls, property locks, reference roles, full/edit prompt compilation, and JSON export. It prepares instructions while preserving the displayed source pixels; it does not generate the requested edit.
+The included [VELLUM map](visual-map.html) provides 15 named elements over a luxury product photograph. It offers selection, bounding-crop previews, keep/change/remove controls, property locks, reference roles, full/edit prompt compilation, and JSON export. It prepares instructions while preserving the displayed source pixels; it does not generate the requested edit.
 
 For another image, prepare valid JSON first, then use **Import reconstruction JSON** and **Attach its clean source**. Check that the boxes and names match the actual image. The page performs no automatic image analysis. Keep exported JSON with its source assets, or update its paths before using the Python compiler; a browser file selection supplies a filename, not a durable absolute path.
 
@@ -111,7 +122,7 @@ The [VELLUM inventory](examples/vellum.reconstruction.json) was built by inspect
 
 The [exact compiled prompt](examples/vellum-reconstruction-prompt.txt) and source photograph produced the included [reconstruction result](assets/vellum-reconstruction.png). The [run record](examples/vellum-run.json) records the actual input, tool, and review. Composition, product identity, and readable label text remained close; wood grain, paper texture, stone veins, and reflections changed. This is one image-assisted study, with no claim that JSON caused the fidelity or improved the original photograph.
 
-The full prompt library is separate from this skill. The small synthetic JSON fixture is included only for the compiler's internal checks.
+More example prompts are in the repository's [prompt library](https://github.com/hbui290/image-studio/tree/main/prompts). The small synthetic JSON fixture is included only for the compiler's internal checks.
 
 ```sh
 python3 <skills>/image-reconstruction/scripts/reconstruct.py self-check

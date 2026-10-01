@@ -20,7 +20,7 @@ For reference mixing, see the two [tested inspiration combinations](../examples/
 For a new task:
 
 1. Pick a recipe and replace only the details relevant to your job.
-2. Invoke `/image-loop` in Claude Code (`/image-studio:image-loop` as a plugin) or `$image-loop` in Codex.
+2. Invoke `/image-loop` in Claude Code (`/image-studio:image-loop` as a plugin) or `$image-loop` in Codex (`$image-studio:image-loop` as a plugin).
 3. Convert required details into a brief before generation.
 4. Inspect the evidence, not just the final picture.
 

@@ -27,6 +27,9 @@ Use the official project or maintainer source when setup is needed. A repository
 | Host image generator (for example ChatGPT/Codex image generation) | Proposes pixels for missing detail from a crop and references | [OpenAI image generation](https://developers.openai.com/api/docs/guides/tools-image-generation); hosted, so verify access instead of downloading a model |
 | ImageMagick `magick` | Exact crops, masks, composites, comparisons, export | [GitHub](https://github.com/ImageMagick/ImageMagick) · [install](https://imagemagick.org/download/) |
 | Real-ESRGAN | Super-resolution when recognizable detail needs more pixels | [GitHub](https://github.com/xinntao/Real-ESRGAN) |
+| Upscayl (optional) | Desktop upscaler that ships the `upscayl-bin` command and models; the default whole-image upscaler in [image-enhance](../../image-enhance/SKILL.md) | [GitHub](https://github.com/upscayl/upscayl) |
+| Real-ESRGAN-ncnn-vulkan (optional) | `realesrgan-ncnn-vulkan` command and models; runs on the GPU without Python | [GitHub](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan) |
+| rembg (optional) | Background removal (`rembg i`); commands in [image-enhance recipes](../../image-enhance/references/recipes.md#background-removal) | [rembg repo](https://github.com/danielgatis/rembg) |
 | SAM 3 (optional) | Mask proposals from a text prompt ("mug") or a point, for crowded scenes; runs on a Mac through Hugging Face Transformers | [SAM 3 repo](https://github.com/facebookresearch/sam3) · [Transformers SAM 3 docs](https://huggingface.co/docs/transformers/model_doc/sam3) |
 | rembg `sam` model (optional) | Point-prompted mask when rembg is already installed | [rembg repo](https://github.com/danielgatis/rembg) |
 | `cwebp` / libwebp | WebP encoding when the editor cannot export it | [GitHub](https://github.com/webmproject/libwebp) |
@@ -35,7 +38,7 @@ Other conditional examples named in [repair-and-composite.md](repair-and-composi
 
 ## What must travel to a new machine or agent?
 
-- The Image Studio skills: install the `image-studio` plugin, or copy all skill folders with `python3 scripts/install.py --to <skills directory>`. The skills link to each other's `references/`, so copying one `SKILL.md` or one folder alone breaks its detailed instructions. Start a new session and verify that the skills appear in that agent's available-skill list.
+- The Image Studio skills: install the `image-studio` plugin, or, from a repo checkout, copy all skill folders with `python3 scripts/install.py --to <skills directory>` (the script is in the repository root and is not part of the installed plugin). The skills link to each other's `references/`, so copying one `SKILL.md` or one folder alone breaks its detailed instructions. Start a new session and verify that the skills appear in that agent's available-skill list.
 - The untouched source, approved identity or product references, and any accepted candidate, mask, editable composite, and delivery file needed to continue a specific job. Record their dimensions and which version is authoritative.
 - The task brief: permitted changes, protected regions, target dimensions/formats, actual display surface, and current status. Include exact crop coordinates and mask polarity only when they belong to the transferred source version.
 - The chosen tool/model names and versions, how they were accessed, what was actually run, and which outputs passed review. A prompt alone cannot reproduce stochastic generated pixels; preserve accepted candidate files for exact continuation.

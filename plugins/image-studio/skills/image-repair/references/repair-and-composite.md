@@ -26,7 +26,7 @@ For a connected structure, trace it before generating pixels: supports and attac
 
 ## Selecting one object in a crowded image
 
-Before editing repeated objects, record a small map with `ID`, plain-language label, source-pixel box or crop, neighbors to protect, and edit status. `lantern-1` and `lantern-2` may share a label but must remain different targets. A box is only a locator; preview the actual mask at native pixels before accepting it. Check holes, thin parts, shadows, overlaps, and whether the mask includes a neighboring hand, face, label, or structural joint. When objects overlap, decide which one is in front and which pixels belong to each before compositing.
+Before editing repeated objects, record a small map with `ID`, plain-language label, source-pixel box or crop, neighbors to protect, and edit status. Use the image-inspect ID form `A:#3`: two lanterns `A:#3` and `A:#4` may share the label "lantern" but must remain different targets. A box is only a locator; preview the actual mask at native pixels before accepting it. Check holes, thin parts, shadows, overlaps, and whether the mask includes a neighboring hand, face, label, or structural joint. When objects overlap, decide which one is in front and which pixels belong to each before compositing.
 
 Manual selection is sufficient when there are few clear objects. Automatic masks can speed up a dense scene, but remain proposals: [SAM 3](https://github.com/facebookresearch/sam3) proposes masks from a text prompt or a point, and rembg's `sam` model takes a point. These are optional examples, not required dependencies or evidence of a proprietary editor's internal algorithm. Verify each proposed label, ID, and boundary against the original image. If the object is missed, draw or correct its mask manually.
 
@@ -104,7 +104,7 @@ $offset = "+$x+$y"
 magick $src -crop $crop +repage crop.png
 magick $candidate -resize "$($w)x$($h)!" candidate-sized.png
 magick candidate-sized.png patch-mask.png -alpha off -compose CopyOpacity -composite patch-with-alpha.png
-magick $src patch-with-alpha.png -geometry $offset -compose Over -composite review.png
+magick $src patch-with-alpha.png -geometry $offset -compose Over -composite -depth 8 review.png
 ```
 
 Inspect `review.png` before exporting a lossy web format. A soft mask does not correct a mismatched perspective or lighting; revise the generated patch when the seam remains visible. Keep the uncompressed review file until the final rendering is checked. Compression can alter pixels outside the patch, so compare protected regions in the uncompressed composite when exact preservation matters.

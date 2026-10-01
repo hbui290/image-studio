@@ -51,6 +51,20 @@ Keep an ID when its element moves, changes color or changes wording. Retire it w
 
 Keep an element's intrinsic description separate from positional relationships. “A narrow cylindrical lamp” can survive a move; “a lamp above the right planter” becomes stale when the lamp moves above the middle planter. Store the latter in `relations` and inspect retained prose after movement. The compiler can omit stale structured relationships, but cannot reliably rewrite spatial implications embedded in arbitrary sentences.
 
+## Converting from an image-spec file
+
+[image-edit-map](../../image-edit-map/SKILL.md) and [image-reverse-engineer](../../image-reverse-engineer/SKILL.md) save an image-spec file ([schema](../../image-edit-map/references/image-spec.schema.json)). It describes the same image in a different format. Rename these fields when you build reconstruction JSON from it; neither validator accepts the other format.
+
+| image-spec | Reconstruction JSON |
+| --- | --- |
+| `schema_version`: `1.0` | `schema_version`: `1.0.0` |
+| `coordinate_system`: `normalized_original_image_top_left_xywh` | `coordinate_system`: `normalized_top_left_xywh` (same convention: normalized `[x, y, width, height]` from the top-left of the clean source) |
+| `images[]` with `source` and `metadata.width_px` / `metadata.height_px` observations | `source_images[]` with `path`, integer `width_px` / `height_px`, and `dimensions_basis` |
+| Observation `basis`: `source_metadata` | Evidence `basis`: `file_metadata` (also `dimensions_basis`) |
+| Section `A:S1` | Group `A-G01` |
+| Element `A:1` (displayed as `A:#1`), with `image_id` and `section_id` | Element `A-01`, with `source_id` and `parent_id`; at least two digits |
+| `relationships[]` | `relations[]` (different `kind` values; check the schema) |
+
 ## Evidence without fake precision
 
 Every `description`, `appearance` attribute and `scene` attribute is an evidence object:
@@ -118,7 +132,7 @@ python3 <skills>/image-reconstruction/scripts/reconstruct.py compile path/to/sel
 
 JSON output separates `rendering_prompt`, actual attachment records, requested output, criteria and warnings. Text output separates the same sections for copying. Pass the rendering prompt and actual attachments to the image tool; apply only supported output settings. Paths are data and are never executed. Compilation has no network call or image-generation side effect and does not overwrite its input JSON. `--output` refuses an existing path or symlink unless `--force` is given; `--force` still never overwrites the source JSON.
 
-`--mode edit` requires a selected clean target and a requested change. It compiles the selected delta and preservation instructions without repeating every unchanged source observation. Full reconstruction uses the default mode. Keep the complete evidence JSON as storage; do not paste it wholesale into a generator. The accompanying test encountered one tool's 32,000-character limit with an 82,283-character raw document. This limit does not establish the limits of other APIs. Resolve source paths relative to the saved JSON when they are not absolute; the tool still needs the actual image attachment.
+`--mode edit` requires a selected clean target and a requested change. It compiles the selected delta and preservation instructions without repeating every unchanged source observation. Full reconstruction uses the default mode. Keep the complete evidence JSON as storage; do not paste it wholesale into a generator. Image tools limit prompt length: one tested tool accepted at most 32,000 characters, while a full storage document was over 82,000. Check the limit of the tool you use. Resolve source paths relative to the saved JSON when they are not absolute; the tool still needs the actual image attachment.
 
 Explicit preserve/allow duplicates and preserved property paths that directly conflict with a changed property are rejected. Arbitrary prose can still contain semantic contradictions. If a selected change alters an original success criterion, update that criterion because the user's request changed, and retain the original source observations; never weaken a criterion merely because generation failed.
 

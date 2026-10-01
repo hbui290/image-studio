@@ -1,6 +1,6 @@
 interface:
   display_name: "Image Reconstruction"
   short_description: "Rebuild or remix a reference from named parts"
-  default_prompt: "Use $image-studio:image-reconstruction to map this reference into named parts and compile a prompt to recreate or remix it."
+  default_prompt: "Map this reference into named parts and compile a prompt to recreate or remix it."
 policy:
   allow_implicit_invocation: true

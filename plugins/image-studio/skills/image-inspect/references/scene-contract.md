@@ -1,6 +1,6 @@
 # Scene and reference contract
 
-Use this when a repair has several references, repeated targets, occlusion, difficult geometry, or a later agent must continue it. A clear one-object edit can use an ordinary comment or region selection plus the main skill's checks. This contract can be a short table or notes; JSON and a dedicated mapping application are optional.
+Use this when a repair has several references, repeated targets, occlusion, difficult geometry, or a later agent must continue it. A clear one-object edit can use an ordinary comment or region selection plus the main skill's checks. This contract can be a short table or notes; JSON and a dedicated mapping application are optional. When an audit needs JSON, write the `contract.json` in [candidate-audit.md](../../image-verify/references/candidate-audit.md): it uses the same `A:#7` IDs with `[x, y, width, height]` boxes in source pixels.
 
 ## Separate evidence, decisions, and checks
 
@@ -32,4 +32,4 @@ Build a concise instruction from the clean source, target ID and description, re
 
 Before submission, inspect the instruction for contradictions: old color versus requested color, `keep everything unchanged` versus a moved object and its shadow, or a style reference that would replace a protected face. If layout or pose is difficult, a simple sketch with source-matched aspect ratio can specify silhouettes and overlap; label construction marks so they do not appear in the final art. Review geometry before surface detail.
 
-This contract adapts the source-versus-selection separation in [Image Reconstruction](../../image-reconstruction/SKILL.md) and reference authority in [Visual Design Kit](https://github.com/newmindsgroup/visual-design-kit/blob/main/plugins/visual-design-studio/library/draft-skills/design-media-reference-control/SKILL.md). Those projects are research sources, not required installations.
+This contract adapts the source-versus-selection separation in [image-reconstruction](../../image-reconstruction/SKILL.md) and reference authority in [Visual Design Kit](https://github.com/newmindsgroup/visual-design-kit/blob/main/plugins/visual-design-studio/library/draft-skills/design-media-reference-control/SKILL.md). Those projects are research sources, not required installations.

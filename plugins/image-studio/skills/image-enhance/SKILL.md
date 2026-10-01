@@ -13,7 +13,7 @@ The upscaler and `magick` do the work; this skill picks the recipe and proves th
    command -v magick upscayl-bin realesrgan-ncnn-vulkan
    ls /Applications/Upscayl.app/Contents/Resources/bin/ 2>/dev/null   # macOS app; elsewhere look in the Upscayl install folder
    ```
-   If no upscaler exists, say so and offer [setup](references/recipes.md#getting-an-upscaler); do not pass off a sharpen filter as enhancement.
+   Paths under `/Applications` here and in [recipes.md](references/recipes.md) are macOS examples; on Windows and Linux, look in the folder where Upscayl or Real-ESRGAN-ncnn-vulkan was installed. If no upscaler exists, say so and offer [setup](references/recipes.md#getting-an-upscaler); do not pass off a sharpen filter as enhancement.
 3. **Pick the recipe by image type** from [recipes.md](references/recipes.md). Default for anime/2D art under about 2000 px wide: `remacri-4x` at 4x, or `realesr-animevideov3-x2` at 2x when speed matters. Never upscale small text or UI; never repeat a pass on an already enhanced image.
 4. **Trial on a crop** of the softest area (faces, small props) with two or three models, then run the winner on the whole image and resize to the delivery size:
    ```bash
@@ -28,8 +28,9 @@ The upscaler and `magick` do the work; this skill picks the recipe and proves th
    python3 <skills>/image-enhance/scripts/compare_display.py --source src.png --candidate enhanced.png \
      --out compare-1 --width 1920 --crop 1200,300,400,300
    ```
+   It writes `metrics.json`, `before-after.png`, and one `crop-N.png` per `--crop` into the new `--out` folder, and prints the same verdict as JSON. It exits 0 whenever the comparison ran, including when `visible_improvement` is false, so read the verdict, not the exit code. It exits 2 for bad input: a missing file, an existing `--out` folder, different aspect ratios, or a crop outside the source. It is not for transparent images: it drops alpha and compares only color, so flatten both files onto the delivery background first (`magick in.png -background white -alpha remove -alpha off flat.png`) and check the cutout edges separately.
    `visible_improvement: false` means stop and report what failed (invisible, not sharper, color shifted, or content moved). Show `before-after.png` and the crops to the user either way. Record rejected models in one line each.
 6. **If still soft where it matters** (faces, props with no real detail), the pixels do not exist: hand those regions to [image-repair](../image-repair/SKILL.md) with references. Upscalers sharpen what is there; they do not invent a correct face.
 7. **Deliver** with the [export](references/recipes.md#web-export) and [cutout](references/recipes.md#background-removal) recipes. A brightness or color grade is a separate, requested change, not part of sharpening.
 
-Run scripts with `python3` 3.9+ and Pillow (`uv run --with pillow python3 ...` works without installing). `<skills>` is the folder that holds the skill folders.
+Run scripts with `python3` 3.9+ and Pillow (`uv run --with pillow python3 ...` works without installing; otherwise `python3 -m pip install pillow`). `<skills>` is the folder that holds the skill folders.

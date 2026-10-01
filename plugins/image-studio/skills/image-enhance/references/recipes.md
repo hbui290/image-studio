@@ -78,10 +78,12 @@ Export from the lossless master, never from a previous WebP:
 
 ```bash
 for w in 3840 2560 1920 1280 768; do
-  magick master.png -resize "${w}x" -strip -quality 90 -define webp:method=6 "hero-$w.webp"
-  magick master.png -resize "${w}x" -strip -quality 60 "hero-$w.avif"
+  magick master.png -resize "${w}x>" -strip -quality 90 -define webp:method=6 "hero-$w.webp"
+  magick master.png -resize "${w}x>" -strip -quality 60 "hero-$w.avif"
 done
 ```
+
+`>` resizes only when the master is wider than `w`, so a narrow master is never upscaled; skip widths above the master's width instead of shipping same-size copies.
 
 ```html
 <picture>

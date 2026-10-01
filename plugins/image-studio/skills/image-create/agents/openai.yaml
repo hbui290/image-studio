@@ -1,6 +1,6 @@
 interface:
   display_name: "Image Create"
   short_description: "Generate new images with a role for each reference"
-  default_prompt: "Use $image-studio:image-create to generate a new image from my brief and references, then check it against the brief."
+  default_prompt: "Generate a new image from this brief, giving each reference a role, then check it against the brief."
 policy:
   allow_implicit_invocation: true
