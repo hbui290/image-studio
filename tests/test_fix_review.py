@@ -228,6 +228,27 @@ class ReviewFixTests(unittest.TestCase):
         self.assertIn("summary", decision["reason"])
         self.assertEqual(json.loads(result.stdout.strip().splitlines()[-1]), decision)
 
+    # 12. brief values that can never pass are refused before any output
+    def test_brief_refuses_empty_values_and_jpg(self):
+        rep = self.put("r.json", report())
+        for field in ("id", "requirement"):
+            brief = json.loads(json.dumps(self.brief))
+            brief["criteria"][0][field] = ""
+            result = self.review("--report", rep, brief=brief, out="empty-" + field)
+            self.assertClean(result)
+            self.assertFalse((self.dir / ("empty-" + field)).exists())
+        self.brief["file_checks"]["format"] = "JPG"
+        result = self.review("--report", rep, out="jpg")
+        self.assertClean(result)
+        self.assertIn("JPEG", result.stderr)
+
+    # 13. a file failure with a supplied report does not mention reviewer usage
+    def test_report_path_file_failure_message(self):
+        self.brief["file_checks"]["width"] = 9
+        self.assertClean(self.review("--report", self.put("r.json", report())), 0)
+        self.assertEqual(self.decision()["action"], "reject_technical")
+        self.assertNotIn("reviewer usage", self.decision()["reason"])
+
 
 if __name__ == "__main__":
     unittest.main()

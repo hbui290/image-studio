@@ -163,7 +163,7 @@ def main():
             json.dump(result, f, indent=2, allow_nan=False)
             f.write('\n')
     except (OSError, ValueError) as exc:
-        p.exit(1, str(exc) + '\n')
+        p.exit(2, str(exc) + '\n')
 
 
 if __name__ == '__main__':

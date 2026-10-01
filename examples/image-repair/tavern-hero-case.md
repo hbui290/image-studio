@@ -10,7 +10,7 @@ A real website hero, anonymized. The first generated image was a 1024×576 anime
 ## 2. Whole-image enhancement (image-enhance)
 
 ```bash
-realesrgan-ncnn-vulkan -i hero-4k.webp -o hero-2x.png -s 2 -n realesr-animevideov3 -m models
+realesrgan-ncnn-vulkan -i hero-source.webp -o hero-2x.png -s 2 -n realesr-animevideov3 -m models
 magick hero-2x.png -filter Lanczos -resize 3840x2160! -unsharp 0x0.55+0.5+0.015 -strip -quality 94 hero-restored-4k.webp
 ```
 

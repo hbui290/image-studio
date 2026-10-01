@@ -26,6 +26,7 @@ class LoopTests(unittest.TestCase):
 
     def test_accept_complete_pass(self):
         self.assertEqual(decide(self.brief,self.report,self.checks)['action'],'accepted_by_checks')
+        self.assertEqual(decide(self.brief,self.report,self.checks)['ids'],[])  # same shape as the audit's decision
 
     def test_missing_duplicate_or_extra_ids_cannot_pass(self):
         for ids in [['color'],['color','color'],['color','text','invented']]:

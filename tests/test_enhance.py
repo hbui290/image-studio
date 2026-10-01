@@ -70,10 +70,16 @@ class CompareDisplay(unittest.TestCase):
         run, _ = self.compare(self.truth, out="taken")
         self.assertEqual(run.returncode, 2)
 
+    def test_failed_crop_leaves_no_output_folder(self):
+        run, _ = self.compare(self.source.resize((100, 56)), "--crop", "1,1,1,1")
+        self.assertEqual(run.returncode, 2, run.stderr)
+        self.assertFalse((self.dir / "out").exists())
+
     def test_16_bit_grayscale_source_matches_its_8_bit_copy(self):
         gray = self.source.convert("L")
         gray.convert("I").point(lambda v: v * 257).save(self.dir / "source.png")  # 16-bit grayscale PNG
-        self.assertEqual(Image.open(self.dir / "source.png").mode, "I;16")
+        with Image.open(self.dir / "source.png") as saved:
+            self.assertEqual(saved.mode, "I;16")
         _, deep = self.compare(self.truth.convert("L"), out="deep")
         gray.save(self.dir / "source.png")
         _, flat = self.compare(self.truth.convert("L"), out="flat")

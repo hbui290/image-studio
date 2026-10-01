@@ -79,8 +79,10 @@ def validate_contract(contract, source_size):
     for axis in ("width", "height"):
         positive_int(canvas[axis], f"canvas.{axis}")
     nonempty(canvas["format"], "canvas.format")
-    if canvas["format"] != canvas["format"].upper():
+    if not (canvas["format"].isascii() and canvas["format"].isalnum() and canvas["format"].isupper()):
         raise ValueError("canvas.format must use the decoded uppercase format, such as PNG")
+    if canvas["format"] == "JPG":
+        raise ValueError("canvas.format: use the decoded format name JPEG, not JPG")
     if source_size and source_size != (canvas["width"], canvas["height"]):
         raise ValueError("source dimensions differ from contract canvas; update the contract")
     locked = contract.get("pixel_lock_outside_mask", False)

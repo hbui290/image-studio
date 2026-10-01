@@ -236,5 +236,17 @@ class ValidateSpecImageTests(TempDirCase):
         self.assertIn("too large", result.stderr)
 
 
+@needs_jsonschema
+class ValidateSpecIdTests(TempDirCase):
+    def test_element_id_must_match_image_and_number(self):
+        spec = json.loads((SKILLS / "image-edit-map/examples/image-spec.example.json").read_text(encoding="utf-8"))
+        self.assertEqual(run(VALIDATE, self.write_json("ok.json", spec)).returncode, 0)
+        element = spec["elements"][0]
+        element["number"] += 100  # id still says the old number
+        result = run(VALIDATE, self.write_json("bad.json", spec))
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn(element["id"] + ": id must be", result.stdout + result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

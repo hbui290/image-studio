@@ -35,7 +35,7 @@ def decide(brief, report, checks, repairs_used=0, max_repairs=3, previous=None):
         return {'action': 'hold_for_inspection', 'reason': 'Uncertain evidence requires stronger inspection.',
                 'ids': [c['id'] for c in uncertain]}
     if not failing:
-        return {'action': 'accepted_by_checks', 'reason': 'All requested and protected criteria and file checks passed.'}
+        return {'action': 'accepted_by_checks', 'reason': 'All requested and protected criteria and file checks passed.', 'ids': []}
     if repairs_used >= max_repairs:
         return {'action': 'stop_budget', 'reason': 'Repair limit reached.', 'ids': [c['id'] for c in failing]}
     if previous is not None and repairs_used > 0:

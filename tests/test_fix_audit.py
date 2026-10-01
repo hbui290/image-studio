@@ -120,8 +120,8 @@ class AuditFixes(unittest.TestCase):
         blob += b"\0\0\0\0" + (16).to_bytes(2, "little") * 3 + pixels
         for name in ("source.png", "candidate.png"):
             (self.dir / name).write_bytes(bytes(blob))
-        opened = Image.open(self.dir / "source.png")
-        self.assertEqual((opened.format, opened.mode), ("TIFF", "RGB"))
+        with Image.open(self.dir / "source.png") as opened:
+            self.assertEqual((opened.format, opened.mode), ("TIFF", "RGB"))
         Image.new("L", SIZE, 255).save(self.dir / "mask.png")
         self.assertEqual(self.audit().returncode, 0)
         self.assertIn("16 bits per color channel", " ".join(self.decision()["issues"]))
@@ -140,6 +140,15 @@ class AuditFixes(unittest.TestCase):
         run = self.audit(out="bad")
         self.assertEqual(run.returncode, 2)
         self.assertFalse((self.dir / "bad").exists())
+
+    def test_canvas_format_must_be_a_decoded_format_name(self):
+        self.images(), self.review()
+        for fmt, hint in (("PNG ", "canvas.format"), ("JPG", "JPEG")):
+            self.contract(fmt=fmt)
+            run = self.audit(out="o-" + fmt.strip())
+            self.assertEqual(run.returncode, 2, run.stderr)
+            self.assertIn(hint, run.stderr)
+            self.assertNotIn("Traceback", run.stderr)
 
     def test_deep_json_is_a_clean_error(self):
         self.images(), self.review()

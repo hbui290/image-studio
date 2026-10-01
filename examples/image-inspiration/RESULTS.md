@@ -15,6 +15,8 @@ The planner selected two distinct combinations from a four-combination space:
 
 ## What ran
 
+Candidate IDs appear in two forms. [plan.json](plan.json), the state files, and the decision files use the plan's combination ID (`C001`). The [call ledger](calls.jsonl) and [lineage.json](lineage.json) add the round number (`r1-C001` is combination `C001` generated in round 1), so IDs stay unique if later rounds reuse a combination ID. The lineage `recipe` field (`plan.json#C001`) links the two forms.
+
 1. `combine.py` ran with count 2 and seed 7. [Plan and recipes](plan.json).
 2. The built-in image tool generated both images with both clean references attached and their roles declared. The exact prompts are [C001](C001/prompt.txt) and [C002](C002/prompt.txt). The [call ledger](calls.jsonl) records two successful generation attempts. Its image model identifier was not exposed.
 3. GPT-5.6 Luna inspected each candidate independently through the configured Codex CLI. All seven visual requirements passed for each; decoded files were 1254×1254 PNGs. [C001 report](C001/review/report.json), [C002 report](C002/review/report.json). There were zero repair calls.
@@ -31,14 +33,14 @@ The three successful reviewer/judge calls record account usage. Their monetary c
 
 ## Reproduce the offline portion
 
-From the repository root, choose new output paths:
+From the repository root, write new outputs outside the repository (here `/tmp`):
 
 ```bash
-python plugins/image-studio/skills/image-inspiration/scripts/combine.py examples/image-inspiration/board.json \
-  --count 2 --seed 7 --out my-plan.json
-python plugins/image-studio/skills/image-inspiration/scripts/advance.py examples/image-inspiration/state-loop.json \
-  --out my-decision.json
-uv run --with pillow --with jsonschema python -m unittest discover -s tests -v
+python3 plugins/image-studio/skills/image-inspiration/scripts/combine.py examples/image-inspiration/board.json \
+  --count 2 --seed 7 --out /tmp/my-plan.json
+python3 plugins/image-studio/skills/image-inspiration/scripts/advance.py examples/image-inspiration/state-loop.json \
+  --out /tmp/my-decision.json
+uv run --with pillow --with jsonschema python3 -m unittest discover -s tests -v
 ```
 
 For new image and model calls, invoke the installed skill with these two references and select the desired mode/judge. The generation prompts, review briefs, model prompts, output schema, hashes, and usage remain alongside the examples. Private CLI diagnostics are excluded from Git.

@@ -125,10 +125,11 @@ def main():
                 raise ValueError(f"crop {x},{y},{w},{h} falls outside the source")
         before, after, metrics, failures = measure(source, candidate, args.width)
         result = {"visible_improvement": not failures, "failures": failures, "metrics": metrics, "limits": LIMITS}
+        crops = [crop_pair(source, candidate, box) for box in args.crop]  # fail before creating the folder
         args.out.mkdir(parents=True)
         side_by_side(before, after).save(args.out / "before-after.png")
-        for number, box in enumerate(args.crop, 1):
-            crop_pair(source, candidate, box).save(args.out / f"crop-{number}.png")
+        for number, crop in enumerate(crops, 1):
+            crop.save(args.out / f"crop-{number}.png")
         (args.out / "metrics.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     except (OSError, ValueError, Image.DecompressionBombError) as error:
         parser.error(f"{type(error).__name__}: {error}")

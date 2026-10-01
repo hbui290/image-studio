@@ -69,4 +69,4 @@ python3 <skills>/image-loop/scripts/review.py --brief rN/C001/brief.json --candi
 python3 <skills>/image-inspiration/scripts/advance.py state.json --out rN/decision.json
 ```
 
-`combine.py` and `advance.py` exit 0 on success and 1 on any error, with the reason on stderr. They never overwrite an existing `--out` file: they print `[Errno 17] File exists: ...` and exit 1. `review.py` also refuses an existing `--out` folder. Write each round to its own folder (`r1/`, `r2/`, ...); create the folder first, because the scripts do not create missing folders. Read [board](references/board.md) and [judging](references/judging.md) for the input formats and output fields.
+`combine.py` and `advance.py` exit 0 on success and 2 on any error, with the reason on stderr. They never overwrite an existing `--out` file: they print `[Errno 17] File exists: ...` and exit 2. `review.py` also refuses an existing `--out` folder. Write each round to its own folder (`r1/`, `r2/`, ...); create the folder first, because the scripts do not create missing folders. Read [board](references/board.md) and [judging](references/judging.md) for the input formats and output fields.

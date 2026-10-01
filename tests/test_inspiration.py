@@ -158,8 +158,13 @@ class InspirationTests(unittest.TestCase):
                    str(ROOT/'examples/image-inspiration/board.json'), '--out', str(out)]
             self.assertEqual(subprocess.run(cmd, capture_output=True).returncode, 0)
             first = out.read_bytes()
-            self.assertNotEqual(subprocess.run(cmd, capture_output=True).returncode, 0)
+            self.assertEqual(subprocess.run(cmd, capture_output=True).returncode, 2)
             self.assertEqual(out.read_bytes(), first)
+            advance = [sys.executable, str(ROOT/'plugins/image-studio/skills/image-inspiration/scripts/advance.py'),
+                       str(Path(tmp)/'missing.json'), '--out', str(Path(tmp)/'d.json')]
+            run = subprocess.run(advance, capture_output=True, text=True)
+            self.assertEqual(run.returncode, 2, run.stderr)
+            self.assertNotIn('Traceback', run.stderr)
 
 
 if __name__ == '__main__':

@@ -2,6 +2,8 @@
 
 Recorded 2026-09-09. These are two controlled revision demonstrations, an annotation demonstration, and a reverse-engineering check. They are not benchmark measurements.
 
+The recorded JSON files come from an earlier version of the scripts. Current scripts add fields: a `repair` `decision.json` gains `start_from`, and `run.json` gains `brief_sha256` (and `report_source` when `review.py --report` is used). Replaying the recorded reports through the current `review.py --report` gives the same actions, failed IDs, and repair prompts. Read the files as records of that run, not as the exact output format of the current version.
+
 ## Revision loop
 
 | Example | Round | Requested reviewer | Controller decision | Review seconds |
@@ -44,11 +46,11 @@ The [corrected specification](image-reverse-engineer/image-spec.json) uses decod
 
 ## Model access and cost
 
-GPT-5.6 Luna succeeded through the configured Codex CLI. Two GPT-5.4 Mini compatibility probes (one direct configuration-free text probe and one configured image-review probe) were rejected. The adapter stops on that error; it does not silently substitute a model. These failures are account/route observations, not universal availability claims.
+GPT-5.6 Luna succeeded through the configured Codex CLI. Two GPT-5.4 Mini compatibility probes (one direct configuration-free text probe and one configured image-review probe) were rejected. Only the image-review probe is recorded, in [product/configured-mini-probe](product/configured-mini-probe/) (`run.json` shows return code 1 and `decision.json` shows `stop_provider`); the text probe was not saved. The adapter stops on that error; it does not silently substitute a model. These failures are account/route observations, not universal availability claims.
 
 The generator was the host's built-in image-generation/editing tool. Its underlying model identifier was not exposed for selection or verification in these calls. Do not describe these as a verified GPT Image 2.5 benchmark.
 
-[Usage records](usage.json) preserve the four successful loop reviews' exposed account token counts and timings. Those records exclude generation, reverse engineering, and compatibility probes. Context from installed CLI skills increased reviewer input tokens, so “small model” does not imply a minimal-context call. No API dollar cost, cost reduction, or broad success rate was established.
+[Usage records](usage.json) is a list of the four `run.json` usage records from the loop reviews above (product and diagram, rounds 0 and 1). They preserve the four successful loop reviews' exposed account token counts and timings. Those records exclude generation, reverse engineering, and compatibility probes. Context from installed CLI skills increased reviewer input tokens, so “small model” does not imply a minimal-context call. No API dollar cost, cost reduction, or broad success rate was established.
 
 ## Offline verification
 

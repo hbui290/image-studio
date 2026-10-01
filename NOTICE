@@ -17,3 +17,7 @@ image-reviewer agent, audit support for the image-loop report format and
 coordinate-based repair prompts, Claude Code and Codex plugin manifests,
 tests/test_bridge.py, tests/test_package.py, tests/test_regressions.py, tests/deps.py,
 image-verify/references/decisions.md and independent-review.md.
+
+New in 2.2.0: the image-enhance skill (SKILL.md, scripts/compare_display.py,
+references/recipes.md), tests/test_enhance.py, tests/test_fix_*.py,
+tests/test_visual_map.py, examples/image-repair/.

@@ -38,6 +38,8 @@ def validate(data, schema):
                 if not section or section['image_id'] != item['image_id']:
                     errors.append(f'{prefix}: section must belong to the same image')
                 key = (item['image_id'], item['number'])
+                if prefix != f"{item['image_id']}:{item['number']}":
+                    errors.append(f"{prefix}: id must be {item['image_id']}:{item['number']} (image_id:number)")
                 if key in numbers:
                     errors.append(f'{prefix}: duplicate display number in image')
                 numbers.add(key)

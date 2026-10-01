@@ -116,6 +116,8 @@ def main():
             p.error('Duplicate brief criterion IDs.')
         if any(c['id'] != c['id'].strip() for c in brief['criteria']):
             p.error('Brief criterion IDs must not start or end with whitespace.')
+        if brief['file_checks'].get('format') == 'JPG':
+            p.error("file_checks.format: use the decoded format name JPEG, not JPG.")
         candidate = args.candidate.resolve(strict=True)
         source = args.source.resolve(strict=True) if args.source else None
         if source is None and any(c['kind'] == 'protected' for c in brief['criteria']):
@@ -183,7 +185,8 @@ def main():
         write_json(out/'report.json', report)
     write_json(out/'file-checks.json', checks)
     if not checks['passed']:
-        decision = {'action':'reject_technical','reason':'Fix file constraints before spending reviewer usage.','issues':checks['failures']}
+        reason = 'Fix file constraints before acceptance.' if args.report else 'Fix file constraints before spending reviewer usage.'
+        decision = {'action':'reject_technical','reason':reason,'issues':checks['failures']}
         write_json(out/'decision.json', decision)
         print(json.dumps(decision))
         return 0
