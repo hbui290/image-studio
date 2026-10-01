@@ -27,7 +27,7 @@ This repo is a plugin for Claude Code and Codex. The plugin contains 10 skills i
 - Use sentence case for headings ("Image verification", not "Image Verification").
 - Do not invent a new ID style. Reuse the style the skill already uses.
 - Every relative link must resolve. Every external tool gets its official URL.
-- When you change a version, change it in all four manifests at once: `.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json`, `plugins/image-studio/.claude-plugin/plugin.json`, and `plugins/image-studio/.codex-plugin/plugin.json`.
+- When you change a version, change it in every manifest that has one, at once (`.claude-plugin/marketplace.json`, `plugins/image-studio/.claude-plugin/plugin.json`, `plugins/image-studio/.codex-plugin/plugin.json`), and add an entry to `CHANGELOG.md`. Installed copies only update when the version changes.
 
 ## Before calling a change done
 

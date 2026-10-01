@@ -95,7 +95,10 @@ def main():
         except RecursionError:
             raise ValueError('JSON nesting is too deep')
         schema = json.loads(schema_path.read_text(encoding='utf-8-sig'))
-        errors = validate(data, schema)
+        try:
+            errors = validate(data, schema)
+        except RecursionError:
+            raise ValueError('JSON nesting is too deep')
         if args.image and not errors:
             from PIL import Image, ImageOps
             selected = [x for x in data['images'] if x['id'] == args.image_id] if args.image_id else data['images']

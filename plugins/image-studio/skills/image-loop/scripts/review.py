@@ -120,6 +120,13 @@ def main():
             p.error("file_checks.format: use the decoded format name JPEG, not JPG.")
         candidate = args.candidate.resolve(strict=True)
         source = args.source.resolve(strict=True) if args.source else None
+        if source is not None:
+            try:
+                source_failures = check_file(source, {'width': None, 'height': None, 'format': None, 'alpha_required': False})['failures']
+            except OSError as exc:
+                p.error(f'Cannot decode --source image: {exc}')
+            if source_failures:
+                p.error('--source: ' + ' '.join(source_failures))
         if source is None and any(c['kind'] == 'protected' for c in brief['criteria']):
             p.error('Protected comparison criteria require --source; use requested criteria for a generation-only brief.')
         if args.report and not args.report.is_file():
@@ -229,9 +236,11 @@ def main():
     events = []
     for line in stdout.splitlines():
         try:
-            events.append(json.loads(line))
+            event = json.loads(line)
         except ValueError:
             continue
+        if isinstance(event, dict):
+            events.append(event)
     usage = [e.get('usage') for e in events if e.get('type') == 'turn.completed']
     write_json(out/'run.json', {'model_requested':args.model,'adapter':'codex exec',
                               'seconds':round(time.monotonic()-start,2),'usage':usage,

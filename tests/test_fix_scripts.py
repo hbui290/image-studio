@@ -247,6 +247,15 @@ class ValidateSpecIdTests(TempDirCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn(element["id"] + ": id must be", result.stdout + result.stderr)
 
+    def test_deep_value_inside_a_valid_spec_is_a_clean_error(self):
+        spec = json.loads((SKILLS / "image-edit-map/examples/image-spec.example.json").read_text(encoding="utf-8"))
+        spec["images"][0]["metadata"]["width_px"]["value"] = "DEEP"
+        path = self.dir / "deep.json"  # built as text: json.dumps itself overflows at this depth on Python 3.9
+        path.write_text(json.dumps(spec).replace('"DEEP"', "[" * 985 + "]" * 985), encoding="utf-8")
+        result = run(VALIDATE, path)
+        self.assertIn(result.returncode, (0, 1, 2), result.stderr)  # newer Pythons may handle this depth
+        self.assertNotIn("Traceback", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

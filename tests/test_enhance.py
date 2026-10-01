@@ -70,6 +70,14 @@ class CompareDisplay(unittest.TestCase):
         run, _ = self.compare(self.truth, out="taken")
         self.assertEqual(run.returncode, 2)
 
+    def test_width_above_limit_is_refused(self):
+        self.source.save(self.dir / "candidate.png")
+        run = subprocess.run([sys.executable, str(SCRIPT), "--source", str(self.dir / "source.png"), "--candidate",
+                              str(self.dir / "candidate.png"), "--out", str(self.dir / "w"), "--width", "200000"],
+                             capture_output=True, text=True, timeout=60)
+        self.assertEqual(run.returncode, 2, run.stderr)
+        self.assertIn("16384", run.stderr)
+
     def test_failed_crop_leaves_no_output_folder(self):
         run, _ = self.compare(self.source.resize((100, 56)), "--crop", "1,1,1,1")
         self.assertEqual(run.returncode, 2, run.stderr)

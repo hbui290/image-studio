@@ -18,6 +18,15 @@ Turn a reference into decisions the user can see and an agent can reuse: named e
 
 An image-spec file from image-edit-map or image-reverse-engineer uses different field names; convert it with the [field mapping table](references/field-guide.md#converting-from-an-image-spec-file).
 
+## Steps
+
+1. **Inspect** each supplied image and record observed, inferred, and unknown details ([inspect the actual image](#inspect-the-actual-image)).
+2. **Map** every meaningful element with a stable ID and normalized bounds, and show the map to the user ([show the visual map](#show-the-visual-map)). Skip the detailed map for an obvious local edit.
+3. **Write the reconstruction JSON**: source observations stay as observed; requested changes go in `selections` ([store observations and choices separately](#store-observations-and-choices-separately)).
+4. **Validate and compile** with `reconstruct.py` ([compile and generate](#compile-and-generate)). Use `--mode edit` only when the JSON has a requested change and a clean target.
+5. **Generate** with the host image tool, sending the compiled `rendering_prompt` and the actual attachments. Save the exact prompt, inputs, and output.
+6. **Check** each hard requirement and the protected regions as pass, fail, uncertain, or not evaluated, then repair the largest failure ([check and repair](#check-and-repair)). Stop at the [stop conditions](#stop-conditions).
+
 Use this workflow for the user's requested scope. A simple image comment can supply enough information for a local edit. A detailed map and JSON are useful for reconstruction, multiple selectable elements, reference combinations, or a handoff. Do not require another approval for a clear, already authorized edit.
 
 ## Choose the control that fits the decision
@@ -61,7 +70,7 @@ The included [VELLUM map](visual-map.html) provides 15 named elements over a lux
 
 For another image, prepare valid JSON first, then use **Import reconstruction JSON** and **Attach its clean source**. Check that the boxes and names match the actual image. The page performs no automatic image analysis. Keep exported JSON with its source assets, or update its paths before using the Python compiler; a browser file selection supplies a filename, not a durable absolute path.
 
-The repository's tests (`tests/test_visual_map.py`, run with Node.js) check that the map's prompt compiler and embedded schema match `scripts/reconstruct.py`. The browser controls themselves are not tested; try them before relying on the UI for production work.
+The page's prompt compiler and embedded schema match `scripts/reconstruct.py`. Try the browser controls on your image before relying on the UI for production work.
 
 ## Supply geometry through a sketch
 
@@ -112,7 +121,7 @@ Compare both the intended change and the protected regions. Inspect identity, ge
 
 Repair the largest diagnosed failure from the best accepted clean version. Isolate an uncertain change; combine compatible clear changes when their effects can be judged together. Allow physically necessary consequences. Every generation can introduce drift, so recheck preservation after each repair.
 
-Stop when the requested checks pass, the agreed budget ends, or another tool is needed. Use deterministic typography, charting, compositing, or vector tools when the job requires exact geometry, editable artwork, or preserved pixels. Do not promise arbitrary images or pixel-identical reconstructions from a prompt.
+Use deterministic typography, charting, compositing, or vector tools when the job requires exact geometry, editable artwork, or preserved pixels. Do not promise arbitrary images or pixel-identical reconstructions from a prompt.
 
 For authorized parallel variants or comparisons, read [the experiment loop](references/experiment-loop.md). Keep the target and checks common, vary declared inputs, and record every attempt. Agents broaden the search; their use alone does not establish better image quality.
 
@@ -132,4 +141,17 @@ Deliver the clean result, exact prompt, actual inputs, map or selection record, 
 
 ## Running the scripts
 
-In commands, `<skills>` means the folder that holds the Image Studio skill folders, which is this skill's parent folder (the host shows the skill's path when it loads); run commands from your working folder. They need only Python 3; no extra packages.
+In commands, `<skills>` means the folder that holds the Image Studio skill folders, which is this skill's parent folder (the host shows the skill's path when it loads); run commands from your working folder. They need only Python 3.9+; no extra packages. `python3 <skills>/image-reconstruction/scripts/reconstruct.py --help` lists the commands: `validate`, `compile`, and `self-check`.
+
+Exit codes:
+
+- 0: `validate` printed `VALID: ...`, `compile` wrote the prompt, or `self-check` printed `PASS: ...`.
+- 2: bad input, with an `ERROR: ...` line on stderr: a missing or unreadable file, invalid JSON, a schema or semantic error, `compile --output` naming a file that already exists (pass `--force` to overwrite; the source JSON is never overwritten), or `--mode edit` without a requested change (a `selections` entry whose action is not `keep`) or without the clean target as an attachment. The bundled VELLUM example has empty `selections`, so `compile --mode edit` on it exits 2.
+
+## Stop conditions
+
+- The requested checks pass.
+- The agreed call or repair budget is used up.
+- Another tool is needed: exact typography, charts, vector artwork, or preserved pixels need a deterministic tool, not a generator.
+- `validate` or `compile` exits 2: fix the JSON before generating.
+- No image tool is available, or generation is outside the request: return the compiled prompt and label it untested.

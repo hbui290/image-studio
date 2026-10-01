@@ -35,7 +35,7 @@ For the next round, add `--previous round-0` (the folder, or its `report.json`).
 | `--out OUT` | yes | New output folder for this round; the script refuses an existing folder. |
 | `--model MODEL` | one of these two | Image-input reviewer model to call through the Codex CLI. |
 | `--report REPORT` | one of these two | Review already written by another reviewer; no Codex call. |
-| `--source SOURCE` | no | Clean original source. Omit for a generation-only brief. |
+| `--source SOURCE` | no | Clean original source. Omit for a generation-only brief. It is decoded first; an unreadable or animated source stops with exit code 2. |
 | `--previous PREVIOUS` | no | Previous round folder (or its `report.json`). Required for every round after round 0. |
 | `--repairs-used N` | no | Optional cross-check. The script derives the count from `--previous` (previous round + 1, else 0) and exits with code 2 if this value differs. |
 | `--max-repairs N` | no | Repair limit, 0 or more. Defaults to the brief's `max_repairs`, else 3; if both are given they must agree. |
@@ -49,9 +49,9 @@ A repository checkout includes a controlled revision test in `examples/product/`
 - `file-checks.json`: decoded dimensions, format, transparency evidence, and candidate SHA-256.
 - `decision.json`: deterministic controller outcome.
 - `repair-prompt.txt`: generated only when a repair is warranted.
-- `reviewer-prompt.txt`: exact prompt used with attached images.
+- `reviewer-prompt.txt`: exact prompt used with attached images. Written only with `--model`, after the file checks pass.
 - `run.json`: requested model, account usage as exposed, elapsed time, source, brief, and candidate hashes, and the repair count and limit. Dollar cost remains unknown unless independently calculated. It is not written when file checks fail (`reject_technical`) or when the Codex call times out or cannot start (`stop_provider`).
-- `.private/`: CLI diagnostics, excluded from publication. These can include local paths and installed skill metadata; do not upload them unreviewed.
+- `.private/`: CLI diagnostics, written only with `--model`, excluded from publication. These can include local paths and installed skill metadata; do not upload them unreviewed.
 
 The script refuses to overwrite a previous round. Invalid output, missing IDs, duplicate IDs, uncertainty, provider failure, and failed file checks stop acceptance. Limits: at most three repairs by default; repeated identical failure sets stop (`stop_repeated_failure`). The script derives the repair count from the `--previous` round folders, so keep each round in its own folder and retain the best protected candidate.
 

@@ -18,7 +18,7 @@ One intended exception: with `review.py --model`, the file checks run before the
 
 Exit 0 means a usable decision was written: `reject_technical`, `hold_for_inspection`, `accepted_by_checks`, `stop_budget`, `stop_repeated_failure`, or `repair`. Read `decision.json` rather than trusting the exit code. Exit 2 means nothing usable was decided: invalid arguments or inputs (both scripts write nothing), `stop_invalid_review` (`review.py` writes it to `decision.json`; the audit writes nothing), or `review.py`'s `stop_provider` (written to `decision.json`). `review.py` checks file properties but not pixels; only the audit compares pixels against the source and mask.
 
-Only `review.py` can also return `stop_provider`, when the Codex reviewer call fails or times out. The inspiration loop (`image-inspiration/scripts/advance.py`) judges between candidates, not against checks, and has its own actions described in [judging.md](../../image-inspiration/references/judging.md).
+Only `review.py` can also return `stop_provider`, when the Codex reviewer call fails or times out. The inspiration loop (`image-inspiration/scripts/advance.py`) judges between candidates, not against checks, and has its own actions, listed in the [actions table](../../image-inspiration/references/judging.md#actions).
 
 ## Rounds
 

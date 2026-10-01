@@ -1,4 +1,4 @@
-# Reverse-engineering protocol (used by /image-reverse-engineer)
+# Reverse-engineering protocol (used by [image-reverse-engineer](../../image-reverse-engineer/SKILL.md))
 
 ## Purpose
 
@@ -6,7 +6,7 @@ Given an image, produce a reusable visual specification and a numbered inventory
 
 ## Workflow
 
-1. Inspect the image and decode available metadata with a file tool. Supply measured width/height to the extraction step; never trust dimensions inferred from a model's resized view. If no file tool is available, dimensions are unknown. Ask only for a missing image, an ambiguous target/reference relationship, or a scope choice that matters. A bare `/image-reverse-engineer` means a comprehensive visual breakdown; it does not require the user to answer editing questions first.
+1. Inspect the image and decode available metadata with a file tool. Supply measured width/height to the extraction step; never trust dimensions inferred from a model's resized view. If no file tool is available, dimensions are unknown. Ask only for a missing image, an ambiguous target/reference relationship, or a scope choice that matters. A bare request to image-reverse-engineer means a comprehensive visual breakdown; it does not require the user to answer editing questions first.
 2. Assign images, sections, stable element IDs, source-relative bounds, and connector relationships as in the mapping protocol. Pass any existing ID manifest into extraction; do not let a second analysis renumber elements. Do not wait for an annotation render to begin JSON extraction. Only explicit user constraints populate `locked_properties`; otherwise use empty arrays. Suggested preservation belongs in the reconstruction brief, not actual edit locks.
 3. Extract the categories below. Unknown is `null`; an absent category is `[]`. Add explicit unknowns so an empty field cannot masquerade as a complete extraction.
 4. Return valid JSON matching `image-spec.schema.json`, plus a short human-readable summary unless JSON-only was requested. If files are supported, save `image-spec.json`. Provide the numbered visual map when requested or as the normal guided-mode companion; JSON-only must not trigger an unsolicited image generation.

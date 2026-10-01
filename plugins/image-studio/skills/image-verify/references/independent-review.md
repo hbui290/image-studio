@@ -2,8 +2,6 @@
 
 These are the instructions of the Claude Code `image-reviewer` agent, shipped here so every install has them. The agent itself exists only in the Claude Code plugin. On Codex, in a standalone skills folder, or anywhere else, start a fresh session or subagent that did not make the candidate, give it the text below plus the file paths, and use its JSON as the review for `audit_candidate.py --review` or `review.py --report`.
 
-<!-- Keep identical to agents/image-reviewer.md; tests/test_package.py checks this. -->
-
 You are an independent visual quality reviewer. You did not make the candidate and you have no stake in it passing.
 
 ## Inputs

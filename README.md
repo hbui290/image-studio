@@ -21,7 +21,7 @@ A plugin of ten skills for Claude Code and Codex, plus a reviewer agent in the C
 
 The `image-reviewer` agent (Claude Code plugin) grades a candidate independently, so the editing agent does not grade its own work. Other hosts get the same instructions in `image-verify/references/independent-review.md` for a fresh reviewer session.
 
-Example: a soft 1024×576 anime tavern hero went through `image-enhance` to 3840×2160. `image-repair` then fixed melted props, removed one figure, and redrew two animal companions, one masked region per round, with a pixel compare confirming that everything outside each mask was unchanged. The full case, including the rejected attempts, is in [examples/image-repair/tavern-hero-case.md](examples/image-repair/tavern-hero-case.md).
+Example: a soft 1672×941 anime tavern hero was repainted to match approved character and pet sheets, upscaled to 3840×2160, and then repaired one masked region per round (props, stairs, a removed figure), with a pixel compare confirming that everything outside each mask was unchanged. Before/after images, crops, and the rejected attempts are in [examples/image-repair/tavern-hero-case.md](examples/image-repair/tavern-hero-case.md).
 
 ## Install
 
@@ -44,7 +44,7 @@ Update or remove:
 ```bash
 claude plugin marketplace update image-studio && claude plugin update image-studio@image-studio
 claude plugin uninstall image-studio@image-studio
-codex plugin marketplace upgrade image-studio
+codex plugin marketplace upgrade image-studio && codex plugin add image-studio@image-studio
 codex plugin remove image-studio@image-studio
 git pull && python3 scripts/install.py --to <your-skills-directory> --replace   # skills-folder install
 ```
@@ -62,7 +62,7 @@ Install only what the job needs:
 | Sharpen or upscale a whole image | An AI upscaler: [Upscayl](https://github.com/upscayl/upscayl) (ships `upscayl-bin` and models) or [Real-ESRGAN-ncnn-vulkan](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan) |
 | Redraw a missing detail | An image generator or editor available to your agent, plus ImageMagick |
 | Background removal | Optional: [rembg](https://github.com/danielgatis/rembg) (`isnet-anime` for illustrations) |
-| Check results | Python 3.9+ with [Pillow](https://pypi.org/project/pillow/); [jsonschema](https://pypi.org/project/jsonschema/) too for `image-loop`'s reviewer and spec validation. Install both with `python3 -m pip install pillow jsonschema`, or prefix a command with `uv run --with pillow --with jsonschema` |
+| Check results | Python 3.9+ with [Pillow](https://pypi.org/project/pillow/); [jsonschema](https://pypi.org/project/jsonschema/) too for `image-loop`'s reviewer and spec validation. Prefix a command with `uv run --with pillow --with jsonschema`, or `pip install pillow jsonschema` into a virtual environment |
 | Many objects to select automatically | Optional: [SAM 3](https://github.com/facebookresearch/sam3) through [Transformers](https://huggingface.co/docs/transformers/model_doc/sam3), or rembg's `sam` model |
 | Automated vision review through Codex | Optional: [Codex CLI](https://github.com/openai/codex) and a vision model your account can run |
 
@@ -88,7 +88,7 @@ Without `uv`, create a virtual environment and `pip install pillow jsonschema` i
 
 - **Skills do not appear:** start a new session; remove older copies of the same skills (another install method, or an old `image-processing` skill).
 - **Wrong skill name:** plugin installs use `image-studio:<skill>`; skills-folder installs use the bare name.
-- **`stop_provider` from `review.py`:** the Codex model could not run (not installed, no vision support, or not available to your account). Use the `image-reviewer` agent or `--report` with a hand-written review instead.
+- **`stop_provider` from `review.py`:** the Codex reviewer could not run or finish (Codex not installed or not signed in, the model has no vision support or is not available to your account, or the review took longer than `--timeout`, 180 s by default). Use the `image-reviewer` agent or `--report` with a hand-written review instead.
 - **No upscaler found:** `image-enhance` stops and says so rather than passing off a sharpen filter; install one from the Tools table.
 
 ## Limits

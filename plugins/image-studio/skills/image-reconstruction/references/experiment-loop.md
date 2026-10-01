@@ -14,7 +14,7 @@ Keep different questions in different blocks:
 | Does mapping help reconstruction? | Narrative description versus a prompt compiled from named objects, bounds and relations. | Same source, same target requirements and available reference inputs. Report any extra information the map introduces. |
 | Which reference combination helps? | No reference; identity only; layout only; identity plus layout, with roles specified. | Rendering brief, required scene and available settings. Choose a bounded subset when the full combination matrix is expensive. |
 | Is one change at a time better? | Two compatible changes in one edit versus the same changes sequentially. | Same clean starting image and final criteria. Report the different call counts and accumulated drift; do not attribute a second call's benefit to wording. |
-| What changes with a model version? | Same task and inputs through verified, identified model endpoints or UI modes. | Settings where they are truly supported by both models. If the backend is unexposed, report a tool comparison, not a proven GPT Image 2.5 advantage. |
+| What changes with a model version? | Same task and inputs through verified, identified model endpoints or UI modes. | Settings where they are truly supported by both models. If the backend is unexposed, report a tool comparison, not a proven advantage of the host image generator. |
 
 One-element and one-property edits are different. “Recolor the sofa and preserve fabric” changes one property; “replace the sofa” changes several. A moved object may require a moved shadow. Compatible coupled changes can work together, while independent uncertain changes are easier to diagnose separately. Test the actual claim instead of making “always one at a time” a slogan.
 

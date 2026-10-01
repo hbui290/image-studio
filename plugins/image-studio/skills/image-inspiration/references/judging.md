@@ -52,4 +52,21 @@ python3 <skills>/image-inspiration/scripts/advance.py state.json --out r1/decisi
 
 Use the current round's folder in `--out` (`r2/decision.json` for round 2): the script never overwrites an existing file and exits 2 with `File exists`. The gate stops batch mode without ever returning `iterate`, blocks ineligible parents and incomplete rankings, waits for human/hybrid input, respects image/round caps, and stops after two no-improvement rounds. For `iterate`, generate at most `remaining_images` and the configured batch size, whichever is smaller. Keep liked axes fixed and change one or two named axes; use `parent_id` and preserve the incumbent until its replacement passes checks and wins the comparison. Save the returned no-improvement count only once per round. New images need new IDs and a fresh judgment.
 
+### Actions
+
+`decision.json` always has `action` and `eligible` (the IDs with `checks: pass`). Exit 0 means one of these actions was written; exit 2 means invalid state or an existing `--out` file, and nothing was written.
+
+| Action | Meaning | Next step |
+| --- | --- | --- |
+| `stop_human` | The person asked to stop (`by: human`, `stop: true`). | Stop. Deliver the incumbent or the person's choice. |
+| `stop_judge` | An accepted judgment set `stop: true` (an LLM judge in `llm` mode). | Stop and report the judge's reason. |
+| `stop_no_eligible` | No candidate has `checks: pass`. | Stop. Report the check failures; revise the brief or start a new batch only with the user's approval. |
+| `awaiting_human` | `judge` is `human` or `hybrid` and no human judgment is saved yet. | Show the images and check results, ask the person, save their judgment, and run the helper again. |
+| `awaiting_llm` | `judge` is `llm` and `judgment` is null. | Run the independent LLM judge, save its judgment, and run the helper again. |
+| `complete_batch` | Batch mode: `winner_id` is chosen. | Deliver `winner_id`. Batch mode never iterates. |
+| `stop_budget` | `rounds_completed` reached `max_rounds` or `images_used` reached `max_images`. | Deliver `winner_id`. Do not raise the caps without the user's approval. |
+| `stop_uncertain_comparison` | After round 1, `improved` is null, so improvement over the incumbent is not established. `winner_id` is the incumbent; `ranked_first` is the judge's favourite. | Deliver the incumbent, or ask the person to compare it with `ranked_first`. |
+| `stop_no_improvement` | Two rounds in a row without improvement. | Deliver `winner_id` (the incumbent). |
+| `iterate` | Loop mode with budget left. Returns `parent_id`, `no_improvement_rounds`, `remaining_images`, and `remaining_rounds`. | Generate the next round from `parent_id`, save `no_improvement_rounds` in `state.json`, and set `incumbent_id` to the winner. |
+
 The helper does not invoke a model, establish evidence authenticity, schedule future work, or generate images. The host agent performs those actions in the active task, observing the returned gate and the host's permissions. A pending human choice is a pause, never a background continuation timer.

@@ -19,5 +19,8 @@ tests/test_bridge.py, tests/test_package.py, tests/test_regressions.py, tests/de
 image-verify/references/decisions.md and independent-review.md.
 
 New in 2.2.0: the image-enhance skill (SKILL.md, scripts/compare_display.py,
-references/recipes.md), tests/test_enhance.py, tests/test_fix_*.py,
-tests/test_visual_map.py, examples/image-repair/.
+references/recipes.md), tests/test_enhance.py, tests/test_fix_*.py, examples/image-repair/.
+
+New in 2.2.1: tests/test_visual_map.py, tests/test_hooks.py, the repository's
+CLAUDE.md and .claude/ hooks, and the anonymized tavern before/after images in
+examples/image-repair/tavern-hero/.

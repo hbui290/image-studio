@@ -7,6 +7,20 @@ description: Make a whole image look sharper, cleaner, or larger - blurry, soft,
 
 The upscaler and `magick` do the work; this skill picks the recipe and proves the gain. A bigger file is not a better image: accept only what `compare_display.py` and a look at `before-after.png` confirm.
 
+## When to use a sibling skill
+
+- One wrong object, a bad face, or a local defect: [image-repair](../image-repair/SKILL.md). Upscalers sharpen what is there; they do not invent correct detail.
+- The image looks soft only on a web page, or you do not yet know why it looks bad: [image-inspect](../image-inspect/SKILL.md) first.
+- A new image or a generate-and-review cycle: [image-loop](../image-loop/SKILL.md).
+
+## Tools
+
+- Required: [ImageMagick](https://imagemagick.org) (`magick`), and one upscaler: [Upscayl](https://github.com/upscayl/upscayl) (`upscayl-bin`) or [Real-ESRGAN-ncnn-vulkan](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan/releases) (`realesrgan-ncnn-vulkan`), with its model files.
+- Optional: [rembg](https://github.com/danielgatis/rembg) for [background removal](references/recipes.md#background-removal).
+- Python 3.9+ with Pillow for `compare_display.py`: `uv run --with pillow python3 ...` works without installing; otherwise `python3 -m pip install pillow`. `<skills>` is the folder that holds the skill folders.
+
+## Steps
+
 1. **Diagnose first** with [image-inspect](../image-inspect/SKILL.md) when the image sits on a page: CSS scaling, dark overlays, and heavy compression can make a good file look soft. If the served file is soft but the master is sharp, re-export from the master instead.
 2. **Find the tools** (never assume, never skip one that is present):
    ```bash
@@ -17,20 +31,39 @@ The upscaler and `magick` do the work; this skill picks the recipe and proves th
 3. **Pick the recipe by image type** from [recipes.md](references/recipes.md). Default for anime/2D art under about 2000 px wide: `remacri-4x` at 4x, or `realesr-animevideov3-x2` at 2x when speed matters. Never upscale small text or UI; never repeat a pass on an already enhanced image.
 4. **Trial on a crop** of the softest area (faces, small props) with two or three models, then run the winner on the whole image and resize to the delivery size:
    ```bash
-   BIN=upscayl-bin      # the binary found in step 2 (full path for the macOS app), or realesrgan-ncnn-vulkan
-   MODELS=models        # folder holding the model's .param and .bin files
-   "$BIN" -i src.png -o up.png -s 4 -m "$MODELS" -n remacri-4x    # or: -s 2 -n realesr-animevideov3-x2
+   BIN=upscayl-bin              # the binary found in step 2 (full path for the macOS app), or realesrgan-ncnn-vulkan
+   MODELS=/path/to/models       # one folder holding every model's .param and .bin; see "Model folders" in recipes.md
+   model=remacri-4x             # or realesr-animevideov3-x2 with -s 2
+   test -f "$MODELS/$model.param" || echo "missing $model in $MODELS"
+   "$BIN" -i src.png -o up.png -s 4 -m "$MODELS" -n "$model"
+   magick up.png -format '%[fx:maxima]' info:     # must print a number above 0; 0 means an all-black image
    magick up.png -filter Lanczos -resize 3840x2160 -depth 8 enhanced.png
    ```
-   The fast `realesr-animevideov3-x2` recipe adds `-unsharp 0x0.55+0.5+0.015` after the resize. `-depth 8` keeps a 16-bit PNG from being produced.
+   A missing model does not stop the upscaler: it prints `fopen ... failed`, writes an all-black image, and still exits 0. The Upscayl app's own models folder holds only the seven Upscayl models; the `realesr-*` and `realesrgan-*` models must be copied in from the Real-ESRGAN-ncnn-vulkan release ([model folders](references/recipes.md#model-folders)). The fast `realesr-animevideov3-x2` recipe adds `-unsharp 0x0.55+0.5+0.015` after the resize. `-depth 8` keeps a 16-bit PNG from being produced.
 5. **Prove it** at the real display size, with 100% crops of the areas the user cares about:
    ```bash
    python3 <skills>/image-enhance/scripts/compare_display.py --source src.png --candidate enhanced.png \
      --out compare-1 --width 1920 --crop 1200,300,400,300
    ```
-   It writes `metrics.json`, `before-after.png`, and one `crop-N.png` per `--crop` into the new `--out` folder, and prints the same verdict as JSON. It exits 0 whenever the comparison ran, including when `visible_improvement` is false, so read the verdict, not the exit code. It exits 2 for bad input: a missing file, an existing `--out` folder, different aspect ratios, or a crop outside the source. It is not for transparent images: it drops alpha and compares only color, so flatten both files onto the delivery background first (`magick in.png -background white -alpha remove -alpha off flat.png`) and check the cutout edges separately.
+   `--width` is the display width in pixels (CSS width × device pixel ratio), 1 to 16384. It is not for transparent images: it drops alpha and compares only color, so flatten both files onto the delivery background first (`magick in.png -background white -alpha remove -alpha off flat.png`) and check the cutout edges separately.
    `visible_improvement: false` means stop and report what failed (invisible, not sharper, color shifted, or content moved). Show `before-after.png` and the crops to the user either way. Record rejected models in one line each.
-6. **If still soft where it matters** (faces, props with no real detail), the pixels do not exist: hand those regions to [image-repair](../image-repair/SKILL.md) with references. Upscalers sharpen what is there; they do not invent a correct face.
+6. **If still soft where it matters** (faces, props with no real detail), the pixels do not exist: hand those regions to [image-repair](../image-repair/SKILL.md) with references.
 7. **Deliver** with the [export](references/recipes.md#web-export) and [cutout](references/recipes.md#background-removal) recipes. A brightness or color grade is a separate, requested change, not part of sharpening.
 
-Run scripts with `python3` 3.9+ and Pillow (`uv run --with pillow python3 ...` works without installing; otherwise `python3 -m pip install pillow`). `<skills>` is the folder that holds the skill folders.
+## Outputs
+
+`compare_display.py` creates the `--out` folder and writes:
+
+- `metrics.json`: `visible_improvement`, `failures`, `metrics`, and `limits`. The same JSON is printed to stdout.
+- `before-after.png`: source left, candidate right, both resized to `--width`.
+- `crop-N.png`: one 100% crop pair per `--crop`, numbered from 1.
+
+Exit codes: 0 whenever the comparison ran, including when `visible_improvement` is false, so read the verdict, not the exit code. 2 for bad input: a missing or unreadable file, an existing `--out` folder, a `--width` outside 1 to 16384, different aspect ratios, or a crop outside the source.
+
+## Stop conditions
+
+- No upscaler is installed: say so and offer setup; do not substitute a sharpen filter.
+- A model file is missing from `$MODELS`, or the output is all black (`%[fx:maxima]` prints 0): do not use that output. Fix the models folder, or retry with `-t 32` or another model.
+- `visible_improvement` is false for every model tried: stop and report the failures with `before-after.png`.
+- The image is small text, UI, or a logo: do not use an AI upscaler.
+- Remaining softness is missing detail, not blur: hand those regions to image-repair.

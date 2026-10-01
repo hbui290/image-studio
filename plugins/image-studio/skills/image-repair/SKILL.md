@@ -10,6 +10,7 @@ This skill fixes one region of an accepted image and keeps every other pixel. Us
 - The whole image is soft rather than one object wrong: [image-enhance](../image-enhance/SKILL.md) first; it tests upscalers and proves the gain at display size.
 - The target or the defect is not yet clear: [image-inspect](../image-inspect/SKILL.md) finds it and numbers the objects.
 - The image is new, or the whole image must be regenerated with automated review rounds: [image-loop](../image-loop/SKILL.md).
+- The user still has to choose what to change: [image-edit-map](../image-edit-map/SKILL.md) plans the edit with a numbered map. This skill then executes the masked local fix, and the [image-verify](../image-verify/SKILL.md) audit proves the rest of the image is unchanged.
 
 Tools: ImageMagick 7 `magick` for crops, masks, and composites; an image generator that accepts a crop and reference images, when new pixels are needed. Optional segmenters, upscalers, and face models are not prerequisites; check an unfamiliar machine with [tool-readiness.md](references/tool-readiness.md).
 
@@ -25,7 +26,7 @@ Tools: ImageMagick 7 `magick` for crops, masks, and composites; an image generat
      --contract contract.json --source source.png --candidate review.png \
      --mask final-acceptance-mask.png --review review.json --out round-0
    ```
-   It needs Python 3 with Pillow: prefix the command with `uv run --with pillow`, or install it with `python3 -m pip install pillow`. `<skills>` is the folder that holds the skill folders. Read `decision.json` and follow [decisions.md](../image-verify/references/decisions.md).
+   It needs Python 3.9+ with Pillow: run it as `uv run --with pillow python3 <skills>/image-verify/scripts/audit_candidate.py ...`, or install Pillow once with `python3 -m pip install pillow` and use `python3` directly. `<skills>` is the folder that holds the skill folders. Read `decision.json` and follow [decisions.md](../image-verify/references/decisions.md).
 6. **Repeat or stop.** Use at most three repair rounds and the stop rules in [decisions.md](../image-verify/references/decisions.md). When two candidates repeat the same failure, change the approach (crop, reference, mask, or a deterministic edit) instead of rewording the prompt.
 
 ## Outputs

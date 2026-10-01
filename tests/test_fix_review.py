@@ -249,6 +249,26 @@ class ReviewFixTests(unittest.TestCase):
         self.assertEqual(self.decision()["action"], "reject_technical")
         self.assertNotIn("reviewer usage", self.decision()["reason"])
 
+    # 14. the clean source must be a readable still image
+    def test_unreadable_or_animated_source_is_refused(self):
+        (self.dir / "text.png").write_text("not an image")
+        frames = [Image.new("RGB", (8, 8), c) for c in ("white", "black")]
+        frames[0].save(self.dir / "anim.gif", save_all=True, append_images=frames[1:], duration=50, loop=0)
+        for name in ("text.png", "anim.gif"):
+            result = self.review("--report", self.put("r.json", report()), "--source", self.dir / name, out="s-" + name)
+            self.assertClean(result)
+            self.assertIn("source", result.stderr.lower())
+            self.assertFalse((self.dir / ("s-" + name)).exists())
+
+    # 15. non-object JSON lines in the reviewer's stdout are ignored
+    def test_non_object_stdout_lines_do_not_crash(self):
+        good = self.put("good.json", report())
+        env = self.stub_env(STUB_STDOUT='42\n"x"\n[1]\n', STUB_REPORT_FILE=str(good))
+        result = self.review("--model", "stub", env=env)
+        self.assertClean(result, 0)
+        self.assertEqual(self.decision()["action"], "accepted_by_checks")
+        self.assertTrue((self.dir / "out/run.json").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

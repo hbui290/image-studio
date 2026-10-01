@@ -382,6 +382,15 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in self.dest.iterdir()), sorted(self.installer.NAMES))
         self.assertEqual([p.name for p in self.dest.parent.iterdir()], ["skills"])  # staging removed
 
+    def test_cli_input_errors_exit_2(self):
+        script = str(ROOT / "scripts/install.py")
+        self.installer.install(SKILLS, self.dest)
+        for args in (["--to", str(self.dest)], ["--to", ""], ["--to", str(SKILLS)]):
+            run = subprocess.run([sys.executable, script, *args], capture_output=True, text=True, cwd=self.tmp.name)
+            self.assertEqual(run.returncode, 2, (args, run.stdout, run.stderr))
+            self.assertNotIn("Traceback", run.stderr)
+        self.assertEqual(sorted(p.name for p in Path(self.tmp.name).iterdir()), ["skills"])  # nothing installed into cwd
+
     def test_refuses_destinations_inside_the_repository(self):
         for inside in (ROOT / "plugins/image-studio", ROOT / "new-folder", SKILLS):
             with self.assertRaises(ValueError):

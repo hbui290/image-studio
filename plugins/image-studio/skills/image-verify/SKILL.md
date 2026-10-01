@@ -46,4 +46,4 @@ Omit `--mask` when the contract does not set `pixel_lock_outside_mask`, and omit
 
 ## Running the scripts
 
-In commands, `<skills>` means the folder that holds the Image Studio skill folders, which is this skill's parent folder (the host shows the skill's path when it loads); run commands from your working folder. `audit_candidate.py` needs Python 3 with Pillow (`python3 -m pip install pillow`); `contract_to_brief.py` needs only Python 3. Prefixing a command with `uv run --with pillow` also works.
+In commands, `<skills>` means the folder that holds the Image Studio skill folders, which is this skill's parent folder (the host shows the skill's path when it loads); run commands from your working folder. `audit_candidate.py` needs Python 3.9+ with Pillow: run it as `uv run --with pillow python3 <skills>/image-verify/scripts/audit_candidate.py ...`, or install Pillow once with `python3 -m pip install pillow` and use `python3` directly. `contract_to_brief.py` needs only Python 3.9+.

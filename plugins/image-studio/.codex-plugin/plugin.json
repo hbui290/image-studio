@@ -1,6 +1,6 @@
 {
   "name": "image-studio",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "Create, enhance, edit, inspect, repair, and verify images with AI upscaling, numbered maps, reference mixing, bounded review loops, and pixel audits that prove the change is visible and the rest untouched.",
   "author": {
     "name": "hbui290",

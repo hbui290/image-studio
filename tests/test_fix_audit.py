@@ -150,6 +150,13 @@ class AuditFixes(unittest.TestCase):
             self.assertIn(hint, run.stderr)
             self.assertNotIn("Traceback", run.stderr)
 
+    def test_criteria_review_summary_must_be_a_string(self):
+        self.images(), self.contract()
+        self.write("review.json", {"criteria": [{"id": "C1", "status": "pass", "evidence": "e", "suggested_fix": ""}], "summary": 123})
+        run = self.audit()
+        self.assertEqual(run.returncode, 2, run.stderr)
+        self.assertIn("summary", run.stderr)
+
     def test_deep_json_is_a_clean_error(self):
         self.images(), self.review()
         self.write("contract.json", "[" * 100000 + "]" * 100000)

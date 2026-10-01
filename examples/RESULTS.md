@@ -2,7 +2,7 @@
 
 Recorded 2026-09-09. These are two controlled revision demonstrations, an annotation demonstration, and a reverse-engineering check. They are not benchmark measurements.
 
-The recorded JSON files come from an earlier version of the scripts. Current scripts add fields: a `repair` `decision.json` gains `start_from`, and `run.json` gains `brief_sha256` (and `report_source` when `review.py --report` is used). Replaying the recorded reports through the current `review.py --report` gives the same actions, failed IDs, and repair prompts. Read the files as records of that run, not as the exact output format of the current version.
+The recorded JSON files come from an earlier version of the scripts. Current scripts add fields: a `repair` `decision.json` gains `start_from`, an `accepted_by_checks` decision gains `"ids": []`, and `run.json` gains `brief_sha256` (and `report_source` when `review.py --report` is used). Replaying the recorded reports through the current `review.py --report` gives the same actions, failed IDs, and repair prompts. Read the files as records of that run, not as the exact output format of the current version.
 
 ## Revision loop
 

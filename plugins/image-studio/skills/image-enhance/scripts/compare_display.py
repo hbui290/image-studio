@@ -105,13 +105,13 @@ def main():
     parser.add_argument("--source", required=True, type=Path)
     parser.add_argument("--candidate", required=True, type=Path)
     parser.add_argument("--out", required=True, type=Path)
-    parser.add_argument("--width", type=int, default=1920, help="Display width in CSS pixels x device pixel ratio")
+    parser.add_argument("--width", type=int, default=1920, help="Display width in CSS pixels x device pixel ratio (1-16384)")
     parser.add_argument("--crop", type=box_arg, action="append", default=[], help="x,y,width,height in source pixels")
     args = parser.parse_args()
     if args.out.exists():
         parser.error("output folder already exists")
-    if args.width <= 0:
-        parser.error("--width must be positive")
+    if not 0 < args.width <= 16384:
+        parser.error("--width must be between 1 and 16384")
     try:
         from PIL import Image, ImageOps
     except ImportError:

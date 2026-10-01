@@ -21,16 +21,29 @@ Upscalers amplify JPEG noise into fake texture (`ultrasharp-4x` worst). If the s
 
 `upscayl-bin` and `realesrgan-ncnn-vulkan` both accept the flags used here (`-i -o -s -m -n -t -x -g`). `upscayl-bin` has a few more (`-z`, `-r`, `-w`, `-c`) that these recipes do not need.
 
+### Model folders
+
+Model names are the `.param`/`.bin` file names without extension. The upscaler loads only from the folder given to `-m`, and the models come from two places:
+
+| Models | Where they come from |
+| --- | --- |
+| `remacri-4x`, `ultrasharp-4x`, `digital-art-4x`, `high-fidelity-4x`, `ultramix-balanced-4x`, `upscayl-standard-4x`, `upscayl-lite-4x` | Upscayl's app models folder (macOS: `/Applications/Upscayl.app/Contents/Resources/models`) |
+| `realesr-animevideov3-x2` (also `-x3`, `-x4`), `realesrgan-x4plus`, `realesrgan-x4plus-anime` | The [Real-ESRGAN-ncnn-vulkan release](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan/releases) `models` folder. They are not in Upscayl's folder |
+
+Copy both sets into one folder of your own and point `MODELS` at it; then every recipe works with either binary. If a model is missing, `upscayl-bin` prints `fopen ... failed`, writes an all-black image, and still exits 0, so check before and after each run:
+
 ```bash
 BIN=/Applications/Upscayl.app/Contents/Resources/bin/upscayl-bin   # macOS app; or upscayl-bin / realesrgan-ncnn-vulkan on PATH
-MODELS=/Applications/Upscayl.app/Contents/Resources/models        # or your own folder holding *.param/*.bin
-"$BIN" -i in.png -o out.png -s 4 -m "$MODELS" -n remacri-4x
-"$BIN" -i in.png -o out.png -s 2 -m "$MODELS" -n realesr-animevideov3-x2
+MODELS=/path/to/models       # your folder holding both model sets (*.param and *.bin)
+model=remacri-4x
+test -f "$MODELS/$model.param" || echo "missing $model in $MODELS"
+"$BIN" -i in.png -o out.png -s 4 -m "$MODELS" -n "$model"      # realesr-animevideov3-x2 uses -s 2
+magick out.png -format '%[fx:maxima]' info:                  # must print a number above 0
 ```
 
-Model names are the `.param`/`.bin` file names without extension. Upscayl ships `remacri-4x`, `ultrasharp-4x`, `digital-art-4x`, `high-fidelity-4x`, `ultramix-balanced-4x`, `upscayl-standard-4x`, and `upscayl-lite-4x`. `realesr-animevideov3-x2` (also `-x3`, `-x4`), `realesrgan-x4plus`, and `realesrgan-x4plus-anime` come with the [Real-ESRGAN-ncnn-vulkan release](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan/releases); copy their files into one models folder to use every model with either binary. Useful flags: `-t 256` (smaller tiles when memory runs out, or to avoid visible tile seams), `-x` (slower test-time augmentation, fewer seams), `-g 0` (pick the GPU). A 3840×2160 input at 4x took 160 s and about 1 GB of memory; resize from the result immediately and do not keep the 15360-wide PNG.
+Useful flags: `-t 256` (smaller tiles when memory runs out, or to avoid visible tile seams), `-x` (slower test-time augmentation, fewer seams), `-g 0` (pick the GPU). A 3840×2160 input at 4x took 160 s and about 1 GB of memory; resize from the result immediately and do not keep the 15360-wide PNG.
 
-Some GPUs return an all-black image; check the output before using it, then retry with `-t 32` or another model. Compare flat areas after upscaling: some models shift color slightly, which `compare_display.py` reports.
+Some GPUs also return an all-black image with every model present; retry with `-t 32` or another model. Compare flat areas after upscaling: some models shift color slightly, which `compare_display.py` reports.
 
 Trial on a crop first:
 
@@ -38,7 +51,9 @@ Trial on a crop first:
 magick src.png -crop 500x400+1100+250 +repage crop.png
 for pair in remacri-4x:4 ultrasharp-4x:4 realesr-animevideov3-x2:2; do   # model:scale
   model=${pair%:*} scale=${pair#*:}
+  test -f "$MODELS/$model.param" || { echo "missing $model in $MODELS"; continue; }
   "$BIN" -i crop.png -o "crop-$model.png" -s "$scale" -m "$MODELS" -n "$model"
+  echo "$model maxima: $(magick "crop-$model.png" -format '%[fx:maxima]' info:)"   # 0 = all black, discard
 done
 python3 <skills>/image-enhance/scripts/compare_display.py --source crop.png --candidate crop-remacri-4x.png --out c-remacri --width 1000
 ```
@@ -62,6 +77,8 @@ On the test anime image: plain resize and a one-pixel edit failed as invisible, 
 
 ## Background removal
 
+Uses [rembg](https://github.com/danielgatis/rembg) (optional).
+
 ```bash
 rembg i -m isnet-anime in.png cutout.png        # anime / illustration
 rembg i -m birefnet-general in.png cutout.png   # photos and products
@@ -77,13 +94,15 @@ The first run downloads the model. Inspect both backdrops for halos, holes, and 
 Export from the lossless master, never from a previous WebP:
 
 ```bash
+mw=$(magick identify -format '%w' master.png)
 for w in 3840 2560 1920 1280 768; do
+  [ "$w" -gt "$mw" ] && continue   # skip widths above the master
   magick master.png -resize "${w}x>" -strip -quality 90 -define webp:method=6 "hero-$w.webp"
   magick master.png -resize "${w}x>" -strip -quality 60 "hero-$w.avif"
 done
 ```
 
-`>` resizes only when the master is wider than `w`, so a narrow master is never upscaled; skip widths above the master's width instead of shipping same-size copies.
+The width check skips any size wider than the master, so no same-size copy ships under a larger name; `>` also stops ImageMagick from upscaling. Remove skipped widths from the `srcset` below.
 
 ```html
 <picture>

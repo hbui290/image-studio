@@ -132,6 +132,8 @@ def validate_review(review, checks):
         items = review["results"]
     if "reviewer" in review:
         nonempty(review["reviewer"], "reviewer")
+    if "summary" in review and not isinstance(review["summary"], str):
+        raise ValueError("review.summary must be a string")  # review.py's schema requires the same
     if not isinstance(items, list):
         raise ValueError("review results must be a list")
     results = {}

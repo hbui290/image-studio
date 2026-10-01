@@ -35,17 +35,3 @@ A mask constrains a tool's edit area only to the extent supported by that tool. 
 ## Delivery
 
 Show the clean result and link/save the file when supported. Summarize what changed and what was verified. Mention only material failures or unperformed checks. Keep the map, source, edit versions, and JSON separately named. Provide updated IDs/coordinates if the user plans to continue editing.
-
-## Behavioral checks when maintaining this skill
-
-Exercise realistic requests without pretending they were live image tests:
-
-- A beginner asks to “make it better”: ask useful questions and create a numbered map before subjective changes.
-- The user says “font only, keep words and right side”: preserve content and region; do not grade the whole image.
-- A dense diagram: group overview and detail maps, stable IDs, no invented topology.
-- Two references: typography from one, layout from another; no accidental content/branding transfer.
-- A JSON-only reverse-engineer request: valid JSON, unknown font family, inferred rather than actual layers, no image-generation side effects.
-- “Make #3 warmer” on a locked product: resolve whether this means product color, photo grading, or lighting.
-- “Just upscale, no questions or redesign”: obey the explicit brief where the target is clear; ask only if incompatible requirements prevent execution.
-- No image tool: deliver a prepared prompt and manifest, explicitly distinguish these from a rendered visual map.
-- A stale map or deleted ID: resolve against the correct version; never apply the old coordinates blindly.

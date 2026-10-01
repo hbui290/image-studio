@@ -73,13 +73,15 @@ def install(source_root, destination, replace=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--to', required=True, type=Path, help='E.g. ~/.agents/skills (Codex) or ~/.claude/skills (Claude Code)')
+    parser.add_argument('--to', required=True, help='E.g. ~/.agents/skills (Codex) or ~/.claude/skills (Claude Code)')
     parser.add_argument('--replace', action='store_true', help='Replace existing skill folders of the same names')
     args = parser.parse_args()
+    if not args.to.strip():
+        parser.error('--to needs a skills directory, for example ~/.claude/skills')
     try:
-        dest = install(SKILLS, args.to, args.replace)
+        dest = install(SKILLS, Path(args.to), args.replace)
     except (OSError, ValueError) as exc:
-        parser.exit(1, str(exc)+'\n')
+        parser.exit(2, str(exc)+'\n')
     print('Installed '+', '.join(NAMES)+' into '+str(dest))
 
 
