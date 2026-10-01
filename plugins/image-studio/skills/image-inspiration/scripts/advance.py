@@ -18,7 +18,10 @@ def load_strict(path):
         keys = [key for key, _ in pairs]
         require(len(keys) == len(set(keys)), 'Duplicate JSON keys are not allowed.')
         return dict(pairs)
-    return json.loads(path.read_text(encoding='utf-8'), parse_constant=reject_constant, object_pairs_hook=unique_keys)
+    try:
+        return json.loads(path.read_text(encoding='utf-8-sig'), parse_constant=reject_constant, object_pairs_hook=unique_keys)
+    except RecursionError:
+        raise ValueError('JSON nesting is too deep.')
 
 
 

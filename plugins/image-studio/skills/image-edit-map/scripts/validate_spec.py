@@ -88,8 +88,11 @@ def main():
             return dict(pairs)
         if args.image_id and not args.image:
             raise ValueError('--image-id needs --image')
-        data = json.loads(args.spec.read_text(encoding='utf-8'), parse_constant=reject_constant, object_pairs_hook=unique_keys)
-        schema = json.loads(schema_path.read_text())
+        try:
+            data = json.loads(args.spec.read_text(encoding='utf-8-sig'), parse_constant=reject_constant, object_pairs_hook=unique_keys)
+        except RecursionError:
+            raise ValueError('JSON nesting is too deep')
+        schema = json.loads(schema_path.read_text(encoding='utf-8-sig'))
         errors = validate(data, schema)
         if args.image and not errors:
             from PIL import Image, ImageOps
@@ -97,12 +100,15 @@ def main():
             if len(selected) != 1:
                 errors.append('Select exactly one image with --image-id for metadata verification.')
             else:
-                with Image.open(args.image) as opened:
-                    im = ImageOps.exif_transpose(opened)  # compare displayed dimensions
-                    for key, actual in [('width_px', im.width), ('height_px', im.height)]:
-                        claim = selected[0]['metadata'].get(key, {}).get('value')
-                        if claim is not None and (type(claim) is not int or claim != actual):
-                            errors.append(f'{key}: extracted value {claim} differs from decoded file {actual}')
+                try:
+                    with Image.open(args.image) as opened:
+                        im = ImageOps.exif_transpose(opened)  # compare displayed dimensions
+                        for key, actual in [('width_px', im.width), ('height_px', im.height)]:
+                            claim = selected[0]['metadata'].get(key, {}).get('value')
+                            if claim is not None and (type(claim) is not int or claim != actual):
+                                errors.append(f'{key}: extracted value {claim} differs from decoded file {actual}')
+                except Image.DecompressionBombError as exc:
+                    raise ValueError(f'Image is too large to verify safely: {exc}')
     except ImportError:
         print('Missing dependency: install jsonschema, and Pillow when using --image.', file=sys.stderr)
         return 2

@@ -6,7 +6,7 @@ Image Studio combines two projects, released here under the MIT License:
   scripts/install.py, tests/test_loop.py, tests/test_inspiration.py.
   The prompt-lab collection stays in that repository.
 - hbui290/image-processing-skill (v1.4.1, commit a9f1a2f, plus audit fixes d5aea6a;
-  repository retired after this merge):
+  superseded by this repository):
   image-inspect, image-create, image-repair, image-verify and their references,
   audit_candidate.py, tests/test_audit_candidate.py. Its standalone SKILL.md now
   lives in image-inspect/references/diagnosis.md, image-verify/references/acceptance.md,

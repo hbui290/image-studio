@@ -20,7 +20,7 @@
         "notes": {"$ref": "#/$defs/strings"}
       }
     },
-    "document_id": {"type": "string", "minLength": 1},
+    "document_id": {"type": "string", "minLength": 1, "pattern": "\\S"},
     "revision": {"type": "integer", "minimum": 1},
     "coordinate_system": {"const": "normalized_top_left_xywh"},
     "provenance": {
@@ -33,7 +33,7 @@
       "required": ["task", "purpose", "exactness", "exactness_note", "output"],
       "properties": {
         "task": {"enum": ["reconstruct", "edit", "remix", "create"]},
-        "purpose": {"type": "string", "minLength": 1},
+        "purpose": {"type": "string", "minLength": 1, "pattern": "\\S"},
         "exactness": {"enum": ["semantic", "perceptual", "geometry", "pixel"]},
         "exactness_note": {"type": "string"},
         "output": {
@@ -53,7 +53,7 @@
       "required": ["status", "granularity", "excluded_regions", "notes"],
       "properties": {
         "status": {"enum": ["complete_visible_inventory", "partial"]},
-        "granularity": {"type": "string", "minLength": 1},
+        "granularity": {"type": "string", "minLength": 1, "pattern": "\\S"},
         "excluded_regions": {"type": "array", "items": {"$ref": "#/$defs/excluded_region"}},
         "notes": {"$ref": "#/$defs/strings"}
       }
@@ -77,7 +77,7 @@
   },
   "$defs": {
     "strings": {"type": "array", "items": {"type": "string"}},
-    "ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "ids": {"type": "array", "items": {"type": "string", "minLength": 1, "pattern": "\\S"}, "uniqueItems": true},
     "bbox": {"type": ["array", "null"], "items": {"type": "number", "minimum": 0, "maximum": 1}, "minItems": 4, "maxItems": 4},
     "evidence": {
       "type": "object", "additionalProperties": false,
@@ -96,7 +96,7 @@
       "properties": {
         "id": {"type": "string", "pattern": "^[A-Z]+$"},
         "path": {"type": ["string", "null"]},
-        "version": {"type": "string", "minLength": 1},
+        "version": {"type": "string", "minLength": 1, "pattern": "\\S"},
         "width_px": {"type": ["integer", "null"], "minimum": 1},
         "height_px": {"type": ["integer", "null"], "minimum": 1},
         "dimensions_basis": {"enum": ["file_metadata", "user_supplied", "unknown"]},
@@ -112,7 +112,7 @@
       "properties": {
         "id": {"type": "string", "pattern": "^[A-Z]+-G[0-9]{2,}$"},
         "source_id": {"type": "string"}, "parent_id": {"type": ["string", "null"]},
-        "name": {"type": "string", "minLength": 1}, "bbox": {"$ref": "#/$defs/bbox"},
+        "name": {"type": "string", "minLength": 1, "pattern": "\\S"}, "bbox": {"$ref": "#/$defs/bbox"},
         "geometry_basis": {"enum": ["pixel_measurement", "visual_estimate", "user_supplied", "unknown"]},
         "note": {"type": "string"}
       }
@@ -123,7 +123,7 @@
       "properties": {
         "id": {"type": "string", "pattern": "^[A-Z]+-[0-9]{2,}$"},
         "source_id": {"type": "string"}, "parent_id": {"type": ["string", "null"]},
-        "name": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1, "pattern": "\\S"},
         "kind": {"enum": ["subject", "object", "text", "connector", "background", "negative_space", "effect", "repeated_detail"]},
         "bbox": {"$ref": "#/$defs/bbox"},
         "geometry_basis": {"enum": ["pixel_measurement", "visual_estimate", "user_supplied", "unknown"]},
@@ -163,7 +163,7 @@
       "type": "object", "additionalProperties": false,
       "required": ["id", "from_id", "to_id", "kind", "status", "confidence", "note"],
       "properties": {
-        "id": {"type": "string", "minLength": 1}, "from_id": {"type": "string"}, "to_id": {"type": "string"},
+        "id": {"type": "string", "minLength": 1, "pattern": "\\S"}, "from_id": {"type": "string"}, "to_id": {"type": "string"},
         "kind": {"enum": ["left_of", "right_of", "above", "below", "in_front_of", "behind", "contains", "overlaps", "touches", "points_to", "same_group", "other"]},
         "status": {"enum": ["observed", "inferred", "unknown"]},
         "confidence": {"enum": ["high", "medium", "low", "unknown"]}, "note": {"type": "string"}
@@ -183,39 +183,39 @@
       "type": "object", "additionalProperties": false,
       "required": ["id", "target_ids", "description", "origin"],
       "properties": {
-        "id": {"type": "string", "minLength": 1}, "target_ids": {"$ref": "#/$defs/ids"},
-        "description": {"type": "string", "minLength": 1}, "origin": {"enum": ["user", "reconstruction_brief"]}
+        "id": {"type": "string", "minLength": 1, "pattern": "\\S"}, "target_ids": {"$ref": "#/$defs/ids"},
+        "description": {"type": "string", "minLength": 1, "pattern": "\\S"}, "origin": {"enum": ["user", "reconstruction_brief"]}
       }
     },
     "unknown": {
       "type": "object", "additionalProperties": false,
       "required": ["target_id", "property", "reason", "resolution"],
       "properties": {
-        "target_id": {"type": "string"}, "property": {"type": "string"}, "reason": {"type": "string", "minLength": 1},
+        "target_id": {"type": "string"}, "property": {"type": "string"}, "reason": {"type": "string", "minLength": 1, "pattern": "\\S"},
         "resolution": {"enum": ["leave_unspecified", "ask_if_needed", "approximate_with_disclosure"]}
       }
     },
     "excluded_region": {
       "type": "object", "additionalProperties": false,
       "required": ["source_id", "bbox", "reason"],
-      "properties": {"source_id": {"type": "string"}, "bbox": {"$ref": "#/$defs/bbox"}, "reason": {"type": "string", "minLength": 1}}
+      "properties": {"source_id": {"type": "string"}, "bbox": {"$ref": "#/$defs/bbox"}, "reason": {"type": "string", "minLength": 1, "pattern": "\\S"}}
     },
     "hard_criterion": {
       "type": "object", "additionalProperties": false,
       "required": ["id", "description", "target_ids", "depends_on", "check"],
       "properties": {
-        "id": {"type": "string", "minLength": 1}, "description": {"type": "string", "minLength": 1},
+        "id": {"type": "string", "minLength": 1, "pattern": "\\S"}, "description": {"type": "string", "minLength": 1, "pattern": "\\S"},
         "target_ids": {"$ref": "#/$defs/ids"}, "depends_on": {"$ref": "#/$defs/ids"},
-        "check": {"type": "string", "minLength": 1}
+        "check": {"type": "string", "minLength": 1, "pattern": "\\S"}
       }
     },
     "soft_criterion": {
       "type": "object", "additionalProperties": false,
       "required": ["id", "description", "target_ids", "depends_on", "check", "weight"],
       "properties": {
-        "id": {"type": "string", "minLength": 1}, "description": {"type": "string", "minLength": 1},
+        "id": {"type": "string", "minLength": 1, "pattern": "\\S"}, "description": {"type": "string", "minLength": 1, "pattern": "\\S"},
         "target_ids": {"$ref": "#/$defs/ids"}, "depends_on": {"$ref": "#/$defs/ids"},
-        "check": {"type": "string", "minLength": 1}, "weight": {"type": "number", "exclusiveMinimum": 0}
+        "check": {"type": "string", "minLength": 1, "pattern": "\\S"}, "weight": {"type": "number", "exclusiveMinimum": 0}
       }
     }
   }

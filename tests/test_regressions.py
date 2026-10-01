@@ -360,7 +360,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in self.dest.iterdir()), sorted(self.installer.NAMES))
 
     def test_refuses_destinations_inside_the_repository(self):
-        for inside in (ROOT / "plugins/image-studio", ROOT / ".claude/skills", SKILLS):
+        for inside in (ROOT / "plugins/image-studio", ROOT / "new-folder", SKILLS):
             with self.assertRaises(ValueError):
                 self.installer.install(SKILLS, inside, replace=True)
 
@@ -440,7 +440,7 @@ class SecondAuditTests(Case):
         write_rgb48_png(self.dir / "c48.png", changed, width, height)
         _, decision, _ = self.audit(self.dir / "s48.png", self.dir / "c48.png", self.review(), self.mask)
         self.assertEqual(decision["action"], "reject_technical")
-        self.assertIn("16-bit-per-channel color PNG", " ".join(decision["issues"]))
+        self.assertIn("16 bits per color channel", " ".join(decision["issues"]))
 
     def test_colored_and_float_masks_are_editable_where_nonzero(self):
         for name, mask in (("rgb", Image.new("RGB", (100, 100), (0, 0, 0))), ("f", Image.new("F", (100, 100), 0.0))):

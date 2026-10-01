@@ -1,6 +1,0 @@
-interface:
-  display_name: "Image Reverse Engineer"
-  short_description: "Extract an image's design to JSON"
-  default_prompt: "Use $image-reverse-engineer to extract this image's typography, palette, composition, and lighting as JSON."
-policy:
-  allow_implicit_invocation: true

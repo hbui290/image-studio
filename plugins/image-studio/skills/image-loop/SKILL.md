@@ -1,6 +1,6 @@
 ---
 name: image-loop
-description: Generate or edit images with a bounded create-review-repair loop, an independent vision reviewer, explicit preservation checks, and saved evidence. Use for image work that needs iterative checking, or invoke image-loop with a brief or reference image. For exact pixel preservation outside a region, pair it with image-verify's candidate audit.
+description: Generate a new image, or regenerate a whole image, with a bounded create-review-repair loop, an independent vision reviewer, explicit preservation checks, and saved evidence. Use for image work that needs iterative checking, or invoke image-loop with a brief or reference image. Not for sharpening or upscaling (image-enhance) or fixing one region of an accepted image (image-repair).
 ---
 
 # Image Loop
@@ -12,12 +12,12 @@ Convert an image brief into checkable requirements, generate a candidate, review
 - Claude Code: `/image-loop [brief]` (shown as `/image-studio:image-loop` when installed as a plugin), or describe the task and let the skill load.
 - Codex: `$image-loop [brief]` or select through `/skills` where supported. Do not claim a custom `/image-loop` command is registered on every host.
 - Analysis only: a JSON breakdown of an image belongs to the companion `image-reverse-engineer` skill; defect diagnosis belongs to `image-inspect`.
-- Fixing one region of an accepted image while every other pixel must stay: use `image-repair` with the `image-verify` audit; this skill covers new images and whole-image edits.
+- Fixing one region of an accepted image while every other pixel must stay: use `image-repair` with the `image-verify` audit. Sharpening, upscaling, cleanup, cutouts, and web export: use `image-enhance`. This skill covers new images and whole-image regenerations.
 - For multiple inspirations and combination search, route to the companion `image-inspiration` skill. It supports one batch or a bounded human/vision-judged loop and reuses this skill's hard checks.
 
 ## Establish the brief
 
-For an image edit, use the companion `image-edit-map` workflow to ask unanswered questions, map sections, and name numbered elements. Respect explicit instructions to skip mapping or edit directly. For new generation, ask only for information essential to the result; do not require a reference image.
+For an image edit whose targets are unclear, use the companion `image-edit-map` workflow to ask unanswered questions, map sections, and name numbered elements; when the user already named the target, skip the map. Respect explicit instructions to skip mapping or edit directly. For new generation, ask only for information essential to the result; do not require a reference image.
 
 Separate subject/content, composition, typography, local color, layer order, grading, medium, lighting, and output requirements. Every reference has a declared role. Record exact text and line breaks. Distinguish protected content from changeable properties. A review must not invent aesthetic requirements absent from the brief.
 

@@ -7,3 +7,7 @@
 work/
 .venv/
 *.log
+tmp*/
+.vscode/
+.idea/
+node_modules/

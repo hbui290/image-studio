@@ -38,9 +38,12 @@ def object_no_duplicates(pairs):
 def read_json(path):
     def invalid_number(value):
         raise Invalid(f"Non-finite JSON number: {value}")
-    return json.loads(Path(path).read_text(encoding="utf-8"),
-                      object_pairs_hook=object_no_duplicates,
-                      parse_constant=invalid_number)
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8-sig"),
+                          object_pairs_hook=object_no_duplicates,
+                          parse_constant=invalid_number)
+    except RecursionError:
+        raise Invalid("JSON nesting is too deep")
 
 
 def type_matches(value, kind):
@@ -89,7 +92,10 @@ def schema_check(value, rule, root, path="$"):
     elif isinstance(value, str):
         require(len(value) >= rule.get("minLength", 0), f"{path}: string too short")
         if "pattern" in rule:
-            require(re.search(rule["pattern"], value), f"{path}: wrong ID format")
+            pattern = rule["pattern"]
+            if pattern.endswith("$"):  # JSON Schema "$" means end of string; Python's also matches before a final newline
+                pattern = pattern[:-1] + r"\Z"
+            require(re.search(pattern, value), f"{path}: wrong format")
     elif isinstance(value, (int, float)) and not isinstance(value, bool):
         require(math.isfinite(value), f"{path}: number must be finite")
         require(value >= rule.get("minimum", -math.inf), f"{path}: below minimum")
@@ -495,6 +501,7 @@ def compile_spec(spec, mode="full"):
     invariants = [item for item in spec["invariants"] if item["id"] not in review["invariant_ids"]]
     hard = [item for item in spec["criteria"]["hard"] if item["id"] not in review["criterion_ids"]]
     soft = [item for item in spec["criteria"]["soft"] if item["id"] not in review["criterion_ids"]]
+    flagged = [item for item in spec["invariants"] if item["id"] in review["invariant_ids"]]
     if invariants or locked or has_edits:
         lines.append("\nPRESERVE")
         lines.extend("- " + item["description"] for item in invariants)
@@ -502,6 +509,11 @@ def compile_spec(spec, mode="full"):
         if has_edits:
             lines.extend(["- Preserve all unselected elements and all unselected properties of edited elements.",
                           "- Preserve counts, exact words and relationships except where a selected edit explicitly changes them."])
+    if flagged:
+        # Flagged invariants may overlap a selected edit; keep the protected text visible instead of dropping it.
+        lines.append("\nReconcile before generating:")
+        lines.append("These baseline invariants may overlap the selected changes. Keep each unless a selected change explicitly overrides it.")
+        lines.extend("- " + item["description"] for item in flagged)
     if hard:
         lines.append("\nREQUIRED RESULT")
         lines.extend("- " + criterion["description"] for criterion in hard)
@@ -522,11 +534,16 @@ def compile_spec(spec, mode="full"):
         start = lines.index("\nREQUESTED CHANGES") + 1
         end = next((index for index in range(start, len(lines)) if lines[index].startswith("\n")), len(lines))
         edits = lines[start:end]
+        protected = ["- " + item["description"] for item in invariants] + [
+            f"- Keep the source properties of {name(element['id'])}: {', '.join(element['locked_properties'])}." for element in locked]
         lines = ["Edit the attached clean source image. Apply only the changes below. The source pixels identify the target; inventory IDs and bounding boxes are review aids and must not appear in the artwork.",
                  "Preserve the original canvas, crop, unselected objects, readable text, relationships, geometry, lighting and materials except for explicitly permitted consequences.",
                  "\nINPUT ROLES",
                  *[f"- {source['id']}: {', '.join(source['allowed_roles'])}. {source['scope_note']}" for source in attachments],
                  "\nREQUESTED CHANGES", *edits,
+                 *(["\nPRESERVE", *protected] if protected else []),
+                 *(["\nReconcile before generating:", *["- " + item["description"] for item in flagged]] if flagged else []),
+                 *(["\nREQUIRED RESULT", *["- " + criterion["description"] for criterion in hard]] if hard else []),
                  "\nAfter editing, inspect each requested difference and every protected detail. Do not claim that “unchanged” is guaranteed by a generative edit."]
     return {"document_id": spec["document_id"], "revision": spec["revision"],
             "rendering_prompt": "\n".join(lines), "attachments": attachments,
@@ -668,7 +685,8 @@ def main():
     compile_parser.add_argument("input")
     compile_parser.add_argument("--format", choices=("text", "json"), default="text")
     compile_parser.add_argument("--mode", choices=("full", "edit"), default="full", help="Use edit for a compact selected delta with an actual clean target input")
-    compile_parser.add_argument("--output")
+    compile_parser.add_argument("--output", help="Write here instead of stdout; refuses an existing path unless --force")
+    compile_parser.add_argument("--force", action="store_true", help="Allow --output to overwrite an existing file (never the source JSON)")
     sub.add_parser("self-check", help="Run the bounded dependency-free behavioral check")
     args = parser.parse_args()
     try:
@@ -681,16 +699,20 @@ def main():
             return
         compiled = compile_spec(spec, mode=args.mode)
         result = json.dumps(compiled, indent=2, ensure_ascii=False, allow_nan=False) + "\n" if args.format == "json" else to_text(compiled)
+        data = result.encode("utf-8")  # fail before touching the filesystem (e.g. a lone surrogate)
         if args.output:
             output = Path(args.output)
             require(output.resolve() != Path(args.input).resolve(), "Output must not overwrite the source JSON")
             if output.exists():
                 require(not output.samefile(args.input), "Output must not overwrite the source JSON through a hard link")
-            output.write_text(result, encoding="utf-8")
+            require(args.force or not (output.exists() or output.is_symlink()),
+                    f"Output already exists: {output}; choose a new path or pass --force to overwrite")
+            with output.open("wb" if args.force else "xb") as handle:
+                handle.write(data)
         else:
             sys.stdout.write(result)
-    except (Invalid, OSError, json.JSONDecodeError, UnicodeDecodeError, RecursionError) as error:
-        print(f"ERROR: {error}", file=sys.stderr)
+    except (Invalid, OSError, json.JSONDecodeError, UnicodeError, RecursionError) as error:
+        print("ERROR: " + str(error).encode("utf-8", "backslashreplace").decode("utf-8"), file=sys.stderr)
         sys.exit(2)
 
 

@@ -43,7 +43,7 @@ def broken_links(base):
 
 class PackageTest(unittest.TestCase):
     def test_every_skill_has_matching_name_and_description(self):
-        self.assertEqual(len(skill_names()), 9)
+        self.assertEqual(len(skill_names()), 10)
         for name in skill_names():
             meta = frontmatter(SKILLS / name / "SKILL.md")
             self.assertEqual(meta.get("name"), name)
@@ -62,15 +62,15 @@ class PackageTest(unittest.TestCase):
         self.assertEqual(codex["name"], "image-studio")
         self.assertEqual(claude["version"], codex["version"])
         claude_market = json.loads((ROOT / ".claude-plugin/marketplace.json").read_text())
+        self.assertEqual(claude_market["plugins"][0]["version"], claude["version"])
         codex_market = json.loads((ROOT / ".agents/plugins/marketplace.json").read_text())
         self.assertEqual((ROOT / claude_market["plugins"][0]["source"]).resolve(), PLUGIN)
         self.assertEqual((ROOT / codex_market["plugins"][0]["source"]["path"]).resolve(), PLUGIN)
 
-    def test_repo_skill_links_point_at_plugin_skills(self):
-        for name in skill_names():
-            link = ROOT / ".claude/skills" / name
-            self.assertTrue(link.is_symlink(), name)
-            self.assertEqual(link.resolve(), (SKILLS / name).resolve())
+    def test_repo_has_no_duplicate_skill_trees(self):
+        # A second tree (symlinks or stale copies) shows every skill twice once the plugin is installed.
+        dupes = [p for p in ROOT.rglob("SKILL.md") if SKILLS not in p.parents and ".git" not in p.parts]
+        self.assertEqual(dupes, [])
 
     def test_standalone_install_keeps_links_working(self):
         spec = importlib.util.spec_from_file_location("installer", ROOT / "scripts/install.py")

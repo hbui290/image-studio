@@ -1,6 +1,6 @@
 interface:
   display_name: "Image Inspect"
   short_description: "Diagnose image defects and number targets"
-  default_prompt: "Use $image-inspect to diagnose what is wrong with this image and number the objects I might want to change."
+  default_prompt: "Use $image-studio:image-inspect to diagnose what is wrong with this image and number the objects I might want to change."
 policy:
   allow_implicit_invocation: true

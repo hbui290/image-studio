@@ -7,6 +7,9 @@ import random
 from pathlib import Path
 
 
+SAMPLE_LIMIT = 5000
+
+
 def require(condition, message):
     if not condition:
         raise ValueError(message)
@@ -20,7 +23,10 @@ def load_strict(path):
         keys = [key for key, _ in pairs]
         require(len(keys) == len(set(keys)), 'Duplicate JSON keys are not allowed.')
         return dict(pairs)
-    return json.loads(path.read_text(encoding='utf-8'), parse_constant=reject_constant, object_pairs_hook=unique_keys)
+    try:
+        return json.loads(path.read_text(encoding='utf-8-sig'), parse_constant=reject_constant, object_pairs_hook=unique_keys)
+    except RecursionError:
+        raise ValueError('JSON nesting is too deep.')
 
 
 
@@ -67,6 +73,31 @@ def validate(board):
     return sources
 
 
+def search(options, incompatible, rng, limit=512, max_nodes=200000):
+    """Randomized backtracking over axes; returns (combinations, search was complete, nodes visited)."""
+    bad = {}
+    for a, b in incompatible:
+        bad.setdefault(a, set()).add(b)
+        bad.setdefault(b, set()).add(a)
+    found, chosen, nodes = [], [], [0]
+
+    def walk(depth):
+        if depth == len(options):
+            found.append(list(chosen))
+            return
+        for t in rng.sample(options[depth], len(options[depth])):
+            if len(found) >= limit or nodes[0] >= max_nodes:
+                return
+            nodes[0] += 1
+            if any(c['id'] in bad.get(t['id'], ()) for c in chosen):
+                continue
+            chosen.append(t)
+            walk(depth + 1)
+            chosen.pop()
+    walk(0)
+    return found, len(found) < limit and nodes[0] < max_nodes, nodes[0]
+
+
 def plan(board, count=4, seed=7):
     sources = validate(board)
     require(type(count) is int and 1 <= count <= 8, 'count must be 1 to 8.')
@@ -77,9 +108,10 @@ def plan(board, count=4, seed=7):
     require(all(options), 'Every active axis needs a known usable trait.')
     total = math.prod(map(len, options))
     rng = random.Random(seed)
-    indices = rng.sample(range(total), min(total, 5000))
+    indices = rng.sample(range(total), min(total, SAMPLE_LIMIT))
     pool = []
     evaluated = 0
+    exhaustive = total <= SAMPLE_LIMIT  # the sample then covers the whole space
     for index in indices:
         choice = []
         for opts in options:
@@ -92,6 +124,10 @@ def plan(board, count=4, seed=7):
         pool.append(choice)
         if len(pool) == 512:
             break
+    if len(pool) < count and not exhaustive:
+        # Sampling can miss a tightly constrained space; search it with pruning instead.
+        pool, exhaustive, nodes = search(options, board['incompatible'], rng)
+        evaluated += nodes
     selected = []
     while pool and len(selected) < count:
         def distance(candidate):
@@ -109,7 +145,9 @@ def plan(board, count=4, seed=7):
     return {'seed': seed, 'requested': count, 'space_size': total, 'evaluated': evaluated,
             'combinations': combinations,
             'note': 'Requested count found.' if len(selected) == count else
-                    'Fewer valid combinations found in the bounded search; do not duplicate images.'}
+                    f'Fewer valid combinations exist: the complete search found only {len(selected)}; do not duplicate images.'
+                    if exhaustive else
+                    'Fewer valid combinations found; the bounded search did not prove that no more exist; do not duplicate images.'}
 
 
 def main():

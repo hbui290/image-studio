@@ -5,8 +5,8 @@
 | Order | `action` | When | Next step |
 | --- | --- | --- | --- |
 | 1 | `stop_invalid_review` | The review is malformed, misses a check ID, repeats one, or invents one (the audit reports this as a command error, exit 2) | Fix the review; do not count it |
-| 2 | `reject_technical` | A file check failed (size, format, bit depth, transparency) or, in the audit, a pixel changed outside the mask, or a "passed" change has no changed pixel | Fix the file or composite; the candidate is not usable |
-| 3 | `hold_for_inspection` | A check is `uncertain`, or a passed `keep` target changed more pixels than the reviewer acknowledged | Inspect closer or ask the user |
+| 2 | `reject_technical` | A file check failed (size, format, bit depth, transparency, animation, mask size) or, in the audit, a pixel changed outside the mask, or a "passed" change has no changed pixel | Fix the file or composite; the candidate is not usable |
+| 3 | `hold_for_inspection` | A check is `uncertain`; in the audit also a passed `keep` target changed more pixels than acknowledged, or a passed `change` target barely changed visibly (under 0.5% of its box moved by 8+ levels) and the reviewer did not set `visible_change_confirmed` | Inspect closer or ask the user |
 | 4 | `accepted_by_checks` | Every check passed | Show the person; this is not human approval |
 | 5 | `stop_budget` | Failures remain and the repair limit is used up | Keep the best candidate that passed protected checks, else the source |
 | 6 | `stop_repeated_failure` | The same set of checks failed in two consecutive reviews, so the last repair fixed nothing | Change the approach (crop, reference, mask, manual edit) instead of repeating it |
@@ -15,6 +15,8 @@
 A `repair` decision lists the failed check `ids` and `protected_failed`. When `protected_failed` is not empty, the candidate damaged something that had to stay, so never build the next repair on it.
 
 One intended exception: with `review.py --model`, the file checks run before the Codex call so a broken file does not spend reviewer usage, and a failure there is `reject_technical` without a review. With `--report`, the supplied review is validated first, as in the audit.
+
+Exit 0 means a decision was written, including `reject_technical`, `hold_for_inspection`, and the stop actions; read `decision.json` rather than trusting the exit code. Exit 2 means nothing usable was decided: invalid inputs, `stop_invalid_review`, or `review.py`'s `stop_provider`. `review.py` checks file properties but not pixels; only the audit compares pixels against the source and mask.
 
 Only `review.py` can also return `stop_provider`, when the Codex reviewer call fails or times out. The inspiration loop (`image-inspiration/scripts/advance.py`) judges between candidates, not against checks, and has its own actions described in [judging.md](../../image-inspiration/references/judging.md).
 

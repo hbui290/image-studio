@@ -13,7 +13,6 @@ from pathlib import Path
 from audit_candidate import load_json, validate_contract
 
 KINDS = {"change": "requested", "keep": "protected"}
-FORMATS = {"PNG", "JPEG", "WEBP"}
 
 
 def to_brief(contract, alpha_required=False):
@@ -39,8 +38,8 @@ def to_brief(contract, alpha_required=False):
         "intent": contract["intent"],
         "criteria": criteria,
         "file_checks": {"width": canvas["width"], "height": canvas["height"],
-                        "format": canvas["format"] if canvas["format"] in FORMATS else None,
-                        "alpha_required": alpha_required},
+                        "format": canvas["format"],
+                        "alpha_required": alpha_required or canvas.get("alpha_required", False)},
     }
 
 
@@ -54,9 +53,9 @@ def main():
         parser.error("output file already exists")
     try:
         brief = to_brief(load_json(args.contract), args.alpha_required)
+        args.out.write_text(json.dumps(brief, indent=2) + "\n", encoding="utf-8")
     except (OSError, ValueError, KeyError, TypeError) as error:
         parser.error(f"{type(error).__name__}: {error}")
-    args.out.write_text(json.dumps(brief, indent=2) + "\n", encoding="utf-8")
     print(args.out)
     return 0
 

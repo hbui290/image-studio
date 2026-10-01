@@ -57,12 +57,11 @@
           "minimum": 1
         },
         "format": {
-          "enum": [
-            "PNG",
-            "JPEG",
-            "WEBP",
-            null
-          ]
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Z0-9]+$"
         },
         "alpha_required": {
           "type": "boolean"

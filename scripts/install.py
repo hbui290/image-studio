@@ -38,7 +38,7 @@ def install(source_root, destination, replace=False):
     if existing and not replace:
         raise FileExistsError('Existing skills: '+', '.join(p.name for p in existing)+'. Use another directory or explicitly pass --replace.')
     destination.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix='.image-studio-install-', dir=destination))
+    staging = Path(tempfile.mkdtemp(prefix='.image-studio-install-', dir=destination.parent))  # outside the scanned skills folder
     new, old = staging/'new', staging/'old'
     new.mkdir()
     old.mkdir()
@@ -67,7 +67,7 @@ def install(source_root, destination, replace=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--to', required=True, type=Path, help='E.g. ~/.codex/skills or ~/.claude/skills')
+    parser.add_argument('--to', required=True, type=Path, help='E.g. ~/.agents/skills (Codex) or ~/.claude/skills (Claude Code)')
     parser.add_argument('--replace', action='store_true', help='Replace existing skill folders of the same names')
     args = parser.parse_args()
     try:

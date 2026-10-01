@@ -1,7 +1,7 @@
 {
   "name": "image-studio",
-  "version": "2.1.0",
-  "description": "Create, edit, inspect, repair, and verify images with numbered maps, reference mixing, bounded review loops, and source-pixel audits.",
+  "version": "2.2.0",
+  "description": "Create, enhance, edit, inspect, repair, and verify images with AI upscaling, numbered maps, reference mixing, bounded review loops, and pixel audits that prove the change is visible and the rest untouched.",
   "author": {
     "name": "hbui290",
     "url": "https://github.com/hbui290"
@@ -13,7 +13,7 @@
   "interface": {
     "displayName": "Image Studio",
     "shortDescription": "Create, repair, and verify images with evidence.",
-    "longDescription": "Nine image skills: inspection, numbered edit maps, reverse engineering, reference mixing, reconstruction, creation, local repair, bounded create-review-repair loops, and source-pixel verification. Image generation stays with the host's image tool.",
+    "longDescription": "Ten image skills: inspection, whole-image enhancement (upscaling, cleanup, cutouts, web export), numbered edit maps, reverse engineering, reference mixing, reconstruction, creation, local repair, bounded create-review-repair loops, and source-pixel verification. Image generation stays with the host's image tool.",
     "developerName": "hbui290",
     "category": "Productivity",
     "capabilities": [],

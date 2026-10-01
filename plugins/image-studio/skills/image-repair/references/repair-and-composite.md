@@ -28,7 +28,7 @@ For a connected structure, trace it before generating pixels: supports and attac
 
 Before editing repeated objects, record a small map with `ID`, plain-language label, source-pixel box or crop, neighbors to protect, and edit status. `lantern-1` and `lantern-2` may share a label but must remain different targets. A box is only a locator; preview the actual mask at native pixels before accepting it. Check holes, thin parts, shadows, overlaps, and whether the mask includes a neighboring hand, face, label, or structural joint. When objects overlap, decide which one is in front and which pixels belong to each before compositing.
 
-Manual selection is sufficient when there are few clear objects. Automatic masks can speed up a dense scene, but remain proposals: [SAM 2](https://github.com/facebookresearch/sam2) provides segmentation, while [Grounded SAM 2](https://github.com/IDEA-Research/Grounded-SAM-2) shows an open pipeline combining grounded detection with segmentation. These are optional examples, not required dependencies or evidence of a proprietary editor's internal algorithm. Verify each proposed label, ID, and boundary against the original image. If the object is missed, draw or correct its mask manually.
+Manual selection is sufficient when there are few clear objects. Automatic masks can speed up a dense scene, but remain proposals: [SAM 3](https://github.com/facebookresearch/sam3) proposes masks from a text prompt or a point, and rembg's `sam` model takes a point. These are optional examples, not required dependencies or evidence of a proprietary editor's internal algorithm. Verify each proposed label, ID, and boundary against the original image. If the object is missed, draw or correct its mask manually.
 
 Before selecting an automatic mask, check that the runtime, weights, and a sample inference actually work on this machine. If they do not, draw a manual mask or use a reviewed color/geometry selection. Record the method actually used. A named model in a setup guide is not evidence that it ran.
 
@@ -68,23 +68,30 @@ h=500
 
 magick "$src" -crop "${w}x${h}+${x}+${y}" +repage crop.png
 magick "$candidate" -resize "${w}x${h}!" candidate-sized.png
+
+# Example acceptance mask in crop coordinates: white polygon accepted, black kept, 1-2 px grow and soft edge.
+magick -size "${w}x${h}" xc:black -fill white \
+  -draw 'polygon 120,80 480,70 520,420 90,430' \
+  -morphology Dilate Disk:2 -blur 0x3 -depth 8 "$mask"
 ```
 
 Create `patch-mask.png` at exactly `w × h`: white where the new pixels are accepted, black where the source must remain. Paint or draw the mask against the generated candidate, then slightly blur only the boundary. The mask is in crop-local coordinates; the composite offset is in full-image coordinates.
 
-Check polarity separately for the generation tool and the final composite. For example, [Diffusers inpainting](https://huggingface.co/docs/diffusers/en/using-diffusers/inpaint) treats white as the area to redraw and black as the area to keep, but its generated result may still alter pixels outside the mask. The final acceptance mask remains the preservation boundary. For ImageMagick `CopyOpacity`, use a grayscale mask without an alpha channel; [its documented behavior](https://usage.imagemagick.org/compose/#copyopacity) maps black to transparent and white to opaque. Preview a small patch if a tool's convention is uncertain.
+Check polarity separately for the generation tool and the final composite. For example, [Diffusers inpainting](https://huggingface.co/docs/diffusers/en/using-diffusers/inpaint) treats white as the area to redraw and black as the area to keep, but its generated result may still alter pixels outside the mask. The final acceptance mask remains the preservation boundary. For ImageMagick `CopyOpacity`, use a grayscale mask without an alpha channel; [its documented behavior](https://usage.imagemagick.org/compose/#copyopacity) maps black to transparent and white to opaque. OpenAI image edits read the mask's **alpha** instead: fully transparent pixels mark the area to edit, the mask must match the image size and format, and the model may still change pixels outside it. Convert this skill's white-accepts mask with `magick crop.png \( "$mask" -negate \) -alpha off -compose CopyOpacity -composite openai-mask.png` only when sending it to such a tool, and keep the original as the final acceptance mask. Preview a small patch if a tool's convention is uncertain.
 
 Include the complete old silhouette inside the white area with a small margin where possible. A mask that cuts through an object can leave duplicate edges, partial bottles, stray foliage, or a hanging timber end. Keep protected neighbors black. If the needed mask would cut through a protected object, regenerate or redraw that edge rather than hiding the mismatch with a wider blur.
 
 If the requested repair is **inside** an object, the outer acceptance mask is insufficient. Make a second mask for protected interior features (for example an emblem silhouette, ring, hand, or printed mark). Subtract this protection mask from the outer acceptance mask before compositing. Feather only the new boundary, check that the source and candidate features align, and reject visible ghost or doubled edges. Color thresholds may propose a mask, but inspect missed antialias pixels and similarly colored neighbors at 100% before accepting it.
 
 ```bash
-magick candidate-sized.png patch-mask.png \
+magick candidate-sized.png "$mask" \
   -alpha off -compose CopyOpacity -composite patch-with-alpha.png
 
 magick "$src" patch-with-alpha.png \
-  -geometry "+${x}+${y}" -compose Over -composite review.png
+  -geometry "+${x}+${y}" -compose Over -composite -depth 8 review.png
 ```
+
+`-depth 8` matters: ImageMagick may otherwise write a 16-bit PNG, which the pixel audit refuses to compare.
 
 On Windows PowerShell, the same operations use PowerShell variables and quoting. Prepare `patch-mask.png` at the crop size first; the white/black acceptance convention is unchanged:
 
@@ -112,13 +119,21 @@ Record a small evidence ledger for handoff: source and approved references; crop
 
 ## Common decisions
 
-- **Upscaling:** A 4K file can still contain soft or missing detail. Test a representative crop with a model suited to the medium, then resize the result and original to identical dimensions and compare at 100% and actual display size. Keep it only if recognizable detail improves without halos, lost line art, or invented geometry. The [Real-ESRGAN README](https://github.com/xinntao/Real-ESRGAN/blob/master/README.md) distinguishes general, anime image and anime video models. An upscaler does not establish an unknown face, product mark, or letter.
+- **Upscaling:** A 4K file can still contain soft or missing detail. For the whole image use [image-enhance](../../image-enhance/SKILL.md); for a patch, test a representative crop with a model suited to the medium, then resize the result and original to identical dimensions and compare at 100% and actual display size. Keep it only if recognizable detail improves without halos, lost line art, or invented geometry. The [Real-ESRGAN README](https://github.com/xinntao/Real-ESRGAN/blob/master/README.md) distinguishes general, anime image and anime video models. An upscaler does not establish an unknown face, product mark, or letter.
 - **Portraits and characters:** Use identity references; inspect eyes, mouth, hairline, ears, hands, costume, and neighboring subjects. Keep identity and pose separate in the prompt. If using a face restorer, record the model and any fidelity setting; reject identity or hair-boundary drift. [CodeFormer](https://github.com/sczhou/CodeFormer/blob/master/README.md) documents a quality/fidelity weight and warns that whole-image face fusion can damage hair boundaries; do not assume a photoreal face model suits stylized art.
 - **Products:** Verify dimensions, material, branding, labels, handles, ports, and reflected features against a real reference. A visually plausible extra part is a defect.
 - **Architecture and backgrounds:** Inspect straight lines, repeated units, vanishing points, object contact, and continuity across the crop boundary.
 - **Alpha cutouts:** Check the edge over both light and dark backdrops for fringe, missing hair, and holes.
 - **Text and logos:** Prefer approved source art or vector and composite it after image generation. Do not rely on a generative model for exact spelling or brand geometry.
-- **Marks on surfaces:** A flat corner overlay can use direct compositing. A logo printed on a tilted page or sign needs a measured perspective transform of the approved source art, then a checked mask, occlusion order, and local light/texture integration. On a strongly curved or folded surface, a simple four-corner warp may be insufficient; use a suitable surface-aware edit or keep the mark on a flatter region. Inspect recognizable proportions after projection and never substitute an AI-redrawn mark for exact brand art. For a web hero headline that need not live inside the illustration, prefer editable HTML/CSS text over generated lettering. [BuilderIO's logo-composite skill](https://github.com/BuilderIO/agent-native/blob/main/templates/assets/.agents/skills/logo-composite/SKILL.md) documents the flat-overlay versus scene-surface distinction.
+- **Marks on surfaces:** A flat corner overlay can use direct compositing. A logo printed on a tilted page or sign needs a measured perspective transform of the approved source art, then a checked mask, occlusion order, and local light/texture integration. On a strongly curved or folded surface, a simple four-corner warp may be insufficient; use a suitable surface-aware edit or keep the mark on a flatter region. Inspect recognizable proportions after projection and never substitute an AI-redrawn mark for exact brand art. A measured four-corner placement, with source corners of the logo mapped to the four measured corners on the surface:
+
+  ```bash
+  magick base.png \( logo.png -background none -virtual-pixel transparent \
+    +distort Perspective '0,0 2540,1450  400,0 2700,1470  400,300 2680,1590  0,300 2520,1565' \) \
+    -layers flatten -depth 8 placed.png
+  ```
+
+  The pairs are `srcX,srcY dstX,dstY` in base-image pixels. Keep `+distort` and `-layers flatten`: plain `-distort` crops the warped logo to its own small canvas, so it never reaches the target. Then mask, multiply-blend the surface texture if needed, and check the brand's usage rules; recoloring or warping a mark can break them, so say so. For a web hero headline that need not live inside the illustration, prefer editable HTML/CSS text over generated lettering. [BuilderIO's logo-composite skill](https://github.com/BuilderIO/agent-native/blob/main/templates/assets/.agents/skills/logo-composite/SKILL.md) documents the flat-overlay versus scene-surface distinction.
 - **Web heroes:** Inspect desktop and mobile crops, focal subject, overlay contrast, loading behavior, and file size; verify that the actual page uses the new asset. Separate art direction (a different crop) from resolution switching (different sizes), as [MDN explains](https://developer.mozilla.org/en-US/docs/Web/HTML/Guides/Responsive_images). If the hero is the measured LCP image, check early discovery and priority; [web.dev](https://web.dev/articles/optimize-lcp) documents preloading CSS background LCP images in the initial HTML. Do not preload every decorative background.
 
 When two candidates repeat the same failure, change the approach rather than only rewriting adjectives in the prompt. Narrow or relocate the crop, use a stronger reference, change the mask, use a deterministic edit, or report that the source lacks enough information.

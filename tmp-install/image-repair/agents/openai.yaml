@@ -1,6 +1,0 @@
-interface:
-  display_name: "Image Repair"
-  short_description: "Fix one region through a mask, keep the rest"
-  default_prompt: "Use $image-repair to fix only the named defect in this image and keep every other pixel unchanged."
-policy:
-  allow_implicit_invocation: true

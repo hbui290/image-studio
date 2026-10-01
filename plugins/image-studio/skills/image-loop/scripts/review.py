@@ -26,11 +26,16 @@ def read_json(path):
         if len(keys) != len(set(keys)):
             raise ValueError(f'Duplicate JSON keys in {path}')
         return dict(pairs)
-    return json.loads(Path(path).read_text(encoding='utf-8'), parse_constant=invalid, object_pairs_hook=unique_keys)
+    try:
+        value = json.loads(Path(path).read_text(encoding='utf-8-sig'), parse_constant=invalid, object_pairs_hook=unique_keys)
+        json.dumps(value, ensure_ascii=False).encode('utf-8')  # lone surrogates cannot be written back out
+    except RecursionError:
+        raise ValueError(f'JSON in {path} is nested too deeply')
+    return value
 
 
 def write_json(path, value):
-    Path(path).write_text(json.dumps(value, indent=2, ensure_ascii=False)+'\n')
+    Path(path).write_text(json.dumps(value, indent=2, ensure_ascii=False)+'\n', encoding='utf-8')
 
 
 def normalize_report(report):
@@ -53,16 +58,22 @@ def invalid_review(out, reason):
 
 def check_file(path, expected):
     from PIL import Image, ImageOps
-    with Image.open(path) as opened:
+    try:
+        opened = Image.open(path)
+    except Image.DecompressionBombError as exc:
+        raise OSError(f'image is too large to check safely: {exc}')
+    with opened:
         opened.load()
-        image_format = opened.format
+        image_format = (opened.format or '').upper()
+        animated = getattr(opened, 'n_frames', 1) > 1
         im = ImageOps.exif_transpose(opened)
         alpha = 'A' in im.getbands() or 'transparency' in im.info
         transparent = im.convert('RGBA').getchannel('A').getextrema()[0] < 255 if alpha else False
         actual = {'width': im.width, 'height': im.height, 'format': image_format,
                   'alpha_channel': alpha, 'has_transparent_pixels': transparent,
                   'sha256': hashlib.sha256(Path(path).read_bytes()).hexdigest()}
-    failures = [f'{k}: expected {expected[k]}, got {actual[k]}'
+    failures = ['animated images are not supported; only the first frame would be checked'] * animated
+    failures += [f'{k}: expected {expected[k]}, got {actual[k]}'
                 for k in ('width', 'height', 'format')
                 if expected[k] is not None and expected[k] != actual[k]]
     if expected['alpha_required'] and not transparent:
@@ -86,8 +97,9 @@ def main():
     args = p.parse_args()
     try:
         from jsonschema import Draft202012Validator, ValidationError
+        import PIL  # noqa: F401
     except ImportError:
-        p.error('jsonschema is required: python3 -m pip install jsonschema pillow')
+        p.error('jsonschema and pillow are required: python3 -m pip install jsonschema pillow')
     if (args.max_repairs is not None and args.max_repairs < 0) or args.timeout <= 0:
         p.error('Repair limit must be nonnegative and timeout positive.')
     try:
@@ -95,6 +107,8 @@ def main():
         Draft202012Validator(read_json(BASE/'references/brief.schema.json')).validate(brief)
         if len({c['id'] for c in brief['criteria']}) != len(brief['criteria']):
             p.error('Duplicate brief criterion IDs.')
+        if any(c['id'] != c['id'].strip() for c in brief['criteria']):
+            p.error('Brief criterion IDs must not start or end with whitespace.')
         candidate = args.candidate.resolve(strict=True)
         source = args.source.resolve(strict=True) if args.source else None
         if source is None and any(c['kind'] == 'protected' for c in brief['criteria']):
@@ -119,9 +133,10 @@ def main():
             prior_count = prior_run.get('repairs_used')
             if type(prior_count) is not int or prior_count < 0:
                 p.error('Previous run.json has no valid repairs_used; start again from round 0.')
-            for key, now in (('brief_sha256', brief_sha), ('source_sha256', source_sha), ('max_repairs', args.max_repairs)):
+            for key, now, label in (('max_repairs', args.max_repairs, 'repair limit'), ('brief_sha256', brief_sha, 'brief'),
+                                    ('source_sha256', source_sha, 'source')):
                 if key in prior_run and prior_run[key] != now:
-                    p.error(f'Previous round used a different {key.replace("_sha256", "")}; keep the brief, source, and limit fixed within one loop.')
+                    p.error(f'Previous round used a different {label}; keep the brief, source, and limit fixed within one loop.')
             repairs_used = prior_count + 1
             previous = normalize_report(read_json(folder/'report.json'))
             Draft202012Validator(review_schema).validate(previous)
@@ -135,24 +150,29 @@ def main():
         p.error(f'Invalid JSON structure: {exc.message}')
     except (OSError, ValueError, TypeError, KeyError) as exc:
         p.error(f'{type(exc).__name__}: {exc}')
-    if args.out.exists():
-        p.error('Output directory exists; choose a new round to avoid overwriting evidence.')
     try:
+        if args.out.exists():
+            p.error('Output directory exists; choose a new round to avoid overwriting evidence.')
         checks = check_file(candidate, brief['file_checks'])
     except OSError as exc:
-        p.error(f'Cannot decode candidate image: {exc}')
-    args.out.mkdir(parents=True)
-    out = args.out.resolve()
+        p.error(f'Cannot use output directory or decode candidate image: {exc}')
+    invalid = report = None
     if args.report:
         # A supplied review is validated first, matching the audit's order (decisions.md rule 1).
         try:
             report = normalize_report(read_json(args.report))
             Draft202012Validator(review_schema).validate(report)
+            invalid = ' '.join(coverage_errors(brief, report))
         except (ValueError, OSError, ValidationError) as exc:
-            return invalid_review(out, f'{type(exc).__name__}: {getattr(exc, "message", exc)}')
-        errors = coverage_errors(brief, report)
-        if errors:
-            return invalid_review(out, ' '.join(errors))
+            invalid = f'{type(exc).__name__}: {getattr(exc, "message", exc)}'
+    try:
+        args.out.mkdir(parents=True)
+    except OSError as exc:
+        p.error(f'Cannot create output directory: {exc}')
+    out = args.out.resolve()
+    if invalid:
+        return invalid_review(out, invalid)
+    if args.report:
         write_json(out/'report.json', report)
     write_json(out/'file-checks.json', checks)
     if not checks['passed']:
@@ -178,7 +198,7 @@ def main():
               'Do not invent aesthetic requirements. Do not claim exact pixel comparison, measured colors or exact font identity from visual inspection. '+
               'For protected criteria compare the source to the candidate. For an unclear arrow endpoint or illegible word use uncertain. '+
               'Suggested fixes must address only observed failures, and should be empty for passes.\nBRIEF:\n'+json.dumps(brief))
-    (out/'reviewer-prompt.txt').write_text(prompt+'\n')
+    (out/'reviewer-prompt.txt').write_text(prompt+'\n', encoding='utf-8')
     cmd = ['codex','exec','--ephemeral','--sandbox','read-only','--skip-git-repo-check',
            '-C',str(private),'--model',args.model,'-c','model_reasoning_effort="low"',
            '--output-schema',str(BASE/'references/review.schema.json'),'--json',
@@ -188,15 +208,16 @@ def main():
     cmd += ['-']
     start = time.monotonic()
     try:
-        result = subprocess.run(cmd, input=prompt, text=True, capture_output=True, timeout=args.timeout)
+        result = subprocess.run(cmd, input=prompt.encode('utf-8'), capture_output=True, timeout=args.timeout)
     except (subprocess.TimeoutExpired, OSError) as exc:
         write_json(out/'decision.json', {'action':'stop_provider','reason':type(exc).__name__,'model_requested':args.model})
         print('stop_provider', file=sys.stderr)
         return 2
-    (private/'events.jsonl').write_text(result.stdout)
-    (private/'stderr.txt').write_text(result.stderr)
+    stdout, stderr = (b.decode('utf-8', errors='replace') for b in (result.stdout, result.stderr))
+    (private/'events.jsonl').write_text(stdout, encoding='utf-8')
+    (private/'stderr.txt').write_text(stderr, encoding='utf-8')
     events = []
-    for line in result.stdout.splitlines():
+    for line in stdout.splitlines():
         try:
             events.append(json.loads(line))
         except ValueError:
@@ -230,7 +251,7 @@ def finish(out, brief, review_schema, checks, args, previous):
         print(json.dumps(decision))
         return 2
     if decision['action'] == 'repair':
-        (out/'repair-prompt.txt').write_text(repair_prompt(brief,report,decision))
+        (out/'repair-prompt.txt').write_text(repair_prompt(brief,report,decision), encoding='utf-8')
     print(json.dumps(decision))
     return 0
 

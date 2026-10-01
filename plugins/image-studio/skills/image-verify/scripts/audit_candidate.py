@@ -24,7 +24,11 @@ def load_json(path):
             raise ValueError(f"{path}: duplicate JSON keys {sorted({k for k in keys if keys.count(k) > 1})}")
         return dict(pairs)
 
-    value = json.loads(path.read_text(encoding="utf-8"), parse_constant=reject_constant, object_pairs_hook=unique_keys)
+    try:
+        value = json.loads(path.read_text(encoding="utf-8-sig"), parse_constant=reject_constant, object_pairs_hook=unique_keys)
+        json.dumps(value, ensure_ascii=False).encode("utf-8")  # rejects lone surrogates before anything is written
+    except RecursionError:
+        raise ValueError(f"{path}: JSON is nested too deeply") from None
     if not isinstance(value, dict):
         raise ValueError(f"{path}: expected a JSON object")
     return value
@@ -34,6 +38,13 @@ def nonempty(value, label):
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{label} must be nonempty text")
     return value.strip()
+
+
+def ident(value, label):
+    """IDs are compared exactly, so surrounding whitespace is an error rather than silently trimmed."""
+    if nonempty(value, label) != value:
+        raise ValueError(f"{label} must not start or end with whitespace")
+    return value
 
 
 def exact_fields(value, required, optional, label):
@@ -62,7 +73,9 @@ def validate_contract(contract, source_size):
     if contract["mode"] == "create" and source_size is not None:
         raise ValueError("create mode does not use --source")
     canvas = contract["canvas"]
-    exact_fields(canvas, {"width", "height", "format"}, set(), "canvas")
+    exact_fields(canvas, {"width", "height", "format"}, {"alpha_required"}, "canvas")
+    if not isinstance(canvas.get("alpha_required", False), bool):
+        raise ValueError("canvas.alpha_required must be a boolean")
     for axis in ("width", "height"):
         positive_int(canvas[axis], f"canvas.{axis}")
     nonempty(canvas["format"], "canvas.format")
@@ -81,7 +94,7 @@ def validate_contract(contract, source_size):
     targets = {}
     for item in contract["targets"]:
         exact_fields(item, {"id", "name", "bbox"}, set(), "target")
-        target_id = nonempty(item["id"], "target.id")
+        target_id = ident(item["id"], "target.id")
         nonempty(item["name"], "target.name")
         box = item["bbox"]
         if target_id in targets or not isinstance(box, list) or len(box) != 4:
@@ -95,7 +108,7 @@ def validate_contract(contract, source_size):
     checks = {}
     for item in contract["checks"]:
         exact_fields(item, {"id", "target_id", "kind", "requirement"}, set(), "check")
-        check_id = nonempty(item["id"], "check.id")
+        check_id = ident(item["id"], "check.id")
         if check_id in checks or not isinstance(item["target_id"], str) or item["target_id"] not in targets:
             raise ValueError(f"{check_id}: duplicate ID or unknown target")
         if item["kind"] not in ("change", "keep"):
@@ -121,10 +134,11 @@ def validate_review(review, checks):
         raise ValueError("review results must be a list")
     results = {}
     for item in items:
-        exact_fields(item, {"id", "status", "evidence"}, {"acknowledged_changed_pixels", "suggested_fix"}, "review result")
+        exact_fields(item, {"id", "status", "evidence"},
+                     {"acknowledged_changed_pixels", "suggested_fix", "visible_change_confirmed"}, "review result")
         if "suggested_fix" in item and not isinstance(item["suggested_fix"], str):
             raise ValueError("suggested_fix must be text")
-        check_id = nonempty(item["id"], "result.id")
+        check_id = ident(item["id"], "result.id")
         if check_id in results or check_id not in checks:
             raise ValueError(f"{check_id}: duplicate or unknown review ID")
         if item["status"] not in ("pass", "fail", "uncertain"):
@@ -134,6 +148,9 @@ def validate_review(review, checks):
             count = item["acknowledged_changed_pixels"]
             if checks[check_id]["kind"] != "keep" or isinstance(count, bool) or not isinstance(count, int) or count < 0:
                 raise ValueError(f"{check_id}: acknowledged_changed_pixels must be a nonnegative integer on a keep check")
+        if "visible_change_confirmed" in item and (checks[check_id]["kind"] != "change"
+                                                   or not isinstance(item["visible_change_confirmed"], bool)):
+            raise ValueError(f"{check_id}: visible_change_confirmed must be a boolean on a change check")
         results[check_id] = item
     if results.keys() != checks.keys():
         raise ValueError(f"review is missing IDs: {sorted(checks.keys() - results.keys())}")
@@ -151,20 +168,29 @@ def digest(path):
 HIGH_PRECISION = {"I", "I;16", "I;16B", "I;16L", "I;16N", "F"}
 
 
-def wide_color_png(path):
-    """True for 16-bit-per-channel color PNGs, which Pillow decodes to 8 bits and so cannot compare exactly."""
+def reduced_depth(path, image):
+    """True when Pillow decoded more than 8 bits per color channel down to 8, so exact comparison is impossible."""
     with open(path, "rb") as stream:
         header = stream.read(26)
-    return header[:8] == b"\x89PNG\r\n\x1a\n" and header[24] == 16 and header[25] in (2, 4, 6)
+    if header[:8] == b"\x89PNG\r\n\x1a\n":
+        return header[24] == 16 and header[25] in (2, 4, 6)
+    bits = getattr(image, "tag_v2", {}).get(258)  # TIFF BitsPerSample
+    return bool(bits) and image.mode not in HIGH_PRECISION and max(bits if isinstance(bits, tuple) else (bits,)) > 8
 
 
 def open_image(path):
-    """Decode an image as displayed (EXIF orientation applied) and keep its file format."""
+    """Decode an image as displayed (EXIF orientation applied); return it, its file format, and its frame count."""
     from PIL import Image, ImageOps
 
-    image = Image.open(path)
-    image_format = image.format
-    return ImageOps.exif_transpose(image), image_format
+    try:
+        image = Image.open(path)
+        image_format, frames = image.format, getattr(image, "n_frames", 1)
+        wide = reduced_depth(path, image)
+        image = ImageOps.exif_transpose(image)
+    except Image.DecompressionBombError as error:
+        raise ValueError(f"{path}: {error}") from None
+    image.wide_source = wide
+    return image, image_format, frames
 
 
 def editable_mask(image):
@@ -208,18 +234,54 @@ def changed_map(source, candidate):
     return ImageChops.darker(changed, any_alpha.point(lambda value: 255 if value else 0))
 
 
+VISIBLE_DELTA = 8  # 8-bit levels; a smaller difference on every channel is not seen at normal viewing
+
+
+def visible_map(source, candidate):
+    """255 where some 8-bit channel moved by VISIBLE_DELTA or more (wide modes: any change counts)."""
+    from PIL import ImageChops
+
+    if source.mode in HIGH_PRECISION or candidate.mode in HIGH_PRECISION:
+        return changed_map(source, candidate)
+    source, candidate = source.convert("RGBA"), candidate.convert("RGBA")
+    channels = ImageChops.difference(source, candidate).split()
+    largest = channels[0]
+    for channel in channels[1:]:
+        largest = ImageChops.lighter(largest, channel)
+    any_alpha = ImageChops.lighter(source.getchannel("A"), candidate.getchannel("A")).point(lambda v: 255 if v else 0)
+    return ImageChops.darker(largest.point(lambda v: 255 if v >= VISIBLE_DELTA else 0), any_alpha)
+
+
 def inspect_pixels(source, candidate, mask, targets):
     from PIL import ImageChops
 
-    changed = changed_map(source, candidate)
-    counts = {}
+    changed, visible = changed_map(source, candidate), visible_map(source, candidate)
+    counts, seen = {}, {}
     for target_id, (x, y, width, height) in targets.items():
-        counts[target_id] = changed.crop((x, y, x + width, y + height)).histogram()[255]
+        box = (x, y, x + width, y + height)
+        counts[target_id] = changed.crop(box).histogram()[255]
+        seen[target_id] = visible.crop(box).histogram()[255]
     outside = None
     if mask is not None:
         outside = ImageChops.darker(changed, ImageChops.invert(mask)).histogram()[255]
     return {"changed_pixels": changed.histogram()[255], "changed_by_target": counts,
-            "changed_outside_mask": outside}
+            "visible_by_target": seen, "changed_outside_mask": outside}
+
+
+def too_small_changes(checks, results, pixels, targets):
+    """Passed change checks whose target barely changed visibly; a person must confirm them."""
+    if pixels is None:
+        return {}
+    found = {}
+    for check_id, item in checks.items():
+        result = results[check_id]
+        if item["kind"] != "change" or result["status"] != "pass" or result.get("visible_change_confirmed"):
+            continue
+        _, _, width, height = targets[item["target_id"]]
+        seen = pixels["visible_by_target"][item["target_id"]]
+        if seen < max(4, width * height // 200):  # under 0.5% of the target box
+            found[check_id] = seen
+    return found
 
 
 def unacknowledged_keep_changes(checks, results, pixels):
@@ -235,16 +297,18 @@ def unacknowledged_keep_changes(checks, results, pixels):
     return found
 
 
-def decide(checks, results, technical_issues, repairs_used, max_repairs, previous, keep_changes=None):
+def decide(checks, results, technical_issues, repairs_used, max_repairs, previous, keep_changes=None, small_changes=None):
     """Same order and action names as image-loop's controller.decide (references/decisions.md)."""
     if technical_issues:
         return {"action": "reject_technical", "reason": "File or pixel checks failed.", "issues": technical_issues}
     uncertain = [item["id"] for item in results.values() if item["status"] == "uncertain"]
-    if uncertain or keep_changes:
+    if uncertain or keep_changes or small_changes:
         decision = {"action": "hold_for_inspection", "reason": "Evidence needs stronger inspection.",
-                    "ids": uncertain + sorted(keep_changes or {})}
+                    "ids": uncertain + sorted(keep_changes or {}) + sorted(small_changes or {})}
         if keep_changes:
             decision["changed_keep_pixels"] = keep_changes
+        if small_changes:
+            decision["barely_visible_change_pixels"] = small_changes
         return decision
     failed = [item["id"] for item in results.values() if item["status"] == "fail"]
     if not failed:
@@ -304,8 +368,10 @@ def main():
     try:
         contract = load_json(args.contract)
         review = load_json(args.review)
-        source, _ = open_image(args.source) if args.source else (None, None)
-        candidate, candidate_format = open_image(args.candidate)
+        source, _, source_frames = open_image(args.source) if args.source else (None, None, 1)
+        candidate, candidate_format, candidate_frames = open_image(args.candidate)
+        if source_frames > 1:
+            raise ValueError("the source is animated; audit one still frame")
         source_size = source.size if source else None
         targets, checks, locked, limit = validate_contract(contract, source_size)
         results = validate_review(review, checks)
@@ -330,25 +396,36 @@ def main():
             raise ValueError(f"--repairs-used {args.repairs_used} does not match the round history ({repairs_used})")
         if locked != bool(args.mask):
             raise ValueError("--mask is required exactly when pixel_lock_outside_mask is true")
-        mask = editable_mask(open_image(args.mask)[0]) if args.mask else None
-        if mask and mask.size != candidate.size:
-            raise ValueError("acceptance mask dimensions differ from the candidate")
         issues = []
+        mask = None
+        if args.mask:
+            mask_image = open_image(args.mask)[0]
+            if mask_image.wide_source:
+                raise ValueError("the mask is a 16-bit-per-channel color image; save it as 8-bit or grayscale")
+            mask = editable_mask(mask_image)
+            if mask.size != candidate.size:
+                issues.append("acceptance mask dimensions differ from the candidate")
+                mask = None
         canvas = contract["canvas"]
         if candidate.size != (canvas["width"], canvas["height"]):
             issues.append("candidate dimensions differ from the contract")
         if candidate_format != canvas["format"]:
             issues.append("candidate decoded format differs from the contract")
+        if candidate_frames > 1:
+            issues.append("candidate is animated; only its first frame could be checked")
+        if canvas.get("alpha_required") and (candidate.mode not in ("RGBA", "LA", "PA") and "transparency" not in candidate.info
+                                             or candidate.convert("RGBA").getchannel("A").getextrema()[0] == 255):
+            issues.append("candidate has no transparent pixels but the contract requires transparency")
         if source and candidate.size != source.size:
             issues.append("source and candidate dimensions differ; source-coordinate comparison is invalid")
-        for label, path in (("source", args.source), ("candidate", args.candidate)):
-            if path and wide_color_png(path):
-                issues.append(f"{label} is a 16-bit-per-channel color PNG; Pillow reads it as 8-bit, so exact comparison "
+        for label, image in (("source", source), ("candidate", candidate)):
+            if image is not None and image.wide_source:
+                issues.append(f"{label} has 16 bits per color channel; Pillow reads it as 8-bit, so exact comparison "
                               "is not possible. Compare 8-bit or 16-bit grayscale copies instead.")
         if source and (source.mode in HIGH_PRECISION) != (candidate.mode in HIGH_PRECISION):
             issues.append(f"source ({source.mode}) and candidate ({candidate.mode}) bit depth differ")
         pixels = None
-        if source and source.size == candidate.size:
+        if source and source.size == candidate.size and (mask is not None or not locked):
             pixels = inspect_pixels(source, candidate, mask, targets)
             if locked and pixels["changed_outside_mask"]:
                 issues.append("decoded pixels changed outside the acceptance mask")
@@ -364,14 +441,15 @@ def main():
                     "repairs_used": repairs_used, "max_repairs": limit,
                     "technical_issues": issues}
         decision = decide(checks, results, issues, repairs_used, limit, previous,
-                          unacknowledged_keep_changes(checks, results, pixels))
-        args.out.mkdir(parents=True)
-        (args.out / "evidence.json").write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
-        (args.out / "decision.json").write_text(json.dumps(decision, indent=2) + "\n", encoding="utf-8")
-        (args.out / "review.json").write_text(json.dumps(review, indent=2) + "\n", encoding="utf-8")
+                          unacknowledged_keep_changes(checks, results, pixels),
+                          too_small_changes(checks, results, pixels, targets))
+        files = {"evidence.json": evidence, "decision.json": decision, "review.json": review}
+        files = {name: json.dumps(value, indent=2) + "\n" for name, value in files.items()}
         if decision["action"] == "repair":
-            (args.out / "repair-prompt.txt").write_text(
-                repair_prompt(contract, targets, checks, results, decision), encoding="utf-8")
+            files["repair-prompt.txt"] = repair_prompt(contract, targets, checks, results, decision)
+        args.out.mkdir(parents=True)
+        for name, text in files.items():
+            (args.out / name).write_text(text, encoding="utf-8")
         print(json.dumps(decision))
         return 0
     except (OSError, ValueError, TypeError, KeyError) as error:
