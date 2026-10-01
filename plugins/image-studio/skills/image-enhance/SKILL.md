@@ -10,17 +10,19 @@ The upscaler and `magick` do the work; this skill picks the recipe and proves th
 1. **Diagnose first** with [image-inspect](../image-inspect/SKILL.md) when the image sits on a page: CSS scaling, dark overlays, and heavy compression can make a good file look soft. If the served file is soft but the master is sharp, re-export from the master instead.
 2. **Find the tools** (never assume, never skip one that is present):
    ```bash
-   command -v magick upscale realesrgan-ncnn-vulkan upscayl-bin
-   ls /Applications/Upscayl.app/Contents/Resources/bin/ ~/.local/share/realesrgan/models 2>/dev/null
+   command -v magick upscayl-bin realesrgan-ncnn-vulkan
+   ls /Applications/Upscayl.app/Contents/Resources/bin/ 2>/dev/null   # macOS app; elsewhere look in the Upscayl install folder
    ```
    If no upscaler exists, say so and offer [setup](references/recipes.md#getting-an-upscaler); do not pass off a sharpen filter as enhancement.
-3. **Pick the recipe by image type** from [recipes.md](references/recipes.md). Default for anime/2D art under about 2000 px wide: `remacri` 4x, or `realesr-animevideov3` 2x when speed matters. Never upscale small text or UI; never repeat a pass on an already enhanced image.
+3. **Pick the recipe by image type** from [recipes.md](references/recipes.md). Default for anime/2D art under about 2000 px wide: `remacri-4x` at 4x, or `realesr-animevideov3-x2` at 2x when speed matters. Never upscale small text or UI; never repeat a pass on an already enhanced image.
 4. **Trial on a crop** of the softest area (faces, small props) with two or three models, then run the winner on the whole image and resize to the delivery size:
    ```bash
-   upscale src.png up.png remacri 4          # or: upscale src.png up.png realesr-animevideov3-x2 2
+   BIN=upscayl-bin      # the binary found in step 2 (full path for the macOS app), or realesrgan-ncnn-vulkan
+   MODELS=models        # folder holding the model's .param and .bin files
+   "$BIN" -i src.png -o up.png -s 4 -m "$MODELS" -n remacri-4x    # or: -s 2 -n realesr-animevideov3-x2
    magick up.png -filter Lanczos -resize 3840x2160 -depth 8 enhanced.png
    ```
-   The origin recipe adds `-unsharp 0x0.55+0.5+0.015` after the resize. `-depth 8` keeps a 16-bit PNG from being produced.
+   The fast `realesr-animevideov3-x2` recipe adds `-unsharp 0x0.55+0.5+0.015` after the resize. `-depth 8` keeps a 16-bit PNG from being produced.
 5. **Prove it** at the real display size, with 100% crops of the areas the user cares about:
    ```bash
    python3 <skills>/image-enhance/scripts/compare_display.py --source src.png --candidate enhanced.png \

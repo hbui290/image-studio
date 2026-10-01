@@ -359,6 +359,29 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(marker.read_text(), "user work")
         self.assertEqual(sorted(p.name for p in self.dest.iterdir()), sorted(self.installer.NAMES))
 
+    def test_interrupted_replace_restores_every_skill(self):
+        self.installer.install(SKILLS, self.dest)
+        marker = self.dest / "image-loop/keep.txt"
+        marker.write_text("user work")
+        real_rename, calls = Path.rename, []
+
+        def interrupted(path, target):
+            if Path(target).parent == self.dest:
+                calls.append(1)
+                if len(calls) == 3:  # third new folder placed, then Ctrl-C
+                    raise KeyboardInterrupt
+            return real_rename(path, target)
+
+        Path.rename = interrupted
+        try:
+            with self.assertRaises(KeyboardInterrupt):
+                self.installer.install(SKILLS, self.dest, replace=True)
+        finally:
+            Path.rename = real_rename
+        self.assertEqual(marker.read_text(), "user work")
+        self.assertEqual(sorted(p.name for p in self.dest.iterdir()), sorted(self.installer.NAMES))
+        self.assertEqual([p.name for p in self.dest.parent.iterdir()], ["skills"])  # staging removed
+
     def test_refuses_destinations_inside_the_repository(self):
         for inside in (ROOT / "plugins/image-studio", ROOT / "new-folder", SKILLS):
             with self.assertRaises(ValueError):

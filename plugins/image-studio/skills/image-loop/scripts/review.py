@@ -34,6 +34,13 @@ def read_json(path):
     return value
 
 
+def read_object(path):
+    value = read_json(path)
+    if not isinstance(value, dict):
+        raise ValueError(f'{path} must hold a JSON object')
+    return value
+
+
 def write_json(path, value):
     Path(path).write_text(json.dumps(value, indent=2, ensure_ascii=False)+'\n', encoding='utf-8')
 
@@ -126,10 +133,10 @@ def main():
             if not args.previous.exists():
                 p.error(f'--previous {args.previous} does not exist.')
             folder = args.previous if args.previous.is_dir() else args.previous.parent
-            prior_action = read_json(folder/'decision.json').get('action')
+            prior_action = read_object(folder/'decision.json').get('action')
             if prior_action != 'repair':
                 p.error(f'Previous round decided {prior_action!r}; only a repair decision starts another round.')
-            prior_run = read_json(folder/'run.json')
+            prior_run = read_object(folder/'run.json')
             prior_count = prior_run.get('repairs_used')
             if type(prior_count) is not int or prior_count < 0:
                 p.error('Previous run.json has no valid repairs_used; start again from round 0.')
@@ -243,9 +250,7 @@ def finish(out, brief, review_schema, checks, args, previous):
         Draft202012Validator(review_schema).validate(report)
         decision = decide(brief,report,checks,args.repairs_used,args.max_repairs,previous)
     except Exception as exc:
-        write_json(out/'decision.json', {'action':'stop_invalid_review','reason':type(exc).__name__})
-        print('stop_invalid_review', file=sys.stderr)
-        return 2
+        return invalid_review(out, f'{type(exc).__name__}: {getattr(exc, "message", exc)}')
     write_json(out/'decision.json',decision)
     if decision['action'] == 'stop_invalid_review':
         print(json.dumps(decision))

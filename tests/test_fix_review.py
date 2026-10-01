@@ -206,6 +206,28 @@ class ReviewFixTests(unittest.TestCase):
             self.assertIn("whitespace", result.stderr)
             self.assertFalse((self.dir / "ws").exists())
 
+    # 10. --previous files that are valid JSON but not objects
+    def test_previous_round_files_must_be_objects(self):
+        rep = self.put("r.json", report("fail", "still white", "paint it"))
+        self.assertClean(self.review("--report", rep, out="r0"), 0)
+        for name, value in (("decision.json", "[]"), ("run.json", "[1]")):
+            original = (self.dir / "r0" / name).read_text(encoding="utf-8")
+            (self.dir / "r0" / name).write_text(value, encoding="utf-8")
+            result = self.review("--report", rep, "--previous", self.dir / "r0", out="r1")
+            self.assertClean(result)
+            self.assertIn("JSON object", result.stderr)
+            (self.dir / "r0" / name).write_text(original, encoding="utf-8")
+
+    # 11. an invalid model report keeps the reason and prints the decision
+    def test_invalid_model_report_records_the_reason(self):
+        bad = self.put("bad.json", {"criteria": [{"id": "C1", "status": "pass", "evidence": "e", "suggested_fix": ""}]})
+        result = self.review("--model", "stub", env=self.stub_env(STUB_REPORT_FILE=str(bad)))
+        self.assertClean(result)
+        decision = self.decision()
+        self.assertEqual(decision["action"], "stop_invalid_review")
+        self.assertIn("summary", decision["reason"])
+        self.assertEqual(json.loads(result.stdout.strip().splitlines()[-1]), decision)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,35 +1,34 @@
 # Enhancement recipes
 
-Measured on this project's test images (a 1672×941 anime tavern scene and a dark 4096×2304 painted hero) with Upscayl's `upscayl-bin` 2.15 on Apple Silicon. Times are for the 1672×941 input. Treat them as a starting point and let `compare_display.py` decide for each image.
+Measured on this project's test images (a 1672×941 anime tavern scene and a dark 4096×2304 painted hero) with Upscayl's `upscayl-bin` 2.15 on Apple Silicon, using Upscayl's models plus the Real-ESRGAN-ncnn-vulkan models in one folder. Times are for the 1672×941 input. Treat them as a starting point and let `compare_display.py` decide for each image.
 
 ## Pick by image type
 
 | Image | Recipe | Result |
 | --- | --- | --- |
-| Anime / 2D art, under ~2000 px wide | `remacri` 4x → Lanczos to delivery size | Best measured: clearly sharper line art, eyes, hair at 1920 and on mobile. ~31 s |
-| Same, when speed matters | `realesr-animevideov3-x2` 2x → Lanczos → `-unsharp 0x0.55+0.5+0.015` (origin recipe) | Clearly sharper, ~2.4 s. Slight halos |
-| Same, cleanest lines | `digital-art` 4x | Clean, slightly hard shading. Same weights as `realesrgan-x4plus-anime` |
-| Photo | `ultrasharp` 4x or `realesrgan-x4plus`, compare both | Not yet verified on detailed photos; always compare |
+| Anime / 2D art, under ~2000 px wide | `remacri-4x` at 4x → Lanczos to delivery size | Best measured: clearly sharper line art, eyes, hair at 1920 and on mobile. ~31 s |
+| Same, when speed matters | `realesr-animevideov3-x2` at 2x → Lanczos → `-unsharp 0x0.55+0.5+0.015` | Clearly sharper, ~2.4 s. Slight halos |
+| Same, cleanest lines | `digital-art-4x` at 4x | Clean, slightly hard shading. Same weights as `realesrgan-x4plus-anime` |
+| Photo | `ultrasharp-4x`, `upscayl-standard-4x`, or `realesrgan-x4plus` at 4x; compare them | Not yet verified on detailed photos; always compare |
 | Already at or above delivery size but soft | No upscaler. Lanczos export, optional `-unsharp 0x0.6+0.6+0.02` | Upscaling adds little you can see; fix soft areas with image-repair |
 | Small text, UI, logos | No AI upscaler | Upscalers invent wrong letters. Re-render from vector or source, or plain Lanczos |
 
-Do not use `high-fidelity` for sharpening (it softened the test image), do not run a second upscale on an enhanced image, and do not fold `-gamma`/`-brightness-contrast` into a sharpen recipe: `compare_display.py` reports that as a color shift, because it is a grade.
+Do not use `high-fidelity-4x` for sharpening (it softened the test image), do not run a second upscale on an enhanced image, and do not fold `-gamma`/`-brightness-contrast` into a sharpen recipe: `compare_display.py` reports that as a color shift, because it is a grade.
 
-Upscalers amplify JPEG noise into fake texture (`ultrasharp` worst). If the source is a heavily compressed JPEG, try a cleaner source first.
+Upscalers amplify JPEG noise into fake texture (`ultrasharp-4x` worst). If the source is a heavily compressed JPEG, try a cleaner source first.
 
 ## Commands
 
-`upscale` is a small wrapper around Upscayl's binary found on some machines; the direct form works anywhere `upscayl-bin` or `realesrgan-ncnn-vulkan` exists (both take the same flags):
+`upscayl-bin` and `realesrgan-ncnn-vulkan` both accept the flags used here (`-i -o -s -m -n -t -x -g`). `upscayl-bin` has a few more (`-z`, `-r`, `-w`, `-c`) that these recipes do not need.
 
 ```bash
-upscale in.png out.png remacri 4                         # wrapper: <in> <out> <model or alias> <scale>
-BIN=/Applications/Upscayl.app/Contents/Resources/bin/upscayl-bin
-MODELS=/Applications/Upscayl.app/Contents/Resources/models  # or the folder holding *.param/*.bin
+BIN=/Applications/Upscayl.app/Contents/Resources/bin/upscayl-bin   # macOS app; or upscayl-bin / realesrgan-ncnn-vulkan on PATH
+MODELS=/Applications/Upscayl.app/Contents/Resources/models        # or your own folder holding *.param/*.bin
 "$BIN" -i in.png -o out.png -s 4 -m "$MODELS" -n remacri-4x
-realesrgan-ncnn-vulkan -i in.png -o out.png -s 2 -n realesr-animevideov3 -m models
+"$BIN" -i in.png -o out.png -s 2 -m "$MODELS" -n realesr-animevideov3-x2
 ```
 
-Model names are the `.param`/`.bin` file names without extension (`remacri-4x`, `ultrasharp-4x`, `digital-art-4x`, `realesrgan-x4plus`, `realesrgan-x4plus-anime`, `realesr-animevideov3-x2`). Useful flags: `-t 256` (smaller tiles when memory runs out, or to avoid visible tile seams), `-x` (slower test-time augmentation, fewer seams), `-g 0` (pick the GPU). A 3840×2160 input at 4x took 160 s and about 1 GB of memory; resize from the result immediately and do not keep the 15360-wide PNG.
+Model names are the `.param`/`.bin` file names without extension. Upscayl ships `remacri-4x`, `ultrasharp-4x`, `digital-art-4x`, `high-fidelity-4x`, `ultramix-balanced-4x`, `upscayl-standard-4x`, and `upscayl-lite-4x`. `realesr-animevideov3-x2` (also `-x3`, `-x4`), `realesrgan-x4plus`, and `realesrgan-x4plus-anime` come with the [Real-ESRGAN-ncnn-vulkan release](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan/releases); copy their files into one models folder to use every model with either binary. Useful flags: `-t 256` (smaller tiles when memory runs out, or to avoid visible tile seams), `-x` (slower test-time augmentation, fewer seams), `-g 0` (pick the GPU). A 3840×2160 input at 4x took 160 s and about 1 GB of memory; resize from the result immediately and do not keep the 15360-wide PNG.
 
 Some GPUs return an all-black image; check the output before using it, then retry with `-t 32` or another model. Compare flat areas after upscaling: some models shift color slightly, which `compare_display.py` reports.
 
@@ -37,10 +36,11 @@ Trial on a crop first:
 
 ```bash
 magick src.png -crop 500x400+1100+250 +repage crop.png
-for model in remacri ultrasharp realesr-animevideov3-x2; do
-  upscale crop.png "crop-$model.png" "$model" 4
+for pair in remacri-4x:4 ultrasharp-4x:4 realesr-animevideov3-x2:2; do   # model:scale
+  model=${pair%:*} scale=${pair#*:}
+  "$BIN" -i crop.png -o "crop-$model.png" -s "$scale" -m "$MODELS" -n "$model"
 done
-python3 <skills>/image-enhance/scripts/compare_display.py --source crop.png --candidate crop-remacri.png --out c-remacri --width 1000
+python3 <skills>/image-enhance/scripts/compare_display.py --source crop.png --candidate crop-remacri-4x.png --out c-remacri --width 1000
 ```
 
 ## Getting an upscaler

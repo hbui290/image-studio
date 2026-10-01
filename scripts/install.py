@@ -9,6 +9,7 @@ leaves either the previous install or the complete new one, never a mix.
 import argparse
 import os
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 
@@ -54,14 +55,19 @@ def install(source_root, destination, replace=False):
         for name in names:
             (new/name).rename(destination/name)
             placed.append(name)
-    except OSError:
-        for name in placed:
-            (destination/name).rename(new/name)
-        for name in moved:
-            (old/name).rename(destination/name)
+    except BaseException:  # also Ctrl-C: put the previous folders back before anything is deleted
+        try:
+            for name in placed:
+                (destination/name).rename(new/name)
+            for name in moved:
+                (old/name).rename(destination/name)
+        finally:
+            if any(old.iterdir()):
+                print(f'Rollback incomplete; your previous skill folders are kept in {old}', file=sys.stderr)
+            else:
+                shutil.rmtree(staging, ignore_errors=True)
         raise
-    finally:
-        shutil.rmtree(staging, ignore_errors=True)
+    shutil.rmtree(staging, ignore_errors=True)
     return destination
 
 

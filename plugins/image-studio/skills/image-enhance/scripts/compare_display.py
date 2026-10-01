@@ -93,6 +93,13 @@ def box_arg(text):
     return values
 
 
+def load_rgb(path, Image, ImageOps):
+    image = ImageOps.exif_transpose(Image.open(path))
+    if image.mode in ("I", "I;16", "I;16B", "I;16L", "I;16N"):
+        image = image.convert("I").point(lambda v: v / 256)  # 16-bit gray to 8-bit; plain convert clips at 255
+    return image.convert("RGB")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--source", required=True, type=Path)
@@ -110,7 +117,7 @@ def main():
     except ImportError:
         parser.error("Pillow is required: python3 -m pip install pillow")
     try:
-        source, candidate = (ImageOps.exif_transpose(Image.open(p)).convert("RGB") for p in (args.source, args.candidate))
+        source, candidate = (load_rgb(p, Image, ImageOps) for p in (args.source, args.candidate))
         if abs(source.width / source.height - candidate.width / candidate.height) > 0.01:
             raise ValueError("source and candidate aspect ratios differ; compare the same framing")
         for x, y, w, h in args.crop:

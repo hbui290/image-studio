@@ -50,7 +50,7 @@ The included [VELLUM map](visual-map.html) provides 15 named elements over a lux
 
 For another image, prepare valid JSON first, then use **Import reconstruction JSON** and **Attach its clean source**. Check that the boxes and names match the actual image. The page performs no automatic image analysis. Keep exported JSON with its source assets, or update its paths before using the Python compiler; a browser file selection supplies a filename, not a durable absolute path.
 
-The restored map's compiler and package links are checked programmatically. Browser interaction verification was unavailable in the authoring environment. Verify the controls in the receiving environment before relying on the UI for production work.
+The repository's tests (`tests/test_visual_map.py`, run with Node.js) check that the map's prompt compiler and embedded schema match `scripts/reconstruct.py`. The browser controls themselves are not tested; try them before relying on the UI for production work.
 
 ## Supply geometry through a sketch
 

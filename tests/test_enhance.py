@@ -70,6 +70,16 @@ class CompareDisplay(unittest.TestCase):
         run, _ = self.compare(self.truth, out="taken")
         self.assertEqual(run.returncode, 2)
 
+    def test_16_bit_grayscale_source_matches_its_8_bit_copy(self):
+        gray = self.source.convert("L")
+        gray.convert("I").point(lambda v: v * 257).save(self.dir / "source.png")  # 16-bit grayscale PNG
+        self.assertEqual(Image.open(self.dir / "source.png").mode, "I;16")
+        _, deep = self.compare(self.truth.convert("L"), out="deep")
+        gray.save(self.dir / "source.png")
+        _, flat = self.compare(self.truth.convert("L"), out="flat")
+        self.assertEqual(deep["failures"], flat["failures"])
+        self.assertTrue(deep["visible_improvement"], deep)
+
 
 if __name__ == "__main__":
     unittest.main()
