@@ -55,7 +55,7 @@ Show clean candidate images labeled by ID, their ingredient recipes, check resul
 
 ## Running the scripts
 
-In commands, `<skills>` means the folder that holds the Image Studio skill folders, which is this skill's parent folder (the host shows the skill's path when it loads); run commands from your working folder. `combine.py` and `advance.py` need only Python 3. Screening candidates with the image-loop reviewer (`review.py`) needs Pillow and jsonschema: prefix that command with `uv run --with pillow --with jsonschema`, or install them with `python3 -m pip install pillow jsonschema`.
+In commands, `<skills>` means the folder that holds the Image Studio skill folders, which is this skill's parent folder (the host shows the skill's path when it loads); run commands from your working folder. `combine.py` and `advance.py` need only Python 3. Screening candidates with the image-loop reviewer (`review.py`) needs Pillow and jsonschema: prefix that command with `uv run --with pillow --with jsonschema` ([uv](https://docs.astral.sh/uv/)), or install them with `python3 -m pip install pillow jsonschema`.
 
 Main commands, for round `N` of a run folder laid out as in [the board guide](references/board.md):
 

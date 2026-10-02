@@ -19,7 +19,7 @@ A worked case that combines a repaint, an upscale, and masked repairs is the [ta
 
 - Required: [ImageMagick](https://imagemagick.org) (`magick`), and one upscaler: [Upscayl](https://github.com/upscayl/upscayl) (`upscayl-bin`) or [Real-ESRGAN-ncnn-vulkan](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan/releases) (`realesrgan-ncnn-vulkan`), with its model files.
 - Optional: [rembg](https://github.com/danielgatis/rembg) for [background removal](references/recipes.md#background-removal).
-- Python 3.9+ with Pillow for `compare_display.py`: `uv run --with pillow python3 ...` works without installing; otherwise `python3 -m pip install pillow`. `<skills>` is the folder that holds the skill folders.
+- Python 3.9+ with Pillow for `compare_display.py`: `uv run --with pillow python3 ...` ([uv](https://docs.astral.sh/uv/)) works without installing; otherwise `python3 -m pip install pillow`. `<skills>` is the folder that holds the skill folders.
 
 ## Steps
 

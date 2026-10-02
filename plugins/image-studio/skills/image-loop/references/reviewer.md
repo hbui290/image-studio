@@ -5,8 +5,8 @@
 `review.py` takes exactly one reviewer: `--model <vision model>` calls Codex; `--report report.json` uses a report already written by the Claude Code `image-reviewer` agent or a person and makes no model call.
 
 - An image-enabled host agent/tool for generation and editing. The review script does not generate images.
-- Python 3, Pillow, and jsonschema. The examples run `python3 <skills>/image-loop/scripts/review.py ...`; to supply the packages, prefix the command with `uv run --with pillow --with jsonschema`, or install them once with `python3 -m pip install pillow jsonschema`.
-- For `--model`: an authenticated Codex CLI and an explicit reviewer model that accepts images on **your configured route**. Verify with an actual image review. A model appearing in a catalog is not proof that a given account/backend can execute it.
+- Python 3, Pillow, and jsonschema. The examples run `python3 <skills>/image-loop/scripts/review.py ...`; to supply the packages, prefix the command with `uv run --with pillow --with jsonschema` ([uv](https://docs.astral.sh/uv/)), or install them once with `python3 -m pip install pillow jsonschema`.
+- For `--model`: an authenticated [Codex CLI](https://github.com/openai/codex) and an explicit reviewer model that accepts images on **your configured route**. Verify with an actual image review. A model appearing in a catalog is not proof that a given account/backend can execute it.
 
 Keep the existing CLI provider configuration. The adapter uses it without editing it. It requests a read-only, ephemeral execution and instructs the reviewer to use only the attached images and brief. User-installed CLI skills/configuration may add context and usage; this is not a hermetically isolated inference call.
 

@@ -78,4 +78,4 @@ Read `evidence.json` for file hashes, decoded dimensions, changed-pixel counts b
 
 ## Origin of the approach
 
-The bounded review idea was informed by [Image Loop](../../image-loop/SKILL.md) and stable IDs by [Image Edit Map](../../image-edit-map/SKILL.md). This helper and contract were written for the local mask/composite workflow of the earlier `image-processing-skill` project (`hbui290/image-processing-skill`, listed in the repository's NOTICE), not a skill in this plugin; Image Studio connects it to the Image Loop reviewer through `contract_to_brief.py` and the shared `criteria` review format.
+The bounded review idea was informed by [image-loop](../../image-loop/SKILL.md) and stable IDs by [image-edit-map](../../image-edit-map/SKILL.md). This helper and contract were written for the local mask/composite workflow of the earlier `image-processing-skill` project (`hbui290/image-processing-skill`, listed in the repository's NOTICE), not a skill in this plugin; Image Studio connects it to the image-loop reviewer through `contract_to_brief.py` and the shared `criteria` review format.

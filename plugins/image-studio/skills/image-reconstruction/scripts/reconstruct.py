@@ -711,7 +711,7 @@ def main():
                 handle.write(data)
         else:
             sys.stdout.write(result)
-    except (Invalid, OSError, json.JSONDecodeError, UnicodeError, RecursionError) as error:
+    except (Invalid, OSError, ValueError, RecursionError) as error:  # ValueError covers JSON, Unicode and int-size errors
         print("ERROR: " + str(error).encode("utf-8", "backslashreplace").decode("utf-8"), file=sys.stderr)
         sys.exit(2)
 

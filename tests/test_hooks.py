@@ -25,13 +25,15 @@ class GuardTests(unittest.TestCase):
         return bool(run.stdout.strip()) and json.loads(run.stdout)["hookSpecificOutput"]["permissionDecision"] == "ask"
 
     def test_attribution_files_ask_in_any_spelling(self):
-        for path in (ROOT / "LICENSE", ROOT / "NOTICE", "NOTICE", ROOT / "license", ROOT / "Notice"):
+        for path in (ROOT / "LICENSE", ROOT / "NOTICE", "NOTICE", ROOT / "license", ROOT / "Notice",
+                     str(ROOT).swapcase() + "/LICENSE"):  # same file on a case-insensitive disk
             self.assertTrue(self.asks(str(path)), path)
         for path in (ROOT / "README.md", ROOT / "plugins/LICENSE"):
             self.assertFalse(self.asks(str(path)), path)
 
     def test_bad_hook_input_is_not_a_traceback(self):
-        for mode, data in (("pre", "not json"), ("post", "[]"), ("pre", "{}")):
+        for mode, data in (("pre", "not json"), ("post", "[]"), ("pre", "{}"),
+                           ("pre", '{"tool_input": {"file_path": 5}}'), ("post", '{"tool_input": {"file_path": ["a.py"]}}')):
             run = hook(mode, data)
             self.assertNotIn("Traceback", run.stderr, (mode, data))
 

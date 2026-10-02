@@ -438,6 +438,16 @@ class InheritedScriptTests(unittest.TestCase):
                          ("stop_uncertain_comparison", "A", "B"))
         # Overshooting a budget is a safe stop, as test_inspiration.test_budget_and_parent expects.
         self.assertEqual(advance.decide(dict(state, rounds_completed=5))['action'], 'stop_budget')
+        # The last round is a budget stop, but an unproven favourite still does not replace the incumbent.
+        last = advance.decide(dict(state, rounds_completed=3))
+        self.assertEqual((last["action"], last["winner_id"], last["ranked_first"]), ("stop_budget", "A", "B"))
+
+    def test_reconstruct_huge_integer_is_a_clean_error(self):
+        path = self.dir / "big.json"
+        path.write_text("1" * 5000)
+        result = run(SKILLS / "image-reconstruction/scripts/reconstruct.py", "validate", path)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
 
 
 def write_rgb48_png(path, pixels, width, height):
@@ -611,3 +621,40 @@ class SecondInheritedTests(unittest.TestCase):
         result = run(script, example, "--image-id", "A")
         self.assertIn("--image-id needs --image", result.stderr)
         self.assertEqual(result.returncode, 2)
+
+
+@needs_pillow
+class CameraAndMaskTests(Case):
+    def mpo(self, color="red"):
+        path = self.dir / f"camera-{color}.jpg"
+        frame = Image.new("RGB", (100, 100), color)
+        frame.save(path, "MPO", save_all=True, append_images=[frame])  # JPEG with an embedded preview frame
+        return path
+
+    def test_camera_mpo_jpeg_is_a_still_jpeg_in_review_py(self):
+        review = load("review", REVIEW)
+        result = review.check_file(self.mpo(), {"width": 100, "height": 100, "format": "JPEG", "alpha_required": False})
+        self.assertTrue(result["passed"], result["failures"])
+
+    def test_camera_mpo_jpeg_is_a_still_jpeg_in_the_audit(self):
+        contract = self.contract(keep=False, locked=False)
+        data = json.loads(contract.read_text())
+        data["canvas"]["format"] = "JPEG"
+        contract.write_text(json.dumps(data))
+        review = self.dir / "review.json"
+        review.write_text(json.dumps({"results": [{"id": "C1", "status": "pass", "evidence": "seen"}]}))
+        result, report, _ = self.audit(self.mpo("blue"), self.mpo(), review)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("animated", result.stdout)
+        self.assertNotIn("format differs", result.stdout)
+
+    def test_animated_mask_is_refused(self):
+        self.contract()
+        mask = self.dir / "mask.gif"
+        frames = [Image.new("L", (100, 100), 255), Image.new("L", (100, 100), 0)]
+        frames[0].save(mask, save_all=True, append_images=frames[1:])
+        source = self.dir / "source.png"
+        Image.new("RGB", (100, 100), "white").save(source)
+        result, _, _ = self.audit(source, source, self.review(), mask=mask)
+        self.assertEqual(result.returncode, 2, result.stdout)
+        self.assertIn("mask is animated", result.stderr)

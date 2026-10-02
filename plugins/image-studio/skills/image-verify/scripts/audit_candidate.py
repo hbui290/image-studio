@@ -189,6 +189,8 @@ def open_image(path):
     try:
         image = Image.open(path)
         image_format, frames = image.format, getattr(image, "n_frames", 1)
+        if image_format == "MPO":  # camera JPEG with an embedded preview frame: a still JPEG
+            image_format, frames = "JPEG", 1
         wide = reduced_depth(path, image)
         image = ImageOps.exif_transpose(image)
     except Image.DecompressionBombError as error:
@@ -403,7 +405,9 @@ def main():
         issues = []
         mask = None
         if args.mask:
-            mask_image = open_image(args.mask)[0]
+            mask_image, _, mask_frames = open_image(args.mask)
+            if mask_frames > 1:
+                raise ValueError("the mask is animated; save one still frame")
             if mask_image.wide_source:
                 raise ValueError("the mask is a 16-bit-per-channel color image; save it as 8-bit or grayscale")
             mask = editable_mask(mask_image)

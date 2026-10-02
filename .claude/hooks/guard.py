@@ -31,13 +31,14 @@ def main():
         path = (data.get('tool_input') or {}).get('file_path') or ''
     except (ValueError, AttributeError):
         return 0  # not a tool call this hook understands
-    if not path:
+    if not isinstance(path, str) or not path:
         return 0
     root = os.path.abspath(os.environ.get('CLAUDE_PROJECT_DIR') or os.getcwd())
     path = os.path.abspath(os.path.join(root, path))
 
     if mode == 'pre':
-        if os.path.normcase(os.path.dirname(path)) == os.path.normcase(root) and os.path.basename(path).lower() in PROTECTED:
+        # lower() on both: macOS and Windows paths are case-insensitive, so Image-Studio/LICENSE is the same file
+        if os.path.dirname(path).lower() == root.lower() and os.path.basename(path).lower() in PROTECTED:
             print(json.dumps({'hookSpecificOutput': {
                 'hookEventName': 'PreToolUse',
                 'permissionDecision': 'ask',

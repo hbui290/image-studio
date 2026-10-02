@@ -43,7 +43,7 @@ Continue through generation and repair during the active task; do not stop at wr
 
 ## Included reviewer adapter
 
-Read [reviewer setup](references/reviewer.md) before running it; it also lists every `review.py` flag. `scripts/review.py` uses an authenticated Codex CLI with an explicitly selected vision model and attached local images. It saves structured review results, file checks, and a decision. No OpenAI API key is required for an existing ChatGPT-authenticated CLI. Calls consume the user's account usage.
+Read [reviewer setup](references/reviewer.md) before running it; it also lists every `review.py` flag. `scripts/review.py` uses an authenticated [Codex CLI](https://github.com/openai/codex) with an explicitly selected vision model and attached local images. It saves structured review results, file checks, and a decision. No OpenAI API key is required for an existing ChatGPT-authenticated CLI. Calls consume the user's account usage.
 
 ```bash
 python3 <skills>/image-loop/scripts/review.py \
@@ -65,4 +65,4 @@ The public prompt library and example results are in the repository's `prompts/`
 
 ## Running the scripts
 
-In commands, `<skills>` means the folder that holds the Image Studio skill folders, which is this skill's parent folder (the host shows the skill's path when it loads); run commands from your working folder. They need Python 3 with Pillow and jsonschema: `python3 -m pip install pillow jsonschema`, or prefix the command with `uv run --with pillow --with jsonschema`.
+In commands, `<skills>` means the folder that holds the Image Studio skill folders, which is this skill's parent folder (the host shows the skill's path when it loads); run commands from your working folder. They need Python 3 with Pillow and jsonschema: `python3 -m pip install pillow jsonschema`, or prefix the command with `uv run --with pillow --with jsonschema` ([uv](https://docs.astral.sh/uv/)).

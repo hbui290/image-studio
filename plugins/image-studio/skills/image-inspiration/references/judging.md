@@ -64,7 +64,7 @@ Use the current round's folder in `--out` (`r2/decision.json` for round 2): the 
 | `awaiting_human` | `judge` is `human` or `hybrid` and no human judgment is saved yet. | Show the images and check results, ask the person, save their judgment, and run the helper again. |
 | `awaiting_llm` | `judge` is `llm` and `judgment` is null. | Run the independent LLM judge, save its judgment, and run the helper again. |
 | `complete_batch` | Batch mode: `winner_id` is chosen. | Deliver `winner_id`. Batch mode never iterates. |
-| `stop_budget` | `rounds_completed` reached `max_rounds` or `images_used` reached `max_images`. | Deliver `winner_id`. Do not raise the caps without the user's approval. |
+| `stop_budget` | `rounds_completed` reached `max_rounds` or `images_used` reached `max_images`. | Deliver `winner_id`. If `improved` was null, `winner_id` is the incumbent and `ranked_first` is the judge's favourite, as in `stop_uncertain_comparison`. Do not raise the caps without the user's approval. |
 | `stop_uncertain_comparison` | After round 1, `improved` is null, so improvement over the incumbent is not established. `winner_id` is the incumbent; `ranked_first` is the judge's favourite. | Deliver the incumbent, or ask the person to compare it with `ranked_first`. |
 | `stop_no_improvement` | Two rounds in a row without improvement. | Deliver `winner_id` (the incumbent). |
 | `iterate` | Loop mode with budget left. Returns `parent_id`, `no_improvement_rounds`, `remaining_images`, and `remaining_rounds`. | Generate the next round from `parent_id`, save `no_improvement_rounds` in `state.json`, and set `incumbent_id` to the winner. |

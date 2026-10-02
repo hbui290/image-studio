@@ -79,9 +79,14 @@ class CompareDisplay(unittest.TestCase):
         self.assertIn("16384", run.stderr)
 
     def test_failed_crop_leaves_no_output_folder(self):
-        run, _ = self.compare(self.source.resize((100, 56)), "--crop", "1,1,1,1")
+        run, _ = self.compare(self.truth, "--crop", "399,0,5,5")
         self.assertEqual(run.returncode, 2, run.stderr)
         self.assertFalse((self.dir / "out").exists())
+
+    def test_small_crop_on_a_smaller_candidate_still_works(self):
+        run, _ = self.compare(self.source.resize((100, 56)), "--crop", "3,3,1,1")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertTrue((self.dir / "out/crop-1.png").exists())
 
     def test_16_bit_grayscale_source_matches_its_8_bit_copy(self):
         gray = self.source.convert("L")

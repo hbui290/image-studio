@@ -47,4 +47,4 @@ A flat image does not reveal its original prompt, exact font family, editable la
 
 ## Running the scripts
 
-In commands, `<skills>` means the folder that holds the Image Studio skill folders, which is this skill's parent folder (the host shows the skill's path when it loads); run commands from your working folder. The validator needs Python 3 with jsonschema, and Pillow for `--image`: prefix the command with `uv run --with pillow --with jsonschema`, or install them with `python3 -m pip install pillow jsonschema`.
+In commands, `<skills>` means the folder that holds the Image Studio skill folders, which is this skill's parent folder (the host shows the skill's path when it loads); run commands from your working folder. The validator needs Python 3 with jsonschema, and Pillow for `--image`: prefix the command with `uv run --with pillow --with jsonschema` ([uv](https://docs.astral.sh/uv/)), or install them with `python3 -m pip install pillow jsonschema`.

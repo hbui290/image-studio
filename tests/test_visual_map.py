@@ -85,11 +85,20 @@ class VisualMapParity(unittest.TestCase):
             self.assertIn("\n" + section, edit)
 
     def test_page_rejects_what_the_script_rejects(self):
-        spec = copy.deepcopy(self.vellum)
-        spec["elements"][0]["name"] = "   "
-        with self.assertRaises(self.rc.Invalid):
-            self.rc.validate(spec)
-        self.assertIn("error", self.js(spec))
+        blank = copy.deepcopy(self.vellum)
+        blank["elements"][0]["name"] = "   "
+        keep_props = copy.deepcopy(self.vellum)
+        keep_props["selections"] = [{"target_id": "A-05", "action": "keep", "properties": ["text"], "instruction": "",
+                                     "destination_bbox": None, "reference_ids": [], "preserve": [], "allow": []}]
+        move_color = self.edited_vellum()
+        move_color["selections"][1]["properties"] = ["bbox", "appearance.color"]
+        casefold = self.edited_vellum()
+        casefold["selections"][0]["preserve"], casefold["selections"][0]["allow"] = ["Straße"], ["STRASSE"]
+        for label, spec in (("blank name", blank), ("keep with properties", keep_props),
+                            ("move with color", move_color), ("casefold overlap", casefold)):
+            with self.assertRaises(self.rc.Invalid, msg=label):
+                self.rc.validate(spec)
+            self.assertIn("error", self.js(spec), label)
 
 
 if __name__ == "__main__":

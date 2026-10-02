@@ -14,7 +14,7 @@ This skill fixes one region of an accepted image and keeps every other pixel. Us
 
 A full worked case, with before/after images and the rejected attempts, is the [tavern hero example](https://github.com/hbui290/image-studio/blob/main/examples/image-repair/tavern-hero-case.md) in the repository; a skills install does not include it.
 
-Tools: ImageMagick 7 `magick` for crops, masks, and composites; an image generator that accepts a crop and reference images, when new pixels are needed. Optional segmenters, upscalers, and face models are not prerequisites; check an unfamiliar machine with [tool-readiness.md](references/tool-readiness.md).
+Tools: [ImageMagick 7](https://imagemagick.org) `magick` for crops, masks, and composites; an image generator that accepts a crop and reference images, when new pixels are needed. Optional segmenters, upscalers, and face models are not prerequisites; check an unfamiliar machine with [tool-readiness.md](references/tool-readiness.md).
 
 ## Steps
 
@@ -28,7 +28,7 @@ Tools: ImageMagick 7 `magick` for crops, masks, and composites; an image generat
      --contract contract.json --source source.png --candidate review.png \
      --mask final-acceptance-mask.png --review review.json --out round-0
    ```
-   It needs Python 3.9+ with Pillow: run it as `uv run --with pillow python3 <skills>/image-verify/scripts/audit_candidate.py ...`, or install Pillow once with `python3 -m pip install pillow` and use `python3` directly. `<skills>` is the folder that holds the skill folders. Read `decision.json` and follow [decisions.md](../image-verify/references/decisions.md).
+   It needs Python 3.9+ with Pillow: run it as `uv run --with pillow python3 <skills>/image-verify/scripts/audit_candidate.py ...` ([uv](https://docs.astral.sh/uv/)), or install Pillow once with `python3 -m pip install pillow` and use `python3` directly. `<skills>` is the folder that holds the skill folders. Read `decision.json` and follow [decisions.md](../image-verify/references/decisions.md).
 6. **Repeat or stop.** Use at most three repair rounds and the stop rules in [decisions.md](../image-verify/references/decisions.md). When two candidates repeat the same failure, change the approach (crop, reference, mask, or a deterministic edit) instead of rewording the prompt.
 
 ## Outputs

@@ -81,7 +81,9 @@ def crop_pair(source, candidate, box):
 
     x, y, w, h = box
     scale = candidate.width / source.width
-    right = candidate.crop(tuple(round(v * scale) for v in (x, y, x + w, y + h)))
+    left_x, top = round(x * scale), round(y * scale)
+    # At least 1 pixel: a candidate smaller than the source can round a small box to nothing.
+    right = candidate.crop((left_x, top, max(round((x + w) * scale), left_x + 1), max(round((y + h) * scale), top + 1)))
     left = source.crop((x, y, x + w, y + h)).resize(right.size, Image.LANCZOS)
     return side_by_side(left, right)
 

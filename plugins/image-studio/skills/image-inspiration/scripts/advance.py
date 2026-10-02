@@ -83,6 +83,9 @@ def decide(state):
     if state['mode'] == 'batch':
         return dict(result, action='complete_batch')
     if state['rounds_completed'] >= state['max_rounds'] or state['images_used'] >= state['max_images']:
+        if incumbent is not None and judgment['improved'] is None:
+            # A budget stop must not crown a favourite whose improvement is unproven.
+            return dict(result, action='stop_budget', winner_id=incumbent, ranked_first=winner)
         return dict(result, action='stop_budget')
     if state['rounds_completed'] > 1 and judgment['improved'] is None:
         # Improvement is not established, so the incumbent is retained; the new favourite is only reported.

@@ -38,7 +38,7 @@ Both examples passed all five visual criteria after one repair and passed decode
 
 ## Reverse engineering exposed a real error
 
-The independent model returned [raw JSON](image-reverse-engineer/raw-extraction.json) that passed schema/geometry/reference validation. But it incorrectly claimed a measured size of 1248×1248; the actual file is 1254×1254. It also suggested locks not supplied by the user and assigned numbers independently from the annotation map.
+The independent model returned [raw JSON](image-reverse-engineer/raw-extraction.json) that passed schema/geometry/reference validation at the time. Since 2.2.1 the validator also requires element IDs in `image_id:number` form, so this raw file now fails that ID check first (seven errors such as `el_headline: id must be img_01:1`) and the dimension check is not reached. But it incorrectly claimed a measured size of 1248×1248; the actual file is 1254×1254. It also suggested locks not supplied by the user and assigned numbers independently from the annotation map.
 
 The package now requires separate file-metadata verification when a local source is available. The validator's `--image` check rejects those incorrect dimensions. The protocol also requires existing ID manifests to be carried into extraction and separates preservation suggestions from user-imposed locks.
 
@@ -54,4 +54,4 @@ The generator was the host's built-in image-generation/editing tool. Its underly
 
 ## Offline verification
 
-The controller/installer suite checks full-pass acceptance, incomplete or duplicate IDs, uncertainty, protected failures, repair limits, repeated failures, improving failure sets, output-file checks, decoded transparency, and overwrite refusal. Schema validation checks the bundled synthetic example and the corrected live extraction. Raw extraction fails the separate dimension check as expected.
+The controller/installer suite checks full-pass acceptance, incomplete or duplicate IDs, uncertainty, protected failures, repair limits, repeated failures, improving failure sets, output-file checks, decoded transparency, and overwrite refusal. Schema validation checks the bundled synthetic example and the corrected live extraction. Raw extraction fails validation as expected: on the ID check since 2.2.1, and on the separate dimension check before that.

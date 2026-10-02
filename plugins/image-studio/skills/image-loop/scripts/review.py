@@ -73,6 +73,8 @@ def check_file(path, expected):
         opened.load()
         image_format = (opened.format or '').upper()
         animated = getattr(opened, 'n_frames', 1) > 1
+        if image_format == 'MPO':  # camera JPEG with an embedded preview frame: a still JPEG
+            image_format, animated = 'JPEG', False
         im = ImageOps.exif_transpose(opened)
         alpha = 'A' in im.getbands() or 'transparency' in im.info
         transparent = im.convert('RGBA').getchannel('A').getextrema()[0] < 255 if alpha else False
