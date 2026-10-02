@@ -21,7 +21,7 @@ Inspect the source at native pixels **and** the rendered result at the target si
 | Compression blocks, noise, mild softness | Re-export from a cleaner master if one exists; otherwise use [image-enhance](../../image-enhance/SKILL.md) and accept only a gain its display-size comparison confirms. |
 | Too few pixels, or a large but visibly soft source | Use [image-enhance](../../image-enhance/SKILL.md): test a suitable super-resolution model on a representative crop. Resize every candidate back to the same delivery size before comparing; reject changes that only look sharper at 4× zoom, oversmooth line art, or invent details. |
 | Missing eyes, broken geometry, fused objects, extra limbs, inconsistent texture | Use a small local edit, manual retouch, or compositing with an approved reference. Upscaling alone cannot solve missing semantics. |
-| Damaged alpha edge or unwanted background | Repair the matte or background, then inspect the edge against light and dark surfaces. |
+| Damaged alpha edge or unwanted background | Repair the matte or background, then inspect the edge against light and dark surfaces. For a jagged, speckled, or outlined edge on a transparent PNG, use the [cutout edges](../../image-enhance/references/recipes.md#cutout-edges) recipe in image-enhance. |
 | Composition fundamentally wrong | Recompose or regenerate only when that larger change is within the user's request. |
 
 Choose the least disruptive operation that solves the observed defect. Use specialist generation or editing tools according to their own instructions when pixels must be generated. Use deterministic image tools for cropping, masking, color correction, resizing, and export when those operations are sufficient.

@@ -4,6 +4,11 @@
 Writes before-after.png (source left, candidate right, both resized to --width with Lanczos),
 optional 100% crops, and metrics.json, then prints the verdict. Metrics are a screen, not proof:
 a person still looks at before-after.png. Requires Pillow only.
+
+Transparent images are shown on a dark backdrop in before-after.png and a light one in
+before-after-light.png, and their cutout edges are compared: edges noisier than the source fail,
+and so does a changed cutout shape. Edges at least 20% cleaner count as a visible improvement.
+Edge noise is relative, not absolute: a detailed outline is legitimately noisier than a plain one.
 """
 
 import argparse
@@ -13,7 +18,9 @@ import sys
 from pathlib import Path
 
 # ponytail: thresholds calibrated on anime/2D art (references/recipes.md); recheck for photos.
-LIMITS = {"min_display_difference": 1.0, "min_sharpness_gain": 1.15, "max_color_shift": 3.0, "min_fidelity_psnr": 25.0}
+LIMITS = {"min_display_difference": 1.0, "min_sharpness_gain": 1.15, "max_color_shift": 3.0, "min_fidelity_psnr": 25.0,
+          "max_edge_ratio_for_gain": 0.8, "max_edge_ratio": 1.1, "min_alpha_iou": 0.97}
+DARK, LIGHT = (30, 30, 30), (235, 235, 235)
 
 
 def to_width(image, width):
@@ -54,16 +61,67 @@ def measure(source, candidate, width):
                "sharpness_gain": round(sharpness(after) / max(sharpness(before), 1e-9), 3),
                "color_shift": round(shift, 3),
                "fidelity_psnr": round(psnr(source, back), 2)}
-    failures = []
+    gain, guard = [], []  # gain: the visible improvement is missing; guard: something got worse
     if metrics["display_difference"] < LIMITS["min_display_difference"]:
-        failures.append("invisible at display size: candidate is almost identical to the resized source")
+        gain.append("invisible at display size: candidate is almost identical to the resized source")
     if metrics["sharpness_gain"] < LIMITS["min_sharpness_gain"]:
-        failures.append("not measurably sharper at display size")
+        gain.append("not measurably sharper at display size")
     if metrics["color_shift"] > LIMITS["max_color_shift"]:
-        failures.append("average color or brightness shifted; that is a grade, not an enhancement")
+        guard.append("average color or brightness shifted; that is a grade, not an enhancement")
     if metrics["fidelity_psnr"] < LIMITS["min_fidelity_psnr"]:
-        failures.append("candidate no longer matches the source when reduced back to source size (invented or moved content)")
-    return before, after, metrics, failures
+        guard.append("candidate no longer matches the source when reduced back to source size (invented or moved content)")
+    return before, after, metrics, gain, guard
+
+
+def flatten(image, color):
+    from PIL import Image
+
+    if image.mode != "RGBA":
+        return image
+    flat = Image.new("RGB", image.size, color)
+    flat.paste(image, mask=image.getchannel("A"))
+    return flat
+
+
+def cutout_mask(image, size=None):
+    from PIL import Image
+
+    alpha = image.getchannel("A")
+    return (alpha.resize(size, Image.LANCZOS) if size else alpha).point(lambda v: 255 if v >= 128 else 0)
+
+
+def edge_speckle(image, width, color):
+    """Mean local noise along the cutout edge at display size; halos, specks and stair-steps raise it."""
+    from PIL import ImageChops, ImageFilter, ImageStat
+
+    shown = to_width(image, width)
+    mask = cutout_mask(shown)
+    band = ImageChops.difference(mask.filter(ImageFilter.MaxFilter(3)), mask.filter(ImageFilter.MinFilter(3)))
+    if not band.getbbox():
+        return 0.0
+    gray = flatten(shown, color).convert("L")
+    return ImageStat.Stat(ImageChops.difference(gray, gray.filter(ImageFilter.MedianFilter(3))), mask=band).mean[0]
+
+
+def check_edges(source, candidate, width, metrics, gain, guard):
+    """Transparent images: edges no noisier than the source at display size, and the same cutout shape."""
+    from PIL import ImageChops
+
+    source_edges = max(edge_speckle(source, width, color) for color in (DARK, LIGHT))
+    candidate_edges = max(edge_speckle(candidate, width, color) for color in (DARK, LIGHT))
+    first, second = cutout_mask(source), cutout_mask(candidate, source.size)
+    union = ImageChops.lighter(first, second).histogram()[255]
+    iou = ImageChops.darker(first, second).histogram()[255] / union if union else 1.0
+    ratio = candidate_edges / source_edges if source_edges else (1.0 if not candidate_edges else math.inf)
+    metrics.update(edge_speckle_source=round(source_edges, 2), edge_speckle_candidate=round(candidate_edges, 2),
+                   edge_ratio=round(ratio, 3) if math.isfinite(ratio) else None, alpha_iou=round(iou, 4))
+    if ratio <= LIMITS["max_edge_ratio_for_gain"]:
+        gain = []  # cleaner edges are themselves the visible improvement
+    if candidate_edges > source_edges * LIMITS["max_edge_ratio"] + 0.3:  # 0.3: ignore noise in tiny values
+        guard.append("cutout edges are noisier than the source at display size (jagged, speckled or haloed)")
+    if iou < LIMITS["min_alpha_iou"]:
+        guard.append("cutout shape changed: the transparent area moved, grew or shrank")
+    return gain, guard
 
 
 def side_by_side(left, right):
@@ -81,8 +139,9 @@ def crop_pair(source, candidate, box):
 
     x, y, w, h = box
     scale = candidate.width / source.width
-    left_x, top = round(x * scale), round(y * scale)
-    # At least 1 pixel: a candidate smaller than the source can round a small box to nothing.
+    # Start inside the candidate and keep at least 1 pixel: a candidate smaller than the source can round
+    # a small box to nothing or push it past the edge, where Pillow would pad with black.
+    left_x, top = min(round(x * scale), candidate.width - 1), min(round(y * scale), candidate.height - 1)
     right = candidate.crop((left_x, top, max(round((x + w) * scale), left_x + 1), max(round((y + h) * scale), top + 1)))
     left = source.crop((x, y, x + w, y + h)).resize(right.size, Image.LANCZOS)
     return side_by_side(left, right)
@@ -95,10 +154,15 @@ def box_arg(text):
     return values
 
 
-def load_rgb(path, Image, ImageOps):
+def load_image(path, Image, ImageOps):
+    """RGB, or RGBA when the image has transparent pixels."""
     image = ImageOps.exif_transpose(Image.open(path))
     if image.mode in ("I", "I;16", "I;16B", "I;16L", "I;16N"):
         image = image.convert("I").point(lambda v: v / 256)  # 16-bit gray to 8-bit; plain convert clips at 255
+    if image.mode in ("RGBA", "LA", "PA") or "transparency" in image.info:
+        rgba = image.convert("RGBA")
+        if rgba.getchannel("A").getextrema()[0] < 255:
+            return rgba
     return image.convert("RGB")
 
 
@@ -119,17 +183,27 @@ def main():
     except ImportError:
         parser.error("Pillow is required: python3 -m pip install pillow")
     try:
-        source, candidate = (load_rgb(p, Image, ImageOps) for p in (args.source, args.candidate))
+        source, candidate = (load_image(p, Image, ImageOps) for p in (args.source, args.candidate))
+        cutout = "RGBA" in (source.mode, candidate.mode)
+        if cutout:
+            source, candidate = source.convert("RGBA"), candidate.convert("RGBA")
         if abs(source.width / source.height - candidate.width / candidate.height) > 0.01:
             raise ValueError("source and candidate aspect ratios differ; compare the same framing")
         for x, y, w, h in args.crop:
             if x + w > source.width or y + h > source.height:
                 raise ValueError(f"crop {x},{y},{w},{h} falls outside the source")
-        before, after, metrics, failures = measure(source, candidate, args.width)
+        shown = (flatten(source, DARK), flatten(candidate, DARK))
+        before, after, metrics, gain, guard = measure(*shown, args.width)
+        if cutout:
+            gain, guard = check_edges(source, candidate, args.width, metrics, gain, guard)
+            light = measure(flatten(source, LIGHT), flatten(candidate, LIGHT), args.width)
+        failures = gain + guard
         result = {"visible_improvement": not failures, "failures": failures, "metrics": metrics, "limits": LIMITS}
-        crops = [crop_pair(source, candidate, box) for box in args.crop]  # fail before creating the folder
+        crops = [crop_pair(*shown, box) for box in args.crop]  # fail before creating the folder
         args.out.mkdir(parents=True)
         side_by_side(before, after).save(args.out / "before-after.png")
+        if cutout:
+            side_by_side(light[0], light[1]).save(args.out / "before-after-light.png")
         for number, crop in enumerate(crops, 1):
             crop.save(args.out / f"crop-{number}.png")
         (args.out / "metrics.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")

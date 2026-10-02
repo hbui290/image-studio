@@ -84,6 +84,12 @@ class VisualMapParity(unittest.TestCase):
         for section in ("PRESERVE", "Reconcile before generating:", "REQUIRED RESULT"):
             self.assertIn("\n" + section, edit)
 
+    def test_page_accepts_what_the_script_accepts(self):
+        dotless = self.edited_vellum()  # Python's casefold keeps the Turkish dotless i distinct from i
+        dotless["selections"][0]["preserve"], dotless["selections"][0]["allow"] = ["\u0131"], ["i"]
+        self.rc.validate(dotless)
+        self.assertNotIn("error", self.js(dotless))
+
     def test_page_rejects_what_the_script_rejects(self):
         blank = copy.deepcopy(self.vellum)
         blank["elements"][0]["name"] = "   "

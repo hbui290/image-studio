@@ -39,7 +39,8 @@ def install(source_root, destination, replace=False):
     if existing and not replace:
         raise FileExistsError('Existing skills: '+', '.join(p.name for p in existing)+'. Use another directory or explicitly pass --replace.')
     destination.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix='.image-studio-install-', dir=destination.parent))  # outside the scanned skills folder
+    # Next to the real folder (a symlinked --to may point to another disk, where rename fails), outside the scanned skills folder.
+    staging = Path(tempfile.mkdtemp(prefix='.image-studio-install-', dir=destination.resolve().parent))
     new, old = staging/'new', staging/'old'
     new.mkdir()
     old.mkdir()

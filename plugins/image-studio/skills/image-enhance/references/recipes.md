@@ -89,6 +89,28 @@ magick cutout.png -background black -flatten on-black.png
 
 The first run downloads the model. Inspect both backdrops for halos, holes, and missing hair. Never ask an image generator for a "transparent background" and trust a painted checkerboard.
 
+## Cutout edges
+
+Symptom: a transparent PNG looks jagged, speckled, or outlined by a gray or white line on a dark or light page, though it looked fine on the backdrop it was made on. Cause: the outermost pixels still carry the old backdrop (a halo or a shadow), and an upscaler sharpened that noise. Upscaling does not fix it: Upscayl keeps the alpha channel and enlarges the halo with it. So upscale first (if needed), then clean the edges at the larger size.
+
+Look at the edge on both backdrops first: run `compare_display.py` with the same file as `--source` and `--candidate`, then open `before-after.png` (dark) and `before-after-light.png` (light); `edge_speckle_source` is the baseline. Then shrink the alpha edge by one, two, and three display pixels, soften it, and compare each:
+
+```bash
+w=520                                                   # display width in pixels
+n=$(( $(magick identify -format '%w' in.png) / w ))     # source pixels per display pixel
+n=$(( n > 0 ? n : 1 ))
+for k in 1 2 3; do
+  magick in.png \( +clone -alpha extract -morphology Erode Disk:$((k*n)) -blur 0x$((k*n/5+1)) \) \
+    -compose CopyOpacity -composite "edges-$k.png"
+  python3 <skills>/image-enhance/scripts/compare_display.py --source in.png --candidate "edges-$k.png" \
+    --out "edges-$k" --width "$w"
+done
+```
+
+Keep the smallest shrink whose `visible_improvement` is true (edges at least 20% cleaner, `alpha_iou` at least 0.97) and that looks clean on both backdrops. Too much shrink eats thin or serrated parts: `alpha_iou` drops and the edges get noisier again. No number tells a halo from a designed gray rim, so look before accepting; to keep a designed rim, mask the halo area and use [image-repair](../../image-repair/SKILL.md) instead.
+
+On a 4096×6144 metallic card pack shown 520 px wide (`n` = 7), `k` = 2 (a 14 px shrink with `-blur 0x3`) removed the gray side halo: `edge_ratio` 0.66, `alpha_iou` 0.987. `k` = 1 was too little (0.88); `k` = 3 also passed (0.78) but cut further into the crimped ends, so `k` = 2 was kept.
+
 ## Web export
 
 Export from the lossless master, never from a previous WebP:

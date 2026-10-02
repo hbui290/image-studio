@@ -9,7 +9,7 @@ A plugin of ten skills for Claude Code and Codex, plus a reviewer agent in the C
 | Skill | Does |
 | --- | --- |
 | `image-inspect` | Diagnoses defects and numbers repeated objects so you can pick a target |
-| `image-enhance` | Sharpens or upscales a whole image, removes backgrounds, exports for the web, and proves the gain at display size |
+| `image-enhance` | Sharpens or upscales a whole image, cleans jagged or haloed cutout edges, removes backgrounds, exports for the web, and proves the gain at display size |
 | `image-repair` | Fixes one region through a mask (a face, a prop, a removed person, a logo) and leaves the rest untouched |
 | `image-verify` | Reviews each criterion and audits pixels outside the mask |
 | `image-create` | Generates new images with a role for each reference |

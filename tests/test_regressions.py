@@ -329,6 +329,22 @@ class InstallerTests(unittest.TestCase):
     def test_skill_list_is_derived_from_the_folder(self):
         self.assertEqual(set(self.installer.NAMES), {p.parent.name for p in SKILLS.glob("*/SKILL.md")})
 
+    def test_staging_sits_next_to_the_real_folder_behind_a_symlink(self):
+        # A symlinked --to can point to another disk; staging beside the link would make rename fail (EXDEV).
+        real = Path(self.tmp.name) / "disk/skills"
+        real.mkdir(parents=True)
+        link = Path(self.tmp.name) / "home/skills"
+        link.parent.mkdir()
+        link.symlink_to(real)
+        real_mkdtemp, used = self.installer.tempfile.mkdtemp, []
+        self.installer.tempfile.mkdtemp = lambda **kw: used.append(Path(kw["dir"])) or real_mkdtemp(**kw)
+        try:
+            self.installer.install(SKILLS, link)
+        finally:
+            self.installer.tempfile.mkdtemp = real_mkdtemp
+        self.assertEqual(used, [real.parent.resolve()])
+        self.assertTrue((real / "image-verify/SKILL.md").is_file())
+
     def test_replace_handles_a_file_where_a_skill_folder_was(self):
         self.installer.install(SKILLS, self.dest)
         target = self.dest / "image-verify"

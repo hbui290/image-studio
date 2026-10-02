@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.2.3 (2026-10-02)
+
+Cutout edge cleanup for transparent PNGs, plus fixes from a third review. Every behavior fix has a regression test (164 tests before, 172 after).
+
+- **image-enhance, new:** `compare_display.py` now handles transparent images. It shows them on a dark backdrop (`before-after.png`) and a light one (`before-after-light.png`), measures edge noise at display size against the source (`edge_ratio`: at most 0.8 counts as a visible improvement, above 1.1 fails), and fails a changed cutout shape (`alpha_iou` below 0.97). A new "Cutout edges" recipe removes a halo or speckled rim by shrinking and softening the alpha edge one display pixel at a time. image-inspect routes jagged or outlined cutout edges to it.
+- **image-enhance:** a `--crop` at the far edge of a candidate smaller than the source no longer shows black padding (a 2.2.2 regression).
+- **Installer:** `--to` may be a symlink to another disk; the staging folder now sits next to the real folder, so the final rename no longer fails with "Cross-device link".
+- **image-reconstruction:** the visual map treats the Turkish dotless i (ı) like Python's `casefold`, so it no longer refuses preserve/allow terms that `reconstruct.py` accepts.
+
 ## 2.2.2 (2026-10-02)
 
 Fixes from a bug hunt on 2.2.1. Every behavior fix has a regression test (159 tests before, 164 after).

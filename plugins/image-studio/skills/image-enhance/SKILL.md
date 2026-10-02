@@ -1,6 +1,6 @@
 ---
 name: image-enhance
-description: Make a whole image look sharper, cleaner, or larger - blurry, soft, pixelated, low resolution, "upscale", "make it 4K", "enhance", "smoother" - with an AI upscaler plus ImageMagick, then prove the result is visibly better at display size. Also background removal and web export. Not for fixing one wrong object (image-repair).
+description: Make a whole image look sharper, cleaner, or larger - blurry, soft, pixelated, low resolution, "upscale", "make it 4K", "enhance", "smoother" - with an AI upscaler plus ImageMagick, then prove the result is visibly better at display size. Also jagged, speckled, or haloed edges on a transparent PNG, background removal, and web export. Not for fixing one wrong object (image-repair).
 ---
 
 # Whole-image enhancement
@@ -47,17 +47,19 @@ A worked case that combines a repaint, an upscale, and masked repairs is the [ta
    python3 <skills>/image-enhance/scripts/compare_display.py --source src.png --candidate enhanced.png \
      --out compare-1 --width 1920 --crop 1200,300,400,300
    ```
-   `--width` is the display width in pixels (CSS width × device pixel ratio), 1 to 16384. It is not for transparent images: it drops alpha and compares only color, so flatten both files onto the delivery background first (`magick in.png -background white -alpha remove -alpha off flat.png`) and check the cutout edges separately.
+   `--width` is the display width in pixels (CSS width × device pixel ratio), 1 to 16384. Transparent images are compared on a dark backdrop, with a light-backdrop copy for viewing, and their cutout edges are checked too (see Outputs). A cutout made from an opaque image is a new shape, not an enhancement: inspect it with the [background removal](references/recipes.md#background-removal) backdrops instead.
    `visible_improvement: false` means stop and report what failed (invisible, not sharper, color shifted, or content moved). Show `before-after.png` and the crops to the user either way. Record rejected models in one line each.
-6. **If still soft where it matters** (faces, props with no real detail), the pixels do not exist: hand those regions to [image-repair](../image-repair/SKILL.md) with references.
-7. **Deliver** with the [export](references/recipes.md#web-export) and [cutout](references/recipes.md#background-removal) recipes. A brightness or color grade is a separate, requested change, not part of sharpening.
+6. **Transparent PNG with jagged or outlined edges**: the halo is in the alpha edge, so upscaling only enlarges it. After any upscale, clean the edges with the [cutout edges](references/recipes.md#cutout-edges) recipe and prove it with step 5.
+7. **If still soft where it matters** (faces, props with no real detail), the pixels do not exist: hand those regions to [image-repair](../image-repair/SKILL.md) with references.
+8. **Deliver** with the [export](references/recipes.md#web-export) and [cutout](references/recipes.md#background-removal) recipes. A brightness or color grade is a separate, requested change, not part of sharpening.
 
 ## Outputs
 
 `compare_display.py` creates the `--out` folder and writes:
 
-- `metrics.json`: `visible_improvement`, `failures`, `metrics`, and `limits`. The same JSON is printed to stdout.
-- `before-after.png`: source left, candidate right, both resized to `--width`.
+- `metrics.json`: `visible_improvement`, `failures`, `metrics`, and `limits`. The same JSON is printed to stdout. For transparent images, `metrics` adds `edge_speckle_source` and `edge_speckle_candidate` (edge noise at display size, the worse of the dark and light backdrops), `edge_ratio` (candidate over source; at most 0.8 counts as a visible improvement, above 1.1 fails), and `alpha_iou` (overlap of the two cutout shapes; below 0.97 fails).
+- `before-after.png`: source left, candidate right, both resized to `--width`. Transparent images are shown on a dark backdrop.
+- `before-after-light.png`: the same on a light backdrop, written only when either image has transparent pixels.
 - `crop-N.png`: one 100% crop pair per `--crop`, numbered from 1.
 
 Exit codes: 0 whenever the comparison ran, including when `visible_improvement` is false, so read the verdict, not the exit code. 2 for bad input: a missing or unreadable file, an existing `--out` folder, a `--width` outside 1 to 16384, different aspect ratios, or a crop outside the source.
@@ -69,3 +71,4 @@ Exit codes: 0 whenever the comparison ran, including when `visible_improvement` 
 - `visible_improvement` is false for every model tried: stop and report the failures with `before-after.png`.
 - The image is small text, UI, or a logo: do not use an AI upscaler.
 - Remaining softness is missing detail, not blur: hand those regions to image-repair.
+- Every edge shrink either leaves the edges noisy or drops `alpha_iou` below 0.97: stop and show both before-after images; the halo needs a masked fix in image-repair.
