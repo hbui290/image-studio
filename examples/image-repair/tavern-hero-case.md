@@ -10,7 +10,7 @@ The after image is the version just before a final round that placed a brand mar
 
 ## What kind of change this was
 
-This was not a pure enhancement. The owner asked for every character and both pets to match approved character and pet sheets, so the whole frame was repainted on purpose: faces, hair, costumes, both pets (a fox-like pet and a rabbit-like pet replaced the original mascots), and later the framing itself. Only after the content was right was the image upscaled, and then defects were fixed one masked region at a time.
+This was not a pure enhancement. The owner asked for every character and both pets to match approved character and pet sheets, so the whole frame was repainted on purpose: faces, hair, costumes, both pets, and later the framing itself. The two pets in the original were generator mistakes: the first AI image invented a duck-like pet and a flame creature instead of the approved designs. Attaching the approved pet sheets as references produced the correct fox-like and rabbit-like pets. Only after the content was right was the image upscaled, and then defects were fixed one masked region at a time.
 
 An earlier version of this page said the first image was 1024×576. The files do not support that. The owner's original is 1672×941. The only 1024×576 file is a small web copy of the approved layout made a day later; the early diagnosis probably measured that copy.
 
@@ -18,7 +18,7 @@ An earlier version of this page said the first image was 1024×576. The files do
 
 | Stage | What changed | Tool |
 | --- | --- | --- |
-| 1. Original | 1672×941 wide scene, twelve people, two mascot pets | Owner-supplied |
+| 1. Original | 1672×941 wide scene, twelve people, two pets drawn wrong by the generator | Owner-supplied |
 | 2. Owner variants | Two 2000×1125 variants with the new pets, then a 1672×941 face revision | Not recorded |
 | 3. Reference rebuild | Faces, hair, and costumes repainted in three passes of four character sheets each. 3840×2160 was requested; 1672×941 came back | Image generator with reference sheets |
 | 4. First 4K | Tone-balanced master upscaled, resampled to 3840×2160 (WebP q90), plus a 2560×1440 copy | Real-ESRGAN `realesrgan-x4plus-anime` ×4, tile 128 |
@@ -93,7 +93,7 @@ Faces (red-haired fighter, blonde healer, witch):
 
 ![Faces before and after](tavern-hero/crop-faces.webp)
 
-Pets (original mascots on the left; fox-like and rabbit-like pets matched to their sheets on the right):
+Pets (the generator's wrong pets on the left; the approved fox-like and rabbit-like designs, redrawn from their sheets, on the right):
 
 ![Pets before and after](tavern-hero/crop-pets.webp)
 
