@@ -75,6 +75,18 @@ With authorization, install [Upscayl](https://github.com/upscayl/upscayl) (deskt
 
 On the test anime image: plain resize and a one-pixel edit failed as invisible, a strong `-unsharp` failed as not sharper, the two AI recipes passed, and the gamma grade failed on color. The numbers screen; the person decides from `before-after.png` and the crops.
 
+## Keep small text from the source
+
+An AI upscaler can redraw small letters into wrong ones. When an image that needs upscaling also carries a line of small text, put the plainly resized source back inside a soft box around the text (the box is in upscaled pixels):
+
+```bash
+magick src.png -filter Lanczos -resize 400% src-4x.png
+magick -size 4096x6144 xc:black -fill white -draw 'rectangle 700,4900 3396,5580' -blur 0x24 -alpha off text-mask.png
+magick up.png src-4x.png text-mask.png -composite locked.png
+```
+
+The mask must have no alpha channel (`-alpha off`), or the composite uses the wrong pixels. Check that the text box matches `src-4x.png` and everything outside it matches `up.png`.
+
 ## Background removal
 
 Uses [rembg](https://github.com/danielgatis/rembg) (optional).
@@ -89,27 +101,57 @@ magick cutout.png -background black -flatten on-black.png
 
 The first run downloads the model. Inspect both backdrops for halos, holes, and missing hair. Never ask an image generator for a "transparent background" and trust a painted checkerboard.
 
-## Cutout edges
+### Solid backdrop
 
-Symptom: a transparent PNG looks jagged, speckled, or outlined by a gray or white line on a dark or light page, though it looked fine on the backdrop it was made on. Cause: the outermost pixels still carry the old backdrop (a halo or a shadow), and an upscaler sharpened that noise. Upscaling does not fix it: Upscayl keeps the alpha channel and enlarges the halo with it. So upscale first (if needed), then clean the edges at the larger size.
-
-Look at the edge on both backdrops first: run `compare_display.py` with the same file as `--source` and `--candidate`, then open `before-after.png` (dark) and `before-after-light.png` (light); `edge_speckle_source` is the baseline. Then shrink the alpha edge by one, two, and three display pixels, soften it, and compare each:
+An object on a plain black backdrop needs no segmenter. Build the mask at the source size (fill the holes so dark parts of the object stay opaque), soften it slightly, and only then enlarge it with Lanczos; a mask thresholded after upscaling keeps every stair-step. For a white backdrop, add `-negate` before `-threshold`.
 
 ```bash
-w=520                                                   # display width in pixels
-n=$(( $(magick identify -format '%w' in.png) / w ))     # source pixels per display pixel
-n=$(( n > 0 ? n : 1 ))
-for k in 1 2 3; do
-  magick in.png \( +clone -alpha extract -morphology Erode Disk:$((k*n)) -blur 0x$((k*n/5+1)) \) \
-    -compose CopyOpacity -composite "edges-$k.png"
-  python3 <skills>/image-enhance/scripts/compare_display.py --source in.png --candidate "edges-$k.png" \
-    --out "edges-$k" --width "$w"
-done
+magick in.png -colorspace gray -threshold 3% -alpha off mask.png
+magick mask.png -fill white -draw 'color 0,0 floodfill' -negate holes.png
+magick mask.png holes.png -compose Lighten -composite -morphology Close Diamond:2 -blur 0x0.5 mask-full.png
+magick in.png mask-full.png -alpha off -compose CopyOpacity -composite cutout.png
 ```
 
-Keep the smallest shrink whose `visible_improvement` is true (edges at least 20% cleaner, `alpha_iou` at least 0.97) and that looks clean on both backdrops. Too much shrink eats thin or serrated parts: `alpha_iou` drops and the edges get noisier again. No number tells a halo from a designed gray rim, so look before accepting; to keep a designed rim, mask the halo area and use [image-repair](../../image-repair/SKILL.md) instead.
+## Cutout edges
 
-On a 4096×6144 metallic card pack shown 520 px wide (`n` = 7), `k` = 2 (a 14 px shrink with `-blur 0x3`) removed the gray side halo: `edge_ratio` 0.66, `alpha_iou` 0.987. `k` = 1 was too little (0.88); `k` = 3 also passed (0.78) but cut further into the crimped ends, so `k` = 2 was kept.
+Symptom: a transparent PNG looks jagged, speckled, or outlined by a gray or white line on a dark or light page, though it looked fine on the backdrop it was made on. Cause: the outermost pixels still carry the old backdrop (a halo or a shadow), and an upscaler sharpened that noise. Work in this order; each step is proved with `compare_display.py`, which for transparent images also writes `before-after-light.png` and reports `edge_noise`, `edge_ratio`, `alpha_iou`, and `body_alpha` (see the SKILL.md Outputs).
+
+1. **Check that the transparency is real.** A file can look transparent and be opaque: a painted checkerboard, or a "transparent" generator result whose background is solid black. `opaque=True` means there is no transparency; make the cutout first (rembg, or the [solid backdrop](#solid-backdrop) recipe):
+   ```bash
+   magick identify -format '%f opaque=%[opaque] corner=%[pixel:p{0,0}]\n' in.png
+   ```
+   Then run `compare_display.py` with the same file as `--source` and `--candidate` and open both before-after images. `edge_noise_source` is the edge baseline (edge noise over the noise inside the object); `body_alpha` below 254 means the object itself is slightly see-through.
+2. **Upscale, if needed, before cleaning edges.** Upscayl keeps the alpha channel, so a direct run works. If the enlarged edges come out darker, give the fully transparent pixels a neutral gray, upscale the colors, and enlarge the alpha separately with Lanczos. Use `-alpha background`, which recolors only fully transparent pixels; `-alpha remove` would also blend gray into the half-transparent edge pixels and leave a gray rim once the alpha is put back:
+   ```bash
+   magick in.png -background '#969696' -alpha background -alpha off rgb.png
+   "$BIN" -i rgb.png -o rgb-4x.png -s 4 -m "$MODELS" -n "$model"
+   magick in.png -alpha extract -filter Lanczos -resize 400% alpha-4x.png
+   magick rgb-4x.png alpha-4x.png -alpha off -compose CopyOpacity -composite up-4x.png
+   ```
+3. **Shrink the alpha edge** by one, two, and three display pixels, soften it, and compare each:
+   ```bash
+   w=520                                                   # display width in pixels
+   n=$(( $(magick identify -format '%w' in.png) / w ))     # source pixels per display pixel
+   n=$(( n > 0 ? n : 1 ))
+   for k in 1 2 3; do
+     magick in.png \( +clone -alpha extract -morphology Erode Disk:$((k*n)) -blur 0x$((k*n/5+1)) \) \
+       -compose CopyOpacity -composite "edges-$k.png"
+     python3 <skills>/image-enhance/scripts/compare_display.py --source in.png --candidate "edges-$k.png" \
+       --out "edges-$k" --width "$w"
+   done
+   ```
+   Keep the smallest shrink whose `visible_improvement` is true (edges at least 20% cleaner, `alpha_iou` at least 0.97) and that looks clean on both backdrops. Too much shrink eats thin or serrated parts: `alpha_iou` drops and the edges get noisier again. No number tells a halo from a designed gray rim, so look before accepting.
+4. **Make the body solid** when `body_alpha` is below 254 and the object is not meant to be transparent. This lifts alpha 248 and above to 255 and barely touches the edge:
+   ```bash
+   magick in.png -channel A -level 0%,97% +channel solid.png
+   ```
+5. **Regenerate the edge when shrinking is not enough**, for example a dark wavy seam that is part of the object's pixels. This is new pixels, so follow [image-repair](../../image-repair/SKILL.md): give the image generator the best cleaned version as the reference, ask for a transparent background, and repair in two passes rather than one big request:
+   - Pass 1, all edges: "Edit this exact [object]. Preserve [the artwork, every line, the text "…", proportions]. Repair ONLY the outer perimeter on all four sides: clean realistic [material] edges, a smooth product-cutout silhouette with continuous antialiasing, no jagged pixels, no colored or black fringe, no stray fragments, no halo, no shadow. Same framing and dimensions. Transparent background. Add nothing."
+   - Pass 2, one remaining spot, with the pass 1 result as the reference: "Local repair only. Remove [the defect] along [the exact edge]. Replace only that narrow strip with [the clean edge]. Preserve [the parts next to it] and every other pixel as closely as possible. Do not modify the other edges. Transparent background."
+
+   A generator redraws the whole image: compare the result with the source, list any design change (a line or detail that disappeared) for the user, and composite the regenerated strip through a soft mask when the rest must stay exact. Generated files are usually about 1024 px and often have a body alpha of 249 to 254, so run steps 1, 2, and 4 on the result.
+
+On a 4096×6144 metallic card pack shown 520 px wide (`n` = 7), `k` = 2 (a 14 px shrink with `-blur 0x3`) removed the gray side halo: `edge_ratio` 0.66, `alpha_iou` 0.987. `k` = 1 was too little (0.88) and `k` = 3 (0.80) cut further into the crimped ends, so `k` = 2 was kept. Shrinking could not remove a dark wavy seam on the top edge; two regeneration passes did. The accepted generated file was 1024×1536 with a body alpha of 249 to 254; upscaling it 4x directly or with `-alpha background` passed (`edge_ratio` 1.29 and 1.27, sharper and not noisier), `-alpha remove` left a gray rim and failed (1.53), and step 4 made the body 255.
 
 ## Web export
 

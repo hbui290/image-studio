@@ -30,7 +30,7 @@ A worked case that combines a repaint, an upscale, and masked repairs is the [ta
    ls /Applications/Upscayl.app/Contents/Resources/bin/ 2>/dev/null   # macOS app; elsewhere look in the Upscayl install folder
    ```
    Paths under `/Applications` here and in [recipes.md](references/recipes.md) are macOS examples; on Windows and Linux, look in the folder where Upscayl or Real-ESRGAN-ncnn-vulkan was installed. If no upscaler exists, say so and offer [setup](references/recipes.md#getting-an-upscaler); do not pass off a sharpen filter as enhancement.
-3. **Pick the recipe by image type** from [recipes.md](references/recipes.md). Default for anime/2D art under about 2000 px wide: `remacri-4x` at 4x, or `realesr-animevideov3-x2` at 2x when speed matters. Never upscale small text or UI; never repeat a pass on an already enhanced image.
+3. **Pick the recipe by image type** from [recipes.md](references/recipes.md). Default for anime/2D art under about 2000 px wide: `remacri-4x` at 4x, or `realesr-animevideov3-x2` at 2x when speed matters. Never AI-upscale an image that is mostly small text or UI (keep a line of text in a larger image with the text-lock recipe); never repeat a pass on an already enhanced image.
 4. **Trial on a crop** of the softest area (faces, small props) with two or three models, then run the winner on the whole image and resize to the delivery size:
    ```bash
    BIN=upscayl-bin              # the binary found in step 2 (full path for the macOS app), or realesrgan-ncnn-vulkan
@@ -41,7 +41,7 @@ A worked case that combines a repaint, an upscale, and masked repairs is the [ta
    magick up.png -format '%[fx:maxima]' info:     # must print a number above 0; 0 means an all-black image
    magick up.png -filter Lanczos -resize 3840x2160 -depth 8 enhanced.png
    ```
-   A missing model does not stop the upscaler: it prints `fopen ... failed`, writes an all-black image, and still exits 0. The Upscayl app's own models folder holds only the seven Upscayl models; the `realesr-*` and `realesrgan-*` models must be copied in from the Real-ESRGAN-ncnn-vulkan release ([model folders](references/recipes.md#model-folders)). The fast `realesr-animevideov3-x2` recipe adds `-unsharp 0x0.55+0.5+0.015` after the resize. `-depth 8` keeps a 16-bit PNG from being produced.
+   If the image carries small text, [keep the text from the source](references/recipes.md#keep-small-text-from-the-source). A missing model does not stop the upscaler: it prints `fopen ... failed`, writes an all-black image, and still exits 0. The Upscayl app's own models folder holds only the seven Upscayl models; the `realesr-*` and `realesrgan-*` models must be copied in from the Real-ESRGAN-ncnn-vulkan release ([model folders](references/recipes.md#model-folders)). The fast `realesr-animevideov3-x2` recipe adds `-unsharp 0x0.55+0.5+0.015` after the resize. `-depth 8` keeps a 16-bit PNG from being produced.
 5. **Prove it** at the real display size, with 100% crops of the areas the user cares about:
    ```bash
    python3 <skills>/image-enhance/scripts/compare_display.py --source src.png --candidate enhanced.png \
@@ -49,7 +49,7 @@ A worked case that combines a repaint, an upscale, and masked repairs is the [ta
    ```
    `--width` is the display width in pixels (CSS width × device pixel ratio), 1 to 16384. Transparent images are compared on a dark backdrop, with a light-backdrop copy for viewing, and their cutout edges are checked too (see Outputs). A cutout made from an opaque image is a new shape, not an enhancement: inspect it with the [background removal](references/recipes.md#background-removal) backdrops instead.
    `visible_improvement: false` means stop and report what failed (invisible, not sharper, color shifted, or content moved). Show `before-after.png` and the crops to the user either way. Record rejected models in one line each.
-6. **Transparent PNG with jagged or outlined edges**: the halo is in the alpha edge, so upscaling only enlarges it. After any upscale, clean the edges with the [cutout edges](references/recipes.md#cutout-edges) recipe and prove it with step 5.
+6. **Transparent PNG with jagged or outlined edges**: the halo is in the edge pixels, so upscaling only enlarges it. Follow the [cutout edges](references/recipes.md#cutout-edges) order: check that the transparency is real, upscale, shrink the edge, make the body solid, and regenerate the edge through image-repair only when shrinking is not enough. Prove each step with step 5.
 7. **If still soft where it matters** (faces, props with no real detail), the pixels do not exist: hand those regions to [image-repair](../image-repair/SKILL.md) with references.
 8. **Deliver** with the [export](references/recipes.md#web-export) and [cutout](references/recipes.md#background-removal) recipes. A brightness or color grade is a separate, requested change, not part of sharpening.
 
@@ -57,7 +57,7 @@ A worked case that combines a repaint, an upscale, and masked repairs is the [ta
 
 `compare_display.py` creates the `--out` folder and writes:
 
-- `metrics.json`: `visible_improvement`, `failures`, `metrics`, and `limits`. The same JSON is printed to stdout. For transparent images, `metrics` adds `edge_speckle_source` and `edge_speckle_candidate` (edge noise at display size, the worse of the dark and light backdrops), `edge_ratio` (candidate over source; at most 0.8 counts as a visible improvement, above 1.1 fails), and `alpha_iou` (overlap of the two cutout shapes; below 0.97 fails).
+- `metrics.json`: `visible_improvement`, `failures`, `metrics`, and `limits`. The same JSON is printed to stdout. For transparent images, `metrics` adds `edge_noise_source` and `edge_noise_candidate` (noise along the cutout edge over the noise inside the object, at display size, the worse of the dark and light backdrops; a sharper upscale raises both, a halo raises only the edge), `edge_ratio` (candidate over source; at most 0.8 with `sharpness_gain` at least 0.9 counts as a visible improvement, above 1.35 fails), and `alpha_iou` (overlap of the two cutout shapes; below 0.97 fails), and `body_alpha_source` and `body_alpha` (mean alpha inside the object; a candidate below 254 fails as see-through, and a see-through source made solid counts as a visible improvement).
 - `before-after.png`: source left, candidate right, both resized to `--width`. Transparent images are shown on a dark backdrop.
 - `before-after-light.png`: the same on a light backdrop, written only when either image has transparent pixels.
 - `crop-N.png`: one 100% crop pair per `--crop`, numbered from 1.
@@ -71,4 +71,4 @@ Exit codes: 0 whenever the comparison ran, including when `visible_improvement` 
 - `visible_improvement` is false for every model tried: stop and report the failures with `before-after.png`.
 - The image is small text, UI, or a logo: do not use an AI upscaler.
 - Remaining softness is missing detail, not blur: hand those regions to image-repair.
-- Every edge shrink either leaves the edges noisy or drops `alpha_iou` below 0.97: stop and show both before-after images; the halo needs a masked fix in image-repair.
+- Every edge shrink either leaves the edges noisy or drops `alpha_iou` below 0.97: stop shrinking and show both before-after images; regenerate the edge through image-repair as the cutout edges recipe describes.

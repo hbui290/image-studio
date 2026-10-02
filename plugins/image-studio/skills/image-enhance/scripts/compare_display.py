@@ -6,9 +6,12 @@ optional 100% crops, and metrics.json, then prints the verdict. Metrics are a sc
 a person still looks at before-after.png. Requires Pillow only.
 
 Transparent images are shown on a dark backdrop in before-after.png and a light one in
-before-after-light.png, and their cutout edges are compared: edges noisier than the source fail,
-and so does a changed cutout shape. Edges at least 20% cleaner count as a visible improvement.
-Edge noise is relative, not absolute: a detailed outline is legitimately noisier than a plain one.
+before-after-light.png, and their cutout edges are compared: edges much noisier than the source fail,
+and so does a changed cutout shape or a candidate whose body is slightly see-through (alpha
+below 255, as image generators often write). Edges at least 20% cleaner, or a see-through body
+made solid, count as a visible improvement.
+Edge noise is measured relative to the noise inside the object, so a detailed object or a sharper
+upscale does not count as a noisy edge, while a halo or speckled rim does.
 """
 
 import argparse
@@ -19,7 +22,8 @@ from pathlib import Path
 
 # ponytail: thresholds calibrated on anime/2D art (references/recipes.md); recheck for photos.
 LIMITS = {"min_display_difference": 1.0, "min_sharpness_gain": 1.15, "max_color_shift": 3.0, "min_fidelity_psnr": 25.0,
-          "max_edge_ratio_for_gain": 0.8, "max_edge_ratio": 1.1, "min_alpha_iou": 0.97}
+          "max_edge_ratio_for_gain": 0.8, "min_sharpness_for_edge_gain": 0.9, "max_edge_ratio": 1.35,
+          "min_alpha_iou": 0.97, "min_body_alpha": 254.0}
 DARK, LIGHT = (30, 30, 30), (235, 235, 235)
 
 
@@ -90,8 +94,11 @@ def cutout_mask(image, size=None):
     return (alpha.resize(size, Image.LANCZOS) if size else alpha).point(lambda v: 255 if v >= 128 else 0)
 
 
-def edge_speckle(image, width, color):
-    """Mean local noise along the cutout edge at display size; halos, specks and stair-steps raise it."""
+def edge_noise(image, width, color):
+    """Local noise along the cutout edge over the noise inside the object, at display size.
+
+    Halos, specks and stair-steps raise the edge alone; sharper detail raises both, so the ratio holds.
+    """
     from PIL import ImageChops, ImageFilter, ImageStat
 
     shown = to_width(image, width)
@@ -100,27 +107,42 @@ def edge_speckle(image, width, color):
     if not band.getbbox():
         return 0.0
     gray = flatten(shown, color).convert("L")
-    return ImageStat.Stat(ImageChops.difference(gray, gray.filter(ImageFilter.MedianFilter(3))), mask=band).mean[0]
+    noise = ImageChops.difference(gray, gray.filter(ImageFilter.MedianFilter(3)))
+    inside = mask.filter(ImageFilter.MinFilter(7))
+    interior = ImageStat.Stat(noise, mask=inside).mean[0] if inside.getbbox() else 0.0
+    return ImageStat.Stat(noise, mask=band).mean[0] / max(interior, 0.5)  # 0.5: a flat interior has ~no noise
+
+
+def body_alpha(image):
+    """Mean alpha inside the cutout, away from its edge: 255 for a solid object."""
+    from PIL import ImageFilter, ImageStat
+
+    body = cutout_mask(image).filter(ImageFilter.MinFilter(9))
+    return ImageStat.Stat(image.getchannel("A"), mask=body).mean[0] if body.getbbox() else 255.0
 
 
 def check_edges(source, candidate, width, metrics, gain, guard):
-    """Transparent images: edges no noisier than the source at display size, and the same cutout shape."""
+    """Transparent images: edges not much noisier than the source at display size, and the same cutout shape."""
     from PIL import ImageChops
 
-    source_edges = max(edge_speckle(source, width, color) for color in (DARK, LIGHT))
-    candidate_edges = max(edge_speckle(candidate, width, color) for color in (DARK, LIGHT))
+    source_edges = max(edge_noise(source, width, color) for color in (DARK, LIGHT))
+    candidate_edges = max(edge_noise(candidate, width, color) for color in (DARK, LIGHT))
     first, second = cutout_mask(source), cutout_mask(candidate, source.size)
     union = ImageChops.lighter(first, second).histogram()[255]
     iou = ImageChops.darker(first, second).histogram()[255] / union if union else 1.0
     ratio = candidate_edges / source_edges if source_edges else (1.0 if not candidate_edges else math.inf)
-    metrics.update(edge_speckle_source=round(source_edges, 2), edge_speckle_candidate=round(candidate_edges, 2),
-                   edge_ratio=round(ratio, 3) if math.isfinite(ratio) else None, alpha_iou=round(iou, 4))
-    if ratio <= LIMITS["max_edge_ratio_for_gain"]:
-        gain = []  # cleaner edges are themselves the visible improvement
-    if candidate_edges > source_edges * LIMITS["max_edge_ratio"] + 0.3:  # 0.3: ignore noise in tiny values
+    metrics.update(edge_noise_source=round(source_edges, 2), edge_noise_candidate=round(candidate_edges, 2),
+                   edge_ratio=round(ratio, 3) if math.isfinite(ratio) else None, alpha_iou=round(iou, 4),
+                   body_alpha_source=round(body_alpha(source), 2), body_alpha=round(body_alpha(candidate), 2))
+    cleaner = ratio <= LIMITS["max_edge_ratio_for_gain"] and metrics["sharpness_gain"] >= LIMITS["min_sharpness_for_edge_gain"]
+    if cleaner or metrics["body_alpha_source"] < LIMITS["min_body_alpha"] <= metrics["body_alpha"]:
+        gain = []  # cleaner edges, or a see-through body made solid, are themselves the visible improvement
+    if candidate_edges > source_edges * LIMITS["max_edge_ratio"] + 0.1:  # 0.1: ignore noise in tiny values
         guard.append("cutout edges are noisier than the source at display size (jagged, speckled or haloed)")
     if iou < LIMITS["min_alpha_iou"]:
         guard.append("cutout shape changed: the transparent area moved, grew or shrank")
+    if metrics["body_alpha"] < LIMITS["min_body_alpha"]:
+        guard.append("the cutout body is slightly see-through (alpha below 255); make it solid unless the object is meant to be transparent")
     return gain, guard
 
 

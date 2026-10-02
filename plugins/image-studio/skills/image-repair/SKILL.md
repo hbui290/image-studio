@@ -8,6 +8,7 @@ description: Correct a specific defect in an existing image with a local edit, a
 This skill fixes one region of an accepted image and keeps every other pixel. Use a sibling skill instead when:
 
 - The whole image is soft rather than one object wrong: [image-enhance](../image-enhance/SKILL.md) first; it tests upscalers and proves the gain at display size.
+- A transparent cutout has jagged or haloed edges: try the [cutout edges](../image-enhance/references/recipes.md#cutout-edges) recipe in image-enhance first; regenerate the edge here only when shrinking it is not enough, with the two-pass prompts that recipe gives.
 - The target or the defect is not yet clear: [image-inspect](../image-inspect/SKILL.md) finds it and numbers the objects.
 - The image is new, or the whole image must be regenerated with automated review rounds: [image-loop](../image-loop/SKILL.md).
 - The user still has to choose what to change: [image-edit-map](../image-edit-map/SKILL.md) plans the edit with a numbered map. This skill then executes the masked local fix, and the [image-verify](../image-verify/SKILL.md) audit proves the rest of the image is unchanged.

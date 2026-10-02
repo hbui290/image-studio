@@ -170,6 +170,20 @@ class TransparentEdges(unittest.TestCase):
         self.assertTrue(any("cutout shape changed" in f for f in result["failures"]), result)
         self.assertLess(result["metrics"]["alpha_iou"], 0.97)
 
+    def test_see_through_body_fails_and_a_solid_one_passes(self):
+        source = self.cutout("rim.png", rim=2)
+        clean = self.cutout("clean.png")
+        with Image.open(clean) as image:  # what image generators write: the body at alpha 250, not 255
+            faint = image.copy()
+        faint.putalpha(faint.getchannel("A").point(lambda v: min(v, 250)))
+        faint.save(self.dir / "faint.png")
+        result = self.compare(source, self.dir / "faint.png")
+        self.assertTrue(any("slightly see-through" in f for f in result["failures"]), result)
+        self.assertLess(result["metrics"]["body_alpha"], 254)
+        self.assertEqual(self.compare(source, clean, out="solid")["metrics"]["body_alpha"], 255.0)
+        fixed = self.compare(self.dir / "faint.png", clean, out="fixed")  # making the body solid is the improvement
+        self.assertTrue(fixed["visible_improvement"], fixed)
+
     def test_opaque_images_get_no_edge_check(self):
         Image.new("RGB", (400, 300), "gray").save(self.dir / "a.png")
         result = self.compare(self.dir / "a.png", self.dir / "a.png")
