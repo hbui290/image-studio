@@ -103,11 +103,11 @@ The first run downloads the model. Inspect both backdrops for halos, holes, and 
 
 ### Solid backdrop
 
-An object on a plain black backdrop needs no segmenter. Build the mask at the source size (fill the holes so dark parts of the object stay opaque), soften it slightly, and only then enlarge it with Lanczos; a mask thresholded after upscaling keeps every stair-step. For a white backdrop, add `-negate` before `-threshold`.
+An object on a plain black backdrop needs no segmenter. Build the mask at the source size (fill the holes so dark parts of the object stay opaque), soften it slightly, and only then enlarge it with Lanczos; a mask thresholded after upscaling keeps every stair-step. For a white backdrop, add `-negate` before `-threshold`. The hole fill starts at the top-left pixel, which must be backdrop; if the object touches that corner, change `+0+0` to a backdrop pixel.
 
 ```bash
 magick in.png -colorspace gray -threshold 3% -alpha off mask.png
-magick mask.png -fill white -draw 'color 0,0 floodfill' -negate holes.png
+magick mask.png -fill white -floodfill +0+0 black -negate holes.png
 magick mask.png holes.png -compose Lighten -composite -morphology Close Diamond:2 -blur 0x0.5 mask-full.png
 magick in.png mask-full.png -alpha off -compose CopyOpacity -composite cutout.png
 ```
@@ -130,13 +130,14 @@ Symptom: a transparent PNG looks jagged, speckled, or outlined by a gray or whit
    ```
 3. **Shrink the alpha edge** by one, two, and three display pixels, soften it, and compare each:
    ```bash
+   src=up-4x.png                                           # the step 2 result, or in.png when step 2 was skipped
    w=520                                                   # display width in pixels
-   n=$(( $(magick identify -format '%w' in.png) / w ))     # source pixels per display pixel
+   n=$(( $(magick identify -format '%w' "$src") / w ))     # image pixels per display pixel
    n=$(( n > 0 ? n : 1 ))
    for k in 1 2 3; do
-     magick in.png \( +clone -alpha extract -morphology Erode Disk:$((k*n)) -blur 0x$((k*n/5+1)) \) \
+     magick "$src" \( +clone -alpha extract -morphology Erode Disk:$((k*n)) -blur 0x$((k*n/5+1)) \) \
        -compose CopyOpacity -composite "edges-$k.png"
-     python3 <skills>/image-enhance/scripts/compare_display.py --source in.png --candidate "edges-$k.png" \
+     python3 <skills>/image-enhance/scripts/compare_display.py --source "$src" --candidate "edges-$k.png" \
        --out "edges-$k" --width "$w"
    done
    ```
@@ -151,7 +152,7 @@ Symptom: a transparent PNG looks jagged, speckled, or outlined by a gray or whit
 
    A generator redraws the whole image: compare the result with the source, list any design change (a line or detail that disappeared) for the user, and composite the regenerated strip through a soft mask when the rest must stay exact. Generated files are usually about 1024 px and often have a body alpha of 249 to 254, so run steps 1, 2, and 4 on the result.
 
-On a 4096×6144 metallic card pack shown 520 px wide (`n` = 7), `k` = 2 (a 14 px shrink with `-blur 0x3`) removed the gray side halo: `edge_ratio` 0.66, `alpha_iou` 0.987. `k` = 1 was too little (0.88) and `k` = 3 (0.80) cut further into the crimped ends, so `k` = 2 was kept. Shrinking could not remove a dark wavy seam on the top edge; two regeneration passes did. The accepted generated file was 1024×1536 with a body alpha of 249 to 254; upscaling it 4x directly or with `-alpha background` passed (`edge_ratio` 1.29 and 1.27, sharper and not noisier), `-alpha remove` left a gray rim and failed (1.53), and step 4 made the body 255.
+On a 4096×6144 metallic card pack shown 520 px wide (`n` = 7), `k` = 2 (a 14 px shrink with `-blur 0x3`) removed the gray side halo: `edge_ratio` 0.66, `alpha_iou` 0.987. `k` = 1 was too little (0.88) and `k` = 3 (0.80) cut further into the crimped ends, so `k` = 2 was kept. Shrinking could not remove a dark wavy seam on the top edge; two regeneration passes did. The accepted generated file was 1024×1536 with a body alpha of 249 to 254. Upscaled 4x with `ultrasharp-4x` and made solid with step 4, all three alpha methods passed at 520 px; at 2048 px, where edges are judged at the source's 1024 px, `-alpha background` measured `edge_ratio` 0.88, the direct run 0.94, and `-alpha remove` 1.22, the noisiest. `remacri-4x` shifted the average color by about 3.1 on this file and failed, so try more than one model.
 
 ## Web export
 

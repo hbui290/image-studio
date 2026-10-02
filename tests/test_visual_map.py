@@ -87,8 +87,15 @@ class VisualMapParity(unittest.TestCase):
     def test_page_accepts_what_the_script_accepts(self):
         dotless = self.edited_vellum()  # Python's casefold keeps the Turkish dotless i distinct from i
         dotless["selections"][0]["preserve"], dotless["selections"][0]["allow"] = ["\u0131"], ["i"]
-        self.rc.validate(dotless)
-        self.assertNotIn("error", self.js(dotless))
+        bom = copy.deepcopy(self.vellum)  # Python does not count U+FEFF as whitespace
+        bom["elements"][0]["name"] = "\ufeff"
+        chain = copy.deepcopy(self.vellum)  # deeper than Python's default recursion limit
+        template = chain["criteria"]["hard"][0]
+        chain["criteria"]["hard"] += [dict(template, id=f"H{i}", depends_on=[f"H{i + 1}"] if i < 2199 else [])
+                                      for i in range(1000, 2200)]
+        for label, spec in (("dotless i", dotless), ("BOM name", bom), ("long dependency chain", chain)):
+            self.rc.validate(spec)
+            self.assertNotIn("error", self.js(spec), label)
 
     def test_page_rejects_what_the_script_rejects(self):
         blank = copy.deepcopy(self.vellum)
@@ -100,11 +107,43 @@ class VisualMapParity(unittest.TestCase):
         move_color["selections"][1]["properties"] = ["bbox", "appearance.color"]
         casefold = self.edited_vellum()
         casefold["selections"][0]["preserve"], casefold["selections"][0]["allow"] = ["Straße"], ["STRASSE"]
-        for label, spec in (("blank name", blank), ("keep with properties", keep_props),
-                            ("move with color", move_color), ("casefold overlap", casefold)):
+        sharp_s = self.edited_vellum()  # casefold makes both "ss"; JavaScript lowercases U+1E9E to U+00DF
+        sharp_s["selections"][0]["preserve"], sharp_s["selections"][0]["allow"] = ["\u1e9e"], ["ss"]
+        separator = copy.deepcopy(self.vellum)  # Python strips U+001C; JavaScript's trim() does not
+        separator["elements"][0]["name"] = "\x1c"
+        number_key = copy.deepcopy(self.vellum)  # JavaScript would list this property first
+        number_key["elements"][0]["appearance"]["2"] = number_key["elements"][0]["appearance"]["color"]
+        big = copy.deepcopy(self.vellum)  # JavaScript cannot hold this integer exactly
+        big["revision"] = 2 ** 53 + 1
+        cases = (("blank name", blank), ("keep with properties", keep_props), ("move with color", move_color),
+                 ("casefold overlap", casefold), ("sharp s", sharp_s), ("separator name", separator),
+                 ("number property name", number_key), ("unsafe integer", big))
+        for label, spec in cases:
             with self.assertRaises(self.rc.Invalid, msg=label):
                 self.rc.validate(spec)
             self.assertIn("error", self.js(spec), label)
+
+
+    def test_page_rejects_duplicate_keys_like_the_script(self):
+        texts = ['{"a": 1, "a": 2}', '{"x": {"a": 1, "\\u0061": 2}}', '[{"a": 1}, {"a": 2}]', '{"a": "b", "c": ["a", "a"]}']
+        code = "const p=require(process.argv[1]);console.log(JSON.stringify(JSON.parse(process.argv[2]).map(p.duplicateKey)))"
+        page = json.loads(subprocess.run([NODE, "-e", code, str(self.page), json.dumps(texts)], capture_output=True,
+                                         text=True, check=True).stdout)
+        for text, repeated in zip(texts, page):
+            path = Path(self.tmp.name) / "dup.json"
+            path.write_text(text, encoding="utf-8")
+            try:
+                self.rc.read_json(path)
+                script = None
+            except self.rc.Invalid as error:
+                script = str(error).split(": ", 1)[1]
+            self.assertEqual(repeated, script, text)
+
+    def test_huge_integer_is_a_clean_error(self):
+        big = copy.deepcopy(self.vellum)
+        big["revision"] = 10 ** 400
+        with self.assertRaises(self.rc.Invalid):
+            self.rc.validate(big)
 
 
 if __name__ == "__main__":

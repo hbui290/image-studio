@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.2.4 (2026-10-02)
+
+Fixes from a fourth review. Every behavior fix has a regression test (173 tests before, 179 after).
+
+- **image-enhance:** `compare_display.py` no longer fails a see-through body made solid as a color grade: when the body is made solid, color and fidelity are measured with the source's opacity and the edges against the source with its body made solid.
+- **image-enhance:** an object whose alpha stays below 128 (a faint or ghost cutout) now has a shape: the cutout is taken where alpha is at least half the image's highest alpha, so `body_alpha` and `alpha_iou` report it instead of 255 and 0.
+- **image-enhance:** when `--width` is wider than the source, edges are judged at the source width (new `edge_width` metric). The enlarged source has smooth, interpolated edges, so a clean AI upscale was failing as "noisier" (`edge_ratio` 3 to 5 at 2048 px for a 1024 px file).
+- **image-enhance:** 16-bit grayscale input works on Pillow before 9.
+- **image-enhance recipes:** the solid-backdrop hole fill works (`-draw 'color … floodfill'` added an alpha channel that `-negate` then inverted, so dark parts of the object stayed transparent). The edge-shrink loop works on the upscaled file from the step before. The card-pack measurements were redone and replace numbers that could not be reproduced.
+- **image-verify:** a 16-bit grayscale mask with a transparent gray value (PNG tRNS) now locks those pixels, as the docs say.
+- **image-reconstruction:** `reconstruct.py` rejects numbers beyond 2^53 − 1 with a clear message (a 400-digit integer was a traceback) and checks long dependency chains without recursion. `visual-map.html` now matches it on duplicate JSON keys, Python whitespace (U+001C–U+001F, U+0085, U+FEFF), `casefold` of ß and final sigma, property names that are plain numbers (both reject them), and long dependency chains.
+- **Docs:** the `edge_ratio` limit states its 0.1 allowance for tiny values.
+
 ## 2.2.3 (2026-10-02)
 
 Cutout edge cleanup for transparent PNGs, plus fixes from a third review. Every behavior fix has a regression test (164 tests before, 172 after).

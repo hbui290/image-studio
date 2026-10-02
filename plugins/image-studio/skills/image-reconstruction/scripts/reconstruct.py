@@ -22,6 +22,9 @@ class Invalid(ValueError):
     pass
 
 
+MAX_SAFE_NUMBER = 2 ** 53 - 1
+
+
 def require(condition, message):
     if not condition:
         raise Invalid(message)
@@ -97,10 +100,17 @@ def schema_check(value, rule, root, path="$"):
                 pattern = pattern[:-1] + r"\Z"
             require(re.search(pattern, value), f"{path}: wrong format")
     elif isinstance(value, (int, float)) and not isinstance(value, bool):
+        # JavaScript (visual-map.html) holds integers exactly only up to 2**53 - 1; reject larger so both agree.
+        require(abs(value) <= MAX_SAFE_NUMBER, f"{path}: number is too large")
         require(math.isfinite(value), f"{path}: number must be finite")
         require(value >= rule.get("minimum", -math.inf), f"{path}: below minimum")
         require(value <= rule.get("maximum", math.inf), f"{path}: above maximum")
         require(value > rule.get("exclusiveMinimum", -math.inf), f"{path}: must be greater than minimum")
+
+
+def check_property_name(key, label):
+    # JavaScript lists number-like keys first, so the page would print these properties in a different order.
+    require(not re.fullmatch(r"[0-9]+", key), f"{label}: a property name cannot be a plain number")
 
 
 def unique_index(items, label):
@@ -214,6 +224,7 @@ def validate(spec):
             require(source["dimensions_basis"] != "file_metadata",
                     f"{source['id']}: synthetic example cannot claim measured dimensions")
     for key, value in spec["scene"].items():
+        check_property_name(key, f"scene.{key}")
         check_evidence(value, f"scene.{key}", synthetic)
     for region in spec["coverage"]["excluded_regions"]:
         require(region["source_id"] in sources, "Excluded region uses an unknown source")
@@ -235,6 +246,7 @@ def validate(spec):
         label = element["id"]
         check_evidence(element["description"], f"{label}.description", synthetic)
         for key, value in element["appearance"].items():
+            check_property_name(key, f"{label}.appearance.{key}")
             check_evidence(value, f"{label}.appearance.{key}", synthetic)
         if element["kind"] == "text":
             require(element["text"] is not None, f"{label}: text element needs a transcript or explicit uncertainty")
@@ -282,18 +294,25 @@ def validate(spec):
     for criterion in spec["criteria"]["hard"]:
         require(set(criterion["depends_on"]) <= hard_ids,
                 f"{criterion['id']}: hard requirements cannot depend on soft preference scores")
-    done = set()
-
-    def check_dependencies(current, trail):
-        # Visit each criterion once; a dense dependency graph stays linear instead of exponential.
-        require(current not in trail, f"Criterion dependency cycle involving {current}")
-        if current in done:
-            return
-        for dep in criteria[current]["depends_on"]:
-            check_dependencies(dep, trail | {current})
-        done.add(current)
-    for criterion_id in criteria:
-        check_dependencies(criterion_id, set())
+    # Depth-first search with an explicit stack: each criterion is visited once, and a long chain cannot hit
+    # the recursion limit. state: 1 = on the current path, 2 = done.
+    state = {}
+    for start in criteria:
+        if start in state:
+            continue
+        state[start] = 1
+        stack = [(start, iter(criteria[start]["depends_on"]))]
+        while stack:
+            current, deps = stack[-1]
+            dep = next(deps, None)
+            if dep is None:
+                state[current] = 2
+                stack.pop()
+                continue
+            require(state.get(dep) != 1, f"Criterion dependency cycle involving {dep}")
+            if dep not in state:
+                state[dep] = 1
+                stack.append((dep, iter(criteria[dep]["depends_on"])))
     selected = {}
     for selection in spec["selections"]:
         target, action = selection["target_id"], selection["action"]

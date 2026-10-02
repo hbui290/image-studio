@@ -207,9 +207,12 @@ def editable_mask(image):
 
     if image.mode in HIGH_PRECISION:
         wide = image.convert("F")
+        # A tRNS value marks one gray level as fully transparent, which locks like black; 0 when there is none.
+        clear = image.info.get("transparency", 0)
+        clear = clear if isinstance(clear, (int, float)) else 0
         if hasattr(ImageMath, "lambda_eval"):
-            return ImageMath.lambda_eval(lambda env: (env["m"] != 0) * 255, m=wide).convert("L")
-        return ImageMath.eval("(m != 0) * 255", m=wide).convert("L")
+            return ImageMath.lambda_eval(lambda env: (env["m"] != 0) * (env["m"] != clear) * 255, m=wide).convert("L")
+        return ImageMath.eval("(m != 0) * (m != t) * 255", m=wide, t=clear).convert("L")
     rgba = image.convert("RGBA")
     red, green, blue, alpha = (band.point(lambda value: 255 if value else 0) for band in rgba.split())
     # Any nonzero color channel permits change, unless that mask pixel is fully transparent.

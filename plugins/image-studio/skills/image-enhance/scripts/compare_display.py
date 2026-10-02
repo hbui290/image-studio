@@ -7,11 +7,13 @@ a person still looks at before-after.png. Requires Pillow only.
 
 Transparent images are shown on a dark backdrop in before-after.png and a light one in
 before-after-light.png, and their cutout edges are compared: edges much noisier than the source fail,
-and so does a changed cutout shape or a candidate whose body is slightly see-through (alpha
-below 255, as image generators often write). Edges at least 20% cleaner, or a see-through body
-made solid, count as a visible improvement.
+and so does a changed cutout shape or a candidate whose body is see-through (alpha below 255,
+as image generators often write). Edges at least 20% cleaner, or a see-through body made solid,
+count as a visible improvement; a body made solid has its color and fidelity checks measured with
+the source's opacity, since a solid body is meant to look brighter or darker on the backdrop.
 Edge noise is measured relative to the noise inside the object, so a detailed object or a sharper
-upscale does not count as a noisy edge, while a halo or speckled rim does.
+upscale does not count as a noisy edge, while a halo or speckled rim does. It is measured at the
+display width, or at the source width when the display is wider.
 """
 
 import argparse
@@ -88,10 +90,14 @@ def flatten(image, color):
 
 
 def cutout_mask(image, size=None):
+    """The object's shape: alpha at least half the image's highest alpha, so a faint object still has a shape."""
     from PIL import Image
 
     alpha = image.getchannel("A")
-    return (alpha.resize(size, Image.LANCZOS) if size else alpha).point(lambda v: 255 if v >= 128 else 0)
+    if size:
+        alpha = alpha.resize(size, Image.LANCZOS)
+    cut = max(1, (alpha.getextrema()[1] + 1) // 2)
+    return alpha.point(lambda v: 255 if v >= cut else 0)
 
 
 def edge_noise(image, width, color):
@@ -123,26 +129,40 @@ def body_alpha(image):
 
 def check_edges(source, candidate, width, metrics, gain, guard):
     """Transparent images: edges not much noisier than the source at display size, and the same cutout shape."""
-    from PIL import ImageChops
+    from PIL import Image, ImageChops
 
-    source_edges = max(edge_noise(source, width, color) for color in (DARK, LIGHT))
-    candidate_edges = max(edge_noise(candidate, width, color) for color in (DARK, LIGHT))
+    metrics.update(body_alpha_source=round(body_alpha(source), 2), body_alpha=round(body_alpha(candidate), 2))
+    solidified = metrics["body_alpha_source"] < LIMITS["min_body_alpha"] <= metrics["body_alpha"]
+    baseline = source
+    if solidified:
+        # A solid body looks brighter or darker on the backdrop; that is the fix, not a grade or invented content.
+        # Judge the colors with the source's opacity, and the edges against the source with its body made solid.
+        same = candidate.copy()
+        same.putalpha(source.getchannel("A").resize(candidate.size, Image.LANCZOS))
+        _, _, colors, _, guard = measure(flatten(source, DARK), flatten(same, DARK), width)
+        metrics.update(color_shift=colors["color_shift"], fidelity_psnr=colors["fidelity_psnr"])
+        scale = 255 / max(metrics["body_alpha_source"], 1)
+        baseline = source.copy()
+        baseline.putalpha(source.getchannel("A").point(lambda v: min(255, round(v * scale))))
+    # Beyond the source's own width its edges are interpolated, smooth by construction, so an upscale is judged there.
+    edge_width = min(width, source.width)
+    source_edges = max(edge_noise(baseline, edge_width, color) for color in (DARK, LIGHT))
+    candidate_edges = max(edge_noise(candidate, edge_width, color) for color in (DARK, LIGHT))
     first, second = cutout_mask(source), cutout_mask(candidate, source.size)
     union = ImageChops.lighter(first, second).histogram()[255]
     iou = ImageChops.darker(first, second).histogram()[255] / union if union else 1.0
     ratio = candidate_edges / source_edges if source_edges else (1.0 if not candidate_edges else math.inf)
-    metrics.update(edge_noise_source=round(source_edges, 2), edge_noise_candidate=round(candidate_edges, 2),
-                   edge_ratio=round(ratio, 3) if math.isfinite(ratio) else None, alpha_iou=round(iou, 4),
-                   body_alpha_source=round(body_alpha(source), 2), body_alpha=round(body_alpha(candidate), 2))
+    metrics.update(edge_width=edge_width, edge_noise_source=round(source_edges, 2),
+                   edge_noise_candidate=round(candidate_edges, 2), edge_ratio=round(ratio, 3) if math.isfinite(ratio) else None, alpha_iou=round(iou, 4))
     cleaner = ratio <= LIMITS["max_edge_ratio_for_gain"] and metrics["sharpness_gain"] >= LIMITS["min_sharpness_for_edge_gain"]
-    if cleaner or metrics["body_alpha_source"] < LIMITS["min_body_alpha"] <= metrics["body_alpha"]:
+    if cleaner or solidified:
         gain = []  # cleaner edges, or a see-through body made solid, are themselves the visible improvement
     if candidate_edges > source_edges * LIMITS["max_edge_ratio"] + 0.1:  # 0.1: ignore noise in tiny values
         guard.append("cutout edges are noisier than the source at display size (jagged, speckled or haloed)")
     if iou < LIMITS["min_alpha_iou"]:
         guard.append("cutout shape changed: the transparent area moved, grew or shrank")
     if metrics["body_alpha"] < LIMITS["min_body_alpha"]:
-        guard.append("the cutout body is slightly see-through (alpha below 255); make it solid unless the object is meant to be transparent")
+        guard.append("the cutout body is see-through (alpha below 255); make it solid unless the object is meant to be transparent")
     return gain, guard
 
 
@@ -180,7 +200,7 @@ def load_image(path, Image, ImageOps):
     """RGB, or RGBA when the image has transparent pixels."""
     image = ImageOps.exif_transpose(Image.open(path))
     if image.mode in ("I", "I;16", "I;16B", "I;16L", "I;16N"):
-        image = image.convert("I").point(lambda v: v / 256)  # 16-bit gray to 8-bit; plain convert clips at 255
+        image = image.convert("I").point(lambda v: v * (1 / 256))  # 16-bit gray to 8-bit; plain convert clips at 255
     if image.mode in ("RGBA", "LA", "PA") or "transparency" in image.info:
         rgba = image.convert("RGBA")
         if rgba.getchannel("A").getextrema()[0] < 255:

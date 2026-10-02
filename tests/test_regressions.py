@@ -664,6 +664,15 @@ class CameraAndMaskTests(Case):
         self.assertNotIn("animated", result.stdout)
         self.assertNotIn("format differs", result.stdout)
 
+    def test_transparent_value_of_a_16_bit_mask_stays_locked(self):
+        audit = load("audit", AUDIT)
+        mask = Image.new("I;16", (100, 100), 65535)
+        ImageDraw.Draw(mask).rectangle((0, 0, 49, 99), fill=40000)
+        mask.save(self.dir / "mask16.png", transparency=65535)  # tRNS: 65535 is fully transparent
+        with Image.open(self.dir / "mask16.png") as image:
+            editable = audit.editable_mask(image)
+        self.assertEqual((editable.getpixel((10, 10)), editable.getpixel((80, 80))), (255, 0))
+
     def test_animated_mask_is_refused(self):
         self.contract()
         mask = self.dir / "mask.gif"

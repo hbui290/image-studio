@@ -100,7 +100,7 @@ class CompareDisplay(unittest.TestCase):
         gray = self.source.convert("L")
         gray.convert("I").point(lambda v: v * 257).save(self.dir / "source.png")  # 16-bit grayscale PNG
         with Image.open(self.dir / "source.png") as saved:
-            self.assertEqual(saved.mode, "I;16")
+            self.assertIn(saved.mode, ("I;16", "I"))  # Pillow before 9 opens it as "I"
         _, deep = self.compare(self.truth.convert("L"), out="deep")
         gray.save(self.dir / "source.png")
         _, flat = self.compare(self.truth.convert("L"), out="flat")
@@ -178,11 +178,41 @@ class TransparentEdges(unittest.TestCase):
         faint.putalpha(faint.getchannel("A").point(lambda v: min(v, 250)))
         faint.save(self.dir / "faint.png")
         result = self.compare(source, self.dir / "faint.png")
-        self.assertTrue(any("slightly see-through" in f for f in result["failures"]), result)
+        self.assertTrue(any("see-through" in f for f in result["failures"]), result)
         self.assertLess(result["metrics"]["body_alpha"], 254)
         self.assertEqual(self.compare(source, clean, out="solid")["metrics"]["body_alpha"], 255.0)
         fixed = self.compare(self.dir / "faint.png", clean, out="fixed")  # making the body solid is the improvement
         self.assertTrue(fixed["visible_improvement"], fixed)
+
+    def test_solidifying_a_bright_body_is_not_a_grade(self):
+        for alpha in (248, 255):  # a bright object filling the frame looks brighter on the dark backdrop once solid
+            image = Image.new("RGBA", (400, 400), (0, 0, 0, 0))
+            image.paste(Image.new("RGBA", (380, 380), (250, 250, 250, alpha)), (10, 10))
+            image.save(self.dir / f"body-{alpha}.png")
+        result = self.compare(self.dir / "body-248.png", self.dir / "body-255.png")
+        self.assertTrue(result["visible_improvement"], result)
+
+    def test_a_faint_body_still_has_a_shape(self):
+        clean = self.cutout("clean.png")
+        with Image.open(clean) as image:  # a ghost: every alpha below 128
+            ghost = image.copy()
+        ghost.putalpha(ghost.getchannel("A").point(lambda v: v * 100 // 255))
+        ghost.save(self.dir / "ghost.png")
+        same = self.compare(self.dir / "ghost.png", self.dir / "ghost.png")
+        self.assertLess(same["metrics"]["body_alpha"], 101)
+        self.assertTrue(any("see-through" in f for f in same["failures"]), same)
+        fixed = self.compare(self.dir / "ghost.png", clean, out="fixed")
+        self.assertTrue(fixed["visible_improvement"], fixed)
+
+    def test_a_crisp_upscale_shown_wider_than_the_source_is_not_noisier(self):
+        clean = self.cutout("clean.png")
+        with Image.open(clean) as image:  # the source is a quarter-size copy; the candidate has real edge pixels
+            image.resize((200, 200), Image.LANCZOS).save(self.dir / "small.png")
+        run = subprocess.run([sys.executable, str(SCRIPT), "--source", str(self.dir / "small.png"), "--candidate", str(clean),
+                              "--out", str(self.dir / "wide"), "--width", "800"], capture_output=True, text=True)
+        result = json.loads(run.stdout)
+        self.assertFalse([f for f in result["failures"] if "edges" in f or "shape" in f], result)
+        self.assertEqual(result["metrics"]["edge_width"], 200)
 
     def test_opaque_images_get_no_edge_check(self):
         Image.new("RGB", (400, 300), "gray").save(self.dir / "a.png")
