@@ -9,7 +9,7 @@ A plugin of ten skills for Claude Code and Codex, plus a reviewer agent in the C
 | Skill | Does |
 | --- | --- |
 | `image-inspect` | Diagnoses defects and numbers repeated objects so you can pick a target |
-| `image-enhance` | Sharpens or upscales a whole image, cleans jagged or haloed cutout edges, removes backgrounds, exports for the web, and proves the gain at display size |
+| `image-enhance` | Sharpens or upscales a whole image, cleans jagged or haloed cutout edges, rebuilds a flat logo as vector SVG, removes backgrounds, exports for the web, and proves the gain at display size |
 | `image-repair` | Fixes one region through a mask (a face, a prop, a removed person, a logo) and leaves the rest untouched |
 | `image-verify` | Reviews each criterion and audits pixels outside the mask |
 | `image-create` | Generates new images with a role for each reference |
@@ -66,6 +66,7 @@ Install only what the job needs:
 | Sharpen or upscale a whole image | An AI upscaler: [Upscayl](https://github.com/upscayl/upscayl) (ships `upscayl-bin` and models) or [Real-ESRGAN-ncnn-vulkan](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan) |
 | Redraw a missing detail | An image generator or editor available to your agent, plus ImageMagick |
 | Background removal | Optional: [rembg](https://github.com/danielgatis/rembg) (`isnet-anime` for illustrations) |
+| Logo to vector SVG | Optional: [Potrace](https://potrace.sourceforge.net) |
 | Check results | Python 3.9+ with [Pillow](https://pypi.org/project/pillow/); [jsonschema](https://pypi.org/project/jsonschema/) too for `image-loop`'s reviewer and spec validation. Prefix a command with `uv run --with pillow --with jsonschema`, or `pip install pillow jsonschema` into a virtual environment |
 | Many objects to select automatically | Optional: [SAM 3](https://github.com/facebookresearch/sam3) through [Transformers](https://huggingface.co/docs/transformers/model_doc/sam3), or rembg's `sam` model |
 | Automated vision review through Codex | Optional: [Codex CLI](https://github.com/openai/codex) and a vision model your account can run |

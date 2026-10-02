@@ -8,7 +8,7 @@ a person still looks at before-after.png. Requires Pillow only.
 Transparent images are shown on a dark backdrop in before-after.png and a light one in
 before-after-light.png, and their cutout edges are compared: edges much noisier than the source fail,
 and so does a changed cutout shape or a candidate whose body is see-through (alpha below 255,
-as image generators often write). Edges at least 20% cleaner, or a see-through body made solid,
+as image generators often write) and more see-through than the source. Edges at least 20% cleaner, or a see-through body made solid,
 count as a visible improvement; a body made solid has its color and fidelity checks measured with
 the source's opacity, since a solid body is meant to look brighter or darker on the backdrop.
 Edge noise is measured relative to the noise inside the object, so a detailed object or a sharper
@@ -161,7 +161,8 @@ def check_edges(source, candidate, width, metrics, gain, guard):
         guard.append("cutout edges are noisier than the source at display size (jagged, speckled or haloed)")
     if iou < LIMITS["min_alpha_iou"]:
         guard.append("cutout shape changed: the transparent area moved, grew or shrank")
-    if metrics["body_alpha"] < LIMITS["min_body_alpha"]:
+    # A body as see-through as the source's is unchanged (a model trial on a crop); only a new see-through body fails.
+    if metrics["body_alpha"] < min(LIMITS["min_body_alpha"], metrics["body_alpha_source"] - 1):
         guard.append("the cutout body is see-through (alpha below 255); make it solid unless the object is meant to be transparent")
     return gain, guard
 

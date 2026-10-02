@@ -2,7 +2,7 @@
 
 ## 2.2.4 (2026-10-02)
 
-Fixes from a fourth review. Every behavior fix has a regression test (173 tests before, 179 after).
+Fixes from a fourth review. Every behavior fix has a regression test (173 tests before, 180 after).
 
 - **image-enhance:** `compare_display.py` no longer fails a see-through body made solid as a color grade: when the body is made solid, color and fidelity are measured with the source's opacity and the edges against the source with its body made solid.
 - **image-enhance:** an object whose alpha stays below 128 (a faint or ghost cutout) now has a shape: the cutout is taken where alpha is at least half the image's highest alpha, so `body_alpha` and `alpha_iou` report it instead of 255 and 0.
@@ -12,6 +12,8 @@ Fixes from a fourth review. Every behavior fix has a regression test (173 tests 
 - **image-verify:** a 16-bit grayscale mask with a transparent gray value (PNG tRNS) now locks those pixels, as the docs say.
 - **image-reconstruction:** `reconstruct.py` rejects numbers beyond 2^53 − 1 with a clear message (a 400-digit integer was a traceback) and checks long dependency chains without recursion. `visual-map.html` now matches it on duplicate JSON keys, Python whitespace (U+001C–U+001F, U+0085, U+FEFF), `casefold` of ß and final sigma, property names that are plain numbers (both reject them), and long dependency chains.
 - **Docs:** the `edge_ratio` limit states its 0.1 allowance for tiny values.
+- **image-enhance:** a see-through body fails only when the candidate is more see-through than the source, so a model trial on a crop of an already see-through file is not failed for it.
+- **Workflow from a Codex card-pack session:** new "Logo to vector" recipe (Potrace per color, layered SVG, render-and-compare check; Potrace added to the tools); the cutout-edge order gains "redraw a simple outline as a vector path" before regeneration, and says to verify a redrawn or regenerated edge with an image-verify contract and edge-only mask instead of `compare_display.py`, which reports any edge repair as changed content; image-repair says to measure and match alignment marks after placing a logo; image-verify says what to do in Codex, which has no `image-reviewer` agent.
 
 ## 2.2.3 (2026-10-02)
 

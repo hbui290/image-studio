@@ -200,9 +200,20 @@ class TransparentEdges(unittest.TestCase):
         ghost.save(self.dir / "ghost.png")
         same = self.compare(self.dir / "ghost.png", self.dir / "ghost.png")
         self.assertLess(same["metrics"]["body_alpha"], 101)
-        self.assertTrue(any("see-through" in f for f in same["failures"]), same)
+        solid = self.compare(clean, self.dir / "ghost.png", out="faded")
+        self.assertTrue(any("see-through" in f for f in solid["failures"]), solid)
         fixed = self.compare(self.dir / "ghost.png", clean, out="fixed")
         self.assertTrue(fixed["visible_improvement"], fixed)
+
+    def test_a_model_trial_on_a_see_through_source_is_not_failed_for_its_body(self):
+        clean = self.cutout("clean.png")
+        with Image.open(clean) as image:  # a crop of a generated file: the body was already at alpha 250
+            faint = image.copy()
+        faint.putalpha(faint.getchannel("A").point(lambda v: min(v, 250)))
+        faint.save(self.dir / "faint.png")
+        faint.resize((1600, 1600), Image.LANCZOS).save(self.dir / "faint-2x.png")
+        result = self.compare(self.dir / "faint.png", self.dir / "faint-2x.png")
+        self.assertFalse([f for f in result["failures"] if "see-through" in f], result)
 
     def test_a_crisp_upscale_shown_wider_than_the_source_is_not_noisier(self):
         clean = self.cutout("clean.png")

@@ -146,13 +146,50 @@ Symptom: a transparent PNG looks jagged, speckled, or outlined by a gray or whit
    ```bash
    magick in.png -channel A -level 0%,97% +channel solid.png
    ```
-5. **Regenerate the edge when shrinking is not enough**, for example a dark wavy seam that is part of the object's pixels. This is new pixels, so follow [image-repair](../../image-repair/SKILL.md): give the image generator the best cleaned version as the reference, ask for a transparent background, and repair in two passes rather than one big request:
+5. **Redraw a simple outline as a vector path** when the object has a plain geometric contour (a pack, a card, a sign) and the edge is wavy or serrated beyond what shrinking removes. Draw a smooth SVG path at the image's size that runs just inside the old edge, render it as the alpha, and look at all four sides at 100%:
+   ```bash
+   # outline.svg: <svg xmlns="http://www.w3.org/2000/svg" width="W" height="H"><path fill="#fff" d="M… smooth curves …Z"/></svg>
+   magick -background black outline.svg -alpha off outline-mask.png
+   magick in.png outline-mask.png -alpha off -compose CopyOpacity -composite outlined.png
+   ```
+   This changes the cutout shape on purpose, so `compare_display.py` reports a lower `alpha_iou`; verify it like step 6.
+6. **Regenerate the edge when shrinking is not enough**, for example a dark wavy seam that is part of the object's pixels. This is new pixels, so follow [image-repair](../../image-repair/SKILL.md): give the image generator the best cleaned version as the reference, ask for a transparent background, and repair in two passes rather than one big request:
    - Pass 1, all edges: "Edit this exact [object]. Preserve [the artwork, every line, the text "…", proportions]. Repair ONLY the outer perimeter on all four sides: clean realistic [material] edges, a smooth product-cutout silhouette with continuous antialiasing, no jagged pixels, no colored or black fringe, no stray fragments, no halo, no shadow. Same framing and dimensions. Transparent background. Add nothing."
    - Pass 2, one remaining spot, with the pass 1 result as the reference: "Local repair only. Remove [the defect] along [the exact edge]. Replace only that narrow strip with [the clean edge]. Preserve [the parts next to it] and every other pixel as closely as possible. Do not modify the other edges. Transparent background."
 
    A generator redraws the whole image: compare the result with the source, list any design change (a line or detail that disappeared) for the user, and composite the regenerated strip through a soft mask when the rest must stay exact. Generated files are usually about 1024 px and often have a body alpha of 249 to 254, so run steps 1, 2, and 4 on the result.
 
+   **Verify steps 5 and 6 with image-verify, not `compare_display.py`.** A repaired edge is new pixels: `compare_display.py` measures enhancement and reports such a change as moved content, a changed shape, or noisier edges even when it looks right. Write a [contract](../../image-verify/references/candidate-audit.md) with `change` checks for the edges and `keep` checks for logos and text, use a final acceptance mask that covers only the edge strips, and have an independent reviewer write the review.
+
 On a 4096×6144 metallic card pack shown 520 px wide (`n` = 7), `k` = 2 (a 14 px shrink with `-blur 0x3`) removed the gray side halo: `edge_ratio` 0.66, `alpha_iou` 0.987. `k` = 1 was too little (0.88) and `k` = 3 (0.80) cut further into the crimped ends, so `k` = 2 was kept. Shrinking could not remove a dark wavy seam on the top edge; two regeneration passes did. The accepted generated file was 1024×1536 with a body alpha of 249 to 254. Upscaled 4x with `ultrasharp-4x` and made solid with step 4, all three alpha methods passed at 520 px; at 2048 px, where edges are judged at the source's 1024 px, `-alpha background` measured `edge_ratio` 0.88, the direct run 0.94, and `-alpha remove` 1.22, the noisiest. `remacri-4x` shifted the average color by about 3.1 on this file and failed, so try more than one model.
+
+## Logo to vector
+
+A flat logo (a few solid colors) is rebuilt as SVG paths with [Potrace](https://potrace.sourceforge.net), one layer per color, instead of being upscaled. Make a 1-bit mask per color (`-fuzz` sets how close a pixel must be to the color), trace each mask, and stack the layers bottom to top in the logo's own order:
+
+```bash
+for layer in '000000:black' '00cfd0:cyan'; do      # color:name, bottom layer first
+  magick logo.png -alpha off -fuzz 25% -fill '#ff00ff' -opaque "#${layer%%:*}" \
+    -fuzz 0 -fill white +opaque '#ff00ff' -fill black -opaque '#ff00ff' "${layer##*:}.pbm"
+  potrace --svg --turdsize 8 --alphamax 1 --opttolerance 0.2 --color "#${layer%%:*}" -o "${layer##*:}.svg" "${layer##*:}.pbm"
+done
+sed -e 's/pt"/"/g' -e '/<\/svg>/d' black.svg > logo.svg   # first layer keeps the header; sizes in pixels, not points
+sed -n '/<g /,/<\/g>/p' cyan.svg >> logo.svg             # repeat for every further layer
+echo '</svg>' >> logo.svg
+```
+
+Check it: render the SVG at the logo's size, rebuild each color mask from the render with the same command, and compare. Differing pixels should be a few percent of the color's pixels; thin strokes differ more. On a 2172×724 two-color logo the black layer differed by about 2% and the thin cyan strokes by about 7%; the file had 15 paths and no embedded image.
+
+```bash
+magick -background white logo.svg -alpha off render.png
+magick render.png -alpha off -fuzz 25% -fill '#ff00ff' -opaque '#00cfd0' \
+  -fuzz 0 -fill white +opaque '#ff00ff' -fill black -opaque '#ff00ff' cyan-render.pbm
+magick compare -metric AE cyan.pbm cyan-render.pbm null:              # differing pixels (printed to stderr)
+magick cyan.pbm -format '%[fx:round((1-mean)*w*h)]\n' info:          # the color's pixels
+grep -c '<image' logo.svg                                             # must print 0: no embedded raster
+```
+
+Place a vector logo on artwork by compositing the SVG itself, never by asking an image generator to redraw it ([text and logos](../../image-repair/references/repair-and-composite.md#common-decisions)).
 
 ## Web export
 
