@@ -12,6 +12,8 @@ This skill fixes one region of an accepted image and keeps every other pixel. Us
 - The image is new, or the whole image must be regenerated with automated review rounds: [image-loop](../image-loop/SKILL.md).
 - The user still has to choose what to change: [image-edit-map](../image-edit-map/SKILL.md) plans the edit with a numbered map. This skill then executes the masked local fix, and the [image-verify](../image-verify/SKILL.md) audit proves the rest of the image is unchanged.
 
+A full worked case, with before/after images and the rejected attempts, is the [tavern hero example](https://github.com/hbui290/image-studio/blob/main/examples/image-repair/tavern-hero-case.md) in the repository; a skills install does not include it.
+
 Tools: ImageMagick 7 `magick` for crops, masks, and composites; an image generator that accepts a crop and reference images, when new pixels are needed. Optional segmenters, upscalers, and face models are not prerequisites; check an unfamiliar machine with [tool-readiness.md](references/tool-readiness.md).
 
 ## Steps

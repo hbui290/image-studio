@@ -21,6 +21,10 @@ A plugin of ten skills for Claude Code and Codex, plus a reviewer agent in the C
 
 The `image-reviewer` agent (Claude Code plugin) grades a candidate independently, so the editing agent does not grade its own work. Other hosts get the same instructions in `image-verify/references/independent-review.md` for a fresh reviewer session.
 
+| Before (1672×941, wrong pets) | After (repainted, upscaled, repaired) |
+| --- | --- |
+| ![Before](examples/image-repair/tavern-hero/before.webp) | ![After](examples/image-repair/tavern-hero/after.webp) |
+
 Example: a soft 1672×941 anime tavern hero, where the generator had drawn the wrong pets and off-model faces, was repainted from the approved character and pet sheets, upscaled to 3840×2160, and then repaired one masked region per round (props, stairs, a removed figure), with a pixel compare confirming that everything outside each mask was unchanged. Before/after images, crops, and the rejected attempts are in [examples/image-repair/tavern-hero-case.md](examples/image-repair/tavern-hero-case.md).
 
 ## Install

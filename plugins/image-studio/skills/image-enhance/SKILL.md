@@ -7,6 +7,8 @@ description: Make a whole image look sharper, cleaner, or larger - blurry, soft,
 
 The upscaler and `magick` do the work; this skill picks the recipe and proves the gain. A bigger file is not a better image: accept only what `compare_display.py` and a look at `before-after.png` confirm.
 
+A worked case that combines a repaint, an upscale, and masked repairs is the [tavern hero example](https://github.com/hbui290/image-studio/blob/main/examples/image-repair/tavern-hero-case.md) in the repository; a skills install does not include it.
+
 ## When to use a sibling skill
 
 - One wrong object, a bad face, or a local defect: [image-repair](../image-repair/SKILL.md). Upscalers sharpen what is there; they do not invent correct detail.
