@@ -24,7 +24,7 @@ Use the official project or maintainer source when setup is needed. A repository
 
 | Tool | Role | Source |
 | --- | --- | --- |
-| Host image generator (for example ChatGPT/Codex image generation) | Proposes pixels for missing detail from a crop and references | [OpenAI image generation](https://developers.openai.com/api/docs/guides/tools-image-generation); hosted, so verify access instead of downloading a model |
+| Host image generator (for example ChatGPT/Codex `image_gen.imagegen`) | Proposes pixels for missing detail from a crop and references | [OpenAI image generation](https://developers.openai.com/api/docs/guides/tools-image-generation); hosted, so verify access instead of downloading a model |
 | ImageMagick `magick` | Exact crops, masks, composites, comparisons, export | [GitHub](https://github.com/ImageMagick/ImageMagick) · [install](https://imagemagick.org/download/) |
 | Real-ESRGAN | Super-resolution when recognizable detail needs more pixels | [GitHub](https://github.com/xinntao/Real-ESRGAN) |
 | Upscayl (optional) | Desktop upscaler that ships the `upscayl-bin` command and models; the default whole-image upscaler in [image-enhance](../../image-enhance/SKILL.md) | [GitHub](https://github.com/upscayl/upscayl) |

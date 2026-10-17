@@ -38,7 +38,7 @@ Save these next to the candidates:
 - Each reference file and its role.
 - The clean output files, without annotations.
 
-Do not present generated text or logos as exact. Composite approved source art over the result, or use editable page text when the text does not need to live inside the scene.
+Do not present generated text or logos as exact. Composite approved source art supplied by the user over the result, or use editable page text when the text does not need to live inside the scene.
 
 ## Outputs
 

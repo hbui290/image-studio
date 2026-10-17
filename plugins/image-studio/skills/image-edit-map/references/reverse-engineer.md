@@ -26,7 +26,7 @@ Given an image, produce a reusable visual specification and a numbered inventory
 - Semantics: connectors with explicit endpoints and direction, labels, node counts, chart values and units where legible. Mark an unclear endpoint unknown rather than connecting it arbitrarily.
 - Preservation: identity/product details, exact text, locked regions, and properties to keep when reconstructing.
 - Export considerations: whether the observed asset appears flat or has measured alpha, constraints of current dimensions, and any target output explicitly requested by the user.
-- Unknowns and follow-up questions: font identity, unreadable text, grading recipe, ambiguous topology, missing source assets.
+- Unknowns and follow-up questions: font identity, unreadable text, grading recipe, ambiguous topology, missing source files.
 
 ## Evidence convention
 

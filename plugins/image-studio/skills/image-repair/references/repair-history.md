@@ -9,7 +9,7 @@ When the project has a `.image-studio/` store ([project memory](../../image-veri
 1. Read this file and the latest review/audit outputs.
 2. Start from the frozen approved source or last accepted candidate. Never branch from a rejected edit unless the history explicitly approves it as the new source.
 3. Keep defect IDs stable (the store's `D<n>` IDs when a store exists). Record source filename and SHA-256, source-coordinate bounds, the visible evidence, protected neighbors, and the exact acceptance condition.
-4. Check the rejected-method notes. If the same defect returned, change the operation, mask, reference, or source; do not just strengthen the same prompt.
+4. Check the rejected-method notes. If the same defect returned, change the operation, crop, mask, or reference. If two consecutive rounds repeat the same failure, follow the [`stop_repeated_failure`](../../image-verify/references/decisions.md) rule.
 
 ## After each review
 

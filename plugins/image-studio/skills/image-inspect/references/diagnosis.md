@@ -18,7 +18,7 @@ Inspect the source at native pixels **and** the rendered result at the target si
 | Finding | First useful action |
 | --- | --- |
 | Wrong crop, contrast, or layout | Correct framing or presentation; preserve the image pixels if they are sound. |
-| Compression blocks, noise, mild softness | Re-export from a cleaner master if one exists; otherwise use [image-enhance](../../image-enhance/SKILL.md) and accept only a gain its display-size comparison confirms. |
+| Compression blocks, noise, mild softness | Re-export from the user's original file if they have one; otherwise use [image-enhance](../../image-enhance/SKILL.md) and accept only a gain its display-size comparison confirms. |
 | Too few pixels, or a large but visibly soft source | Use [image-enhance](../../image-enhance/SKILL.md): test a suitable super-resolution model on a representative crop. Resize every candidate back to the same delivery size before comparing; reject changes that only look sharper at 4× zoom, oversmooth line art, or invent details. |
 | Missing eyes, broken geometry, fused objects, extra limbs, inconsistent texture | Use a small local edit, manual retouch, or compositing with an approved reference. Upscaling alone cannot solve missing semantics. |
 | Damaged alpha edge or unwanted background | Repair the matte or background, then inspect the edge against light and dark surfaces. For a jagged, speckled, or outlined edge on a transparent PNG, use the [cutout edges](../../image-enhance/references/recipes.md#cutout-edges) recipe in image-enhance. |

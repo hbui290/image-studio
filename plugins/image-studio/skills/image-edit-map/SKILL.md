@@ -19,22 +19,14 @@ Turn “change that bit” into an addressable edit. Help people see, name, and 
 
 ## Start here
 
-0. **Load project memory.** Run `python3 <skills>/image-verify/scripts/studio_state.py brief`. If it finds a `.image-studio/` store, tell the user in 3–5 lines what was loaded: deliverables, approved masters, open defects, and preferences. If the user sent a screenshot of a defect, record it with `defect add` before editing. If it exits 2 with no store and the job spans several rounds, involves a brand or logo, or the user reports a defect, create one: `init --project <project folder> --brand <brand>` (ask the user when either is unclear; never the home folder or inside a folder that already has a store), then `approve master` for each master the user approved, `approve deliverable` for the current file, and `defect add` for each reported defect. See [project memory](../image-verify/references/project-memory.md).
+0. **Load project memory.** If not already in context, run `studio_state.py brief`; see [using the store in a skill](../image-verify/references/project-memory.md#using-the-store-in-a-skill) to load memory or create a store.
 1. Inspect every supplied image. If no image is available, ask for it; do not invent its contents. Identify which is the edit target and which are references. Read image metadata when possible; do not infer exact dimensions from a resized preview.
 2. Ask up to three short, unanswered questions: **What should change? What must stay? Where will you use it?** Offer plain-language choices relevant to the actual image. If the user is unsure, make the map to help them decide. Do not repeat questions already answered in their brief. Ask follow-ups only when they affect the requested result.
 3. When targets need a picture to choose from, make a **numbered annotation pass** using [the mapping protocol](references/mapping-and-prompts.md). Prefer drawing badges and boxes on a copy with ImageMagick from source coordinates (`magick src.png -fill none -stroke red -draw "rectangle left,top right,bottom" -font <path to a .ttf> -pointsize 28 -fill red -annotate +x0+y0 "#3" map.png`; ImageMagick needs an explicit font file on many systems, such as `/System/Library/Fonts/Supplemental/Arial.ttf` on macOS). Map boxes are normalized `[x, y, width, height]` fractions; convert them to pixel `left`, `top`, `right`, `bottom` with the [normalized-box to pixel rule](../image-verify/references/candidate-audit.md#contract-and-review) before drawing; use a paid image-generation call for it only when a drawn overlay cannot show the elements. Divide the picture into meaningful sections; point arrows from number badges to individually editable elements. Show the map plus its matching legend before asking the person to select edits. This pass creates a separate review copy, never a redesign of the source.
 4. Explain: **“You can say ‘make #3 smaller,’ ‘change #5’s font,’ or ‘keep everything in section B.’”** For multiple pictures, use `A:#3` and `B:#3`.
 5. On selection, form an explicit edit instruction with target, property, requested change, and preserved details. Execute once enough information is available. A user's clear edit request authorizes that edit; do not add another approval step unless they asked to review a proposal first.
 6. Compare the result with the clean source and the agreed constraints.
-7. **Gate before claiming done.** In a project with a store, never call a deliverable done or verified until the gate exits 0:
-   ```bash
-   python3 <skills>/image-verify/scripts/studio_state.py approve deliverable --name N --file F   # only if the file changed
-   python3 <skills>/image-verify/scripts/studio_state.py defect close --id D<n> --status resolved --note "what changed"   # each fixed defect
-   python3 <skills>/image-verify/scripts/studio_state.py gate --deliverable N                     # prints the run id and Next: commands
-   python3 <skills>/image-verify/scripts/studio_state.py verdict --run <run-id> --id D<n> --status pass --evidence "what the crop shows"
-   python3 <skills>/image-verify/scripts/studio_state.py gate --deliverable N --run <run-id>
-   ```
-   Open each crop before writing its verdict; use `fail` or `uncertain` when it is not clearly fixed. Report the gate's Checked / Not checked / Still failing lines as they are. Deliver only after it exits 0; when the gate has not passed, end the turn with the Checked / Not checked / Still failing report or a question. Details: [the gate](../image-verify/references/project-memory.md#the-gate).
+7. **Gate before claiming done.** In a project with a store, run `gate --deliverable` once before telling the user the deliverable is done; follow [using the store in a skill](../image-verify/references/project-memory.md#using-the-store-in-a-skill).
 8. Deliver a clean image, the actual dimensions, and a brief account of changes and any remaining mismatch.
 
 Honor “just do this,” “skip the map,” or an already complete brief. Do not force a questionnaire or annotation round over an explicit direct-edit instruction. If the user requests planning or prompts only, provide those without generating images. In reverse-engineer mode, analysis is the requested output; do not automatically begin an edit.
@@ -85,7 +77,7 @@ These are instructions recognized **inside this skill**, not automatically insta
 
 ## Tools and evidence
 
-Use the host's image inspection and editing tools according to their live instructions. Prefer its image-generation/editing tool for actual image edits. Do not bypass tool restrictions with scripts or another provider. This skill supplies no API key, model entitlement, native editor, or automatic image renderer.
+Use the host's image inspection and editing tools according to their live instructions. Prefer its image-generation/editing tool (`image_gen.imagegen` in Codex) for actual image edits. Do not bypass tool restrictions with scripts or another provider. This skill supplies no API key, model entitlement, native editor, or automatic image renderer.
 
 If image editing is unavailable, provide the map manifest, legend, and prepared annotation/edit prompt, and clearly say the visual map or edit has not been rendered. Do not substitute a text table and claim an annotated image exists. If the user wants deterministic overlays or compositing, use an appropriate editor only when authorized and supported.
 

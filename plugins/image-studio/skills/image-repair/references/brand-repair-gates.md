@@ -1,11 +1,11 @@
 # Brand repair gates
 
-Use these gates for repeated edits, exact logos, text on packaging, and transparent exports. These are visual acceptance requirements, not guarantees provided by a prompt or a successful script exit.
+Use these gates only for exact logos, text on packaging, and transparent exports. These are visual acceptance requirements, not guarantees provided by a prompt or a successful script exit.
 
 ## Freeze the source
 
-1. Record one approved full-size source and one approved master for each logo, card, pack, and character. Record which reference controls shape, color, material, and placement separately. A color request does not authorize replacing the product silhouette or ornament.
-2. Keep rejected candidates separate. Branch each attempt from the approved source, not the latest generated image. If repeated regeneration has degraded detail, stop and return to source assets; sharpening cannot recover canonical geometry.
+1. Record one approved full-size source and one approved master for each logo or brand mark. Record which reference controls shape, color, material, and placement separately. A color request does not authorize replacing the product silhouette or ornament.
+2. Keep rejected candidates separate. Branch each attempt from the approved source, not the latest generated image. If repeated regeneration has degraded detail, restart from the approved image and regenerate with a tighter crop, mask, or reference; do not search for or paste other existing artwork unless the user supplied it.
 3. Fix the named region only. Do not regenerate the poster to move a logo, recolor foil, or remove one card. When a new composition is explicitly requested, treat it as a new draft and recheck all protected criteria.
 
 ## Replace a logo without double printing
@@ -27,7 +27,7 @@ From a repo checkout, see the [logo brief example](https://github.com/hbui290/im
 
 ## Stop and handoff
 
-When the same visible failure appears in two consecutive reviews (the [`stop_repeated_failure`](../../image-verify/references/decisions.md) rule), stop incremental patching and inspect the source, matte polarity, coordinate system, and old-mark removal. Change method or ask one focused diagnostic question; do not produce another near-identical candidate with a stronger completion claim.
+When two consecutive reviews fail for the same reason, follow the [`stop_repeated_failure`](../../image-verify/references/decisions.md) rule: inspect the source, matte polarity, coordinate system, and old-mark removal.
 
 Before delivery, review the exact final artifact and decode the files extracted from the final ZIP. Check dimensions, color, alpha, every logo occurrence, all copy, local seams, and outside-mask preservation as required by the contract. File integrity and metadata removal do not prove visual correctness. Metadata cleaning does not guarantee that image-generation detection is impossible; report only the specific metadata inspected or removed, without exposing private values.
 

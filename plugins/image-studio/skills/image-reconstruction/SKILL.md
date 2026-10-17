@@ -68,7 +68,7 @@ For a native comment or region selection, resolve the target and use the same co
 
 The included [VELLUM map](visual-map.html) provides 15 named elements over a luxury product photograph. It offers selection, bounding-crop previews, keep/change/remove controls, property locks, reference roles, full/edit prompt compilation, and JSON export. It prepares instructions while preserving the displayed source pixels; it does not generate the requested edit.
 
-For another image, prepare valid JSON first, then use **Import reconstruction JSON** and **Attach its clean source**. Check that the boxes and names match the actual image. The page performs no automatic image analysis. Keep exported JSON with its source assets, or update its paths before using the Python compiler; a browser file selection supplies a filename, not a durable absolute path.
+For another image, prepare valid JSON first, then use **Import reconstruction JSON** and **Attach its clean source**. Check that the boxes and names match the actual image. The page performs no automatic image analysis. Keep exported JSON with its source images, or update its paths before using the Python compiler; a browser file selection supplies a filename, not a durable absolute path.
 
 The page's prompt compiler and embedded schema match `scripts/reconstruct.py`. Try the browser controls on your image before relying on the UI for production work.
 

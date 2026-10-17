@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.3.1-local.1 (2026-10-17)
+
+Regenerate patch material by default and streamline project-memory workflow, measured from a real session where the agent searched for and pasted existing art instead of regenerating, and duplicated gate instructions created heavy per-round overhead.
+
+- **image-repair:** regenerate patches by default via host image generators (`image_gen.imagegen` in Codex; host tools in Claude Code) rather than searching disk for replacement artwork or reusing existing images; composite existing pixels only from user-supplied files or for exact logos and packaging text. Object removal residue checklist now reuses gate defect crops rather than requiring separate extra crops.
+- **brand-repair-gates:** narrow gates to exact logos, packaging text, and transparent exports; masters limited to logos and brand marks. If detail degrades, restart from the approved image and regenerate with tighter crops, masks, or references instead of searching for or pasting other artwork. Stop conditions now link directly to `stop_repeated_failure`.
+- **project-memory:** consolidate store and gate instructions into a single canonical "Using the store in a skill" reference in `image-verify/references/project-memory.md` rather than repeating them across 5 skills. Load memory once per session; create stores only when defects, brand marks, or user requests warrant one; run the gate once before delivery rather than every repair round; open 200% crops only when 100% is unclear; run verdicts one at a time; guide whole-image defects toward regeneration, enhancement, or wontfix.
+- **image-inspect, image-create:** clarify source-art pointers to refer to user-supplied files.
+
 ## 2.3.0-local.1 (2026-10-17)
 
 Project memory and an evidence gate, so an agent remembers approved work and open defects across chats and cannot claim "done" without checked evidence. Built from a review of a real session where most corrections came from false completion claims and forgotten approved designs.

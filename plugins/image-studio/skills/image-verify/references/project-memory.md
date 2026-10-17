@@ -40,6 +40,24 @@ python3 <skills>/image-verify/scripts/studio_state.py <command> ...
 | `pref add [--brand B] --rule T --check T [--evidence T] [--confirmed]` | Add a preference; without `--confirmed` it is a proposal for the user to confirm |
 | `hook session-start`, `hook stop` | Used by the plugin hooks; see below |
 
+## Using the store in a skill
+
+Use this canonical procedure when working in a skill:
+
+1. **Load memory once per chat:** If the session-start brief (printed by the hook) is already in context, do not run `brief` again; when one skill hands off to another, the next skill does not reload. Otherwise, run `python3 <skills>/image-verify/scripts/studio_state.py brief`. If it finds a store, tell the user in 3–5 lines what was loaded: deliverables, approved masters, open defects, and preferences.
+2. **Create a store only when needed:** Create a store (`init --project <dir> --brand <brand>`) only when the user reports a defect, the job involves an exact logo/brand mark, or the user asks for one. Never create a store in the home folder or inside an ancestor that already has one. Approve a master (`approve master --name N --file F --role logo`) only for a logo or brand mark the user approved. Approve deliverables with `approve deliverable --name N --file F`. First time: add `--width W --height H --format PNG` (and `--alpha required|forbidden|any` as needed).
+3. **Record defects:** When a user reports a defect, record it with `defect add --deliverable N --bbox x0,y0,x1,y1 --kind ... --note "..."`. A defect whose box covers most of the image (for example "the whole poster looks soft") is not a local repair: ask the user whether to regenerate the whole image, run [image-enhance](../../image-enhance/SKILL.md), or close it as `wontfix` with their words (`--quote`), instead of repeating repair rounds.
+4. **Gate commands:** Run the gate once per delivery attempt, before telling the user it is done; re-run it only after a further fix. Deliver only after it exits 0 — not after every repair round (repair rounds use `audit_candidate.py` / the review as today):
+   ```bash
+   python3 <skills>/image-verify/scripts/studio_state.py approve deliverable --name N --file F   # only if the file changed
+   python3 <skills>/image-verify/scripts/studio_state.py defect close --id D<n> --status resolved --note "what changed"
+   python3 <skills>/image-verify/scripts/studio_state.py gate --deliverable N
+   python3 <skills>/image-verify/scripts/studio_state.py verdict --run <run-id> --id D<n> --status pass --evidence "what the crop shows"
+   python3 <skills>/image-verify/scripts/studio_state.py gate --deliverable N --run <run-id>
+   ```
+   Open the 100% crop first; open the 200% crop that Next: lists only when the 100% view is unclear. Run `verdict` commands one at a time (parallel runs overwrite each other). If `python3 -c "import PIL"` fails, run `studio_state.py` as `uv run --with pillow python3 <skills>/image-verify/scripts/studio_state.py ...` (for gate, defect add, verdict).
+5. **Handoff and stop report:** Report the gate's Checked / Not checked / Still failing lines as they are. When the gate has not passed, end the turn with the Checked / Not checked / Still failing report or a question. All existing gate rules remain in effect; see [the gate](#the-gate).
+
 ## The gate
 
 Run it in this order:
@@ -47,7 +65,7 @@ Run it in this order:
 1. If the file changed since it was approved and it is the one the user should receive: `approve deliverable --name N --file F`.
 2. For each defect you fixed and checked: `defect close --id D<n> --status resolved --note "what changed"`.
 3. `gate --deliverable N` starts a new run, writes the crops and `checklist.json`, and prints the run ID, the report, and `Next:` with the exact commands still needed.
-4. Open each crop, at 100% and 200%, and record what you saw: `verdict --run <run-id> --id D<n> --status pass|fail|uncertain --evidence "..."`.
+4. Open the 100% crop first; open the 200% crop that Next: lists only when the 100% view is unclear. Run verdicts one at a time, and record what you saw: `verdict --run <run-id> --id D<n> --status pass|fail|uncertain --evidence "..."`.
 5. `gate --deliverable N --run <run-id>` re-checks the same run with its verdicts.
 
 `gate` exits 0 only when all of these hold:
