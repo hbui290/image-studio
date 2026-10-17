@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.4.0-local.1 (2026-10-18)
+
+Lighter and faster, closer to the owner's image-processing plugin. Measured on a real 414-minute Codex poster job: each repair pass loaded 18-26k tokens of docs and re-read them after every compaction, the gate ran about 20 times, and the Stop hook made the agent list defect IDs in every message.
+
+- **image-create, image-inspect, image-repair, image-verify:** each SKILL.md is a short checklist of about 2.5 KB. Detail moved to references that are read only when a stated condition holds. Each says to run scripts and use `--help` instead of reading their source.
+- **image-repair:** `brand-repair-gates.md` and `repair-history.md` are merged into `references/repair-rules.md`, scoped to exact logos, packaging text, transparent exports, and multi-chat repair notes. `repair-and-composite.md` and `tool-readiness.md` are shorter, with a quick preflight.
+- **studio_state.py:** about half the size. Removed features that were never used: logo matching, `approve master`, `defect add --master/--member`, the ZIP member scan (a ZIP deliverable is checked by hash and size), `gate --iou-threshold`, and the plugin-version warning. Old stores stay readable. `--help` is a full cheat sheet.
+- **hooks:** the Stop hook blocks only a completion claim while the gate has not passed or a defect is open, and asks the agent to tell the user plainly what is still wrong; progress updates, questions, and negated claims pass. A session working in a separate git repo below the project folder is not policed. SessionStart prints a card of at most 2,400 characters. Timeouts are 10 s and 5 s.
+- **project-memory.md:** rewritten to about 4.5 KB: create a store only when needed, load it once per chat, gate once per delivery attempt, 100% crops first, and defect IDs stay internal.
+
 ## 2.3.1-local.1 (2026-10-17)
 
 Regenerate patch material by default and streamline project-memory workflow, measured from a real session where the agent searched for and pasted existing art instead of regenerating, and duplicated gate instructions created heavy per-round overhead.

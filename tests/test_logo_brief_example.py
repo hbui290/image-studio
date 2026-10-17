@@ -9,7 +9,7 @@ from jsonschema import Draft202012Validator
 ROOT = Path(__file__).resolve().parents[1]
 BRIEF_PATH = ROOT / "examples/image-repair/logo-brief.json"
 SCHEMA_PATH = ROOT / "plugins/image-studio/skills/image-loop/references/brief.schema.json"
-GATES_PATH = ROOT / "plugins/image-studio/skills/image-repair/references/brand-repair-gates.md"
+GATES_PATH = ROOT / "plugins/image-studio/skills/image-repair/references/repair-rules.md"
 
 
 class LogoBriefExampleTest(unittest.TestCase):

@@ -97,11 +97,9 @@ class StudioBase(unittest.TestCase):
         return self.ok("approve", "deliverable", "--name", "poster", "--file", path, "--width", 200,
                        "--height", 150, "--alpha", "any", "--format", "PNG")
 
-    def defect(self, bbox, kind="scope", note="x", master=None, source="user"):
+    def defect(self, bbox, kind="scope", note="x", source="user"):
         args = ["defect", "add", "--deliverable", "poster", "--bbox", ",".join(map(str, bbox)),
                 "--kind", kind, "--source", source, "--note", note]
-        if master:
-            args += ["--master", master]
         return self.ok(*args).stdout.strip().split()[-1]
 
     def gate(self, *extra):
@@ -131,7 +129,7 @@ class StoreTests(StudioBase):
         state = self.state()
         self.assertEqual(state["brand"], "acme")
         self.assertEqual(state["schema_version"], 1)
-        for key in ("deliverables", "masters", "decisions", "plugin_version_last_seen"):
+        for key in ("deliverables", "decisions"):
             self.assertIn(key, state)
         self.assertTrue((self.store / "defects.jsonl").is_file())
 
@@ -201,18 +199,6 @@ class StoreTests(StudioBase):
         self.assertEqual(d1["status"], "resolved")
         self.assertEqual(d1["source"], "user")
         self.assertGreaterEqual(len(d1["history"]), 2)
-
-    def test_approve_master_copies_and_hashes(self):
-        self.init()
-        logo = self.project / "logo.png"
-        draw_logo().save(logo)
-        self.ok("approve", "master", "--name", "logo", "--file", logo, "--role", "logo",
-                "--quote", "use only this master logo")
-        master = self.state()["masters"]["logo"]
-        self.assertEqual(master["role"], "logo")
-        self.assertTrue((self.store / master["path"]).is_file())
-        self.assertEqual(len(master["sha256"]), 64)
-        self.assertEqual(self.state()["decisions"][-1]["quote"], "use only this master logo")
 
 
 class Oct17Tests(StudioBase):
@@ -436,143 +422,21 @@ class ZipTests(StudioBase):
         self.ok("approve", "deliverable", "--name", "poster", "--file", path, "--width", 64, "--height", 96,
                 "--alpha", "any", "--format", "ZIP")
 
+    def test_defect_on_multi_image_zip_is_refused(self):
+        self.init()
+        self.approve_zip(self.make_zip([("a.png", self.png((64, 96))), ("b.png", self.png((64, 96)))]))
+        run = self.run_cli("defect", "add", "--deliverable", "poster", "--bbox", "0,0,40,40", "--kind", "seam", "--note", "x")
+        self.assertEqual(run.returncode, 2, run.stdout)
+        self.assertIn("own deliverable", run.stderr + run.stdout)
+
     def test_good_zip_passes(self):
         self.init()
         self.approve_zip(self.make_zip([("a.png", self.png((64, 96))), ("b.png", self.png((64, 96)))]))
         run = self.gate()
         self.assertEqual(run.returncode, 0, run.stdout)
 
-    def test_zip_containing_store_fails(self):
-        self.init()
-        self.approve_zip(self.make_zip([("a.png", self.png((64, 96))), ("x/.image-studio/state.json", b"{}")]))
-        run = self.gate()
-        self.assertEqual(run.returncode, 1)
-        self.assertIn(".image-studio", run.stdout)
-
-    def test_zip_with_wrong_size_image_fails(self):
-        self.init()
-        self.approve_zip(self.make_zip([("a.png", self.png((64, 96))), ("b.png", self.png((64, 95)))]))
-        run = self.gate()
-        self.assertEqual(run.returncode, 1)
-        self.assertIn("b.png", run.stdout)
-
-    def test_zip_with_duplicate_member_names_fails(self):
-        self.init()
-        path = self.project / "pack.zip"
-        with warnings.catch_warnings(), zipfile.ZipFile(path, "w") as archive:
-            warnings.simplefilter("ignore", UserWarning)  # zipfile warns when writing the duplicate on purpose
-            archive.writestr("a.png", self.png((64, 96)))
-            archive.writestr("a.png", self.png((64, 96)))
-        self.approve_zip(path)
-        run = self.gate()
-        self.assertEqual(run.returncode, 1, run.stdout)
-        self.assertIn("duplicate member names: a.png", run.stdout)
-
-    def test_zip_member_without_image_extension_is_still_checked(self):
-        self.init()
-        self.approve_zip(self.make_zip([("a.png", self.png((64, 96))), ("cover.bin", self.png((64, 95)))]))
-        run = self.gate()
-        self.assertEqual(run.returncode, 1, run.stdout)
-        self.assertIn("cover.bin: size 64x95", run.stdout)
-
-    def test_zip_member_with_image_extension_that_will_not_open_fails(self):
-        self.init()
-        self.approve_zip(self.make_zip([("a.png", self.png((64, 96))), ("broken.jpg", b"not an image")]))
-        run = self.gate()
-        self.assertEqual(run.returncode, 1, run.stdout)
-        self.assertIn("broken.jpg: cannot open as image", run.stdout)
-
-    def test_zip_store_path_check_ignores_case(self):
-        self.init()
-        for name in (".Image-Studio/state.json", "x/.IMAGE-STUDIO/defects.jsonl"):
-            with self.subTest(name):
-                self.approve_zip(self.make_zip([("a.png", self.png((64, 96))), (name, b"{}")]))
-                run = self.gate()
-                self.assertEqual(run.returncode, 1, run.stdout)
-                self.assertIn("ZIP contains project memory", run.stdout)
-
-    def nested(self, entries):
-        buffer = io.BytesIO()
-        with zipfile.ZipFile(buffer, "w") as archive:
-            for name, data in entries:
-                archive.writestr(name, data)
-        return buffer.getvalue()
-
-    def test_store_files_and_nested_store_fail(self):
-        self.init()
-        cases = {"root pair": [("state.json", b"{}"), ("defects.jsonl", b"")],
-                 "nested store": [("extra.zip", self.nested([("x/.image-studio/state.json", b"{}")]))],
-                 "nested pair": [("extra.zip", self.nested([("state.json", b"{}"), ("defects.jsonl", b"")]))]}
-        for label_, extra in cases.items():
-            with self.subTest(label_):
-                self.approve_zip(self.make_zip([("a.png", self.png((64, 96)))] + extra))
-                run = self.gate()
-                self.assertEqual(run.returncode, 1, run.stdout)
-                self.assertIn("ZIP contains project memory", run.stdout)
-
-    def test_extensionless_member_that_will_not_open_fails(self):
-        self.init()
-        self.approve_zip(self.make_zip([("a.png", self.png((64, 96))), ("README", b"hello")]))
-        run = self.gate()
-        self.assertEqual(run.returncode, 1, run.stdout)
-        self.assertIn("README: cannot open", run.stdout)
-
-    def test_zip_defect_crops_use_the_member(self):
-        self.init()
-        self.approve_zip(self.make_zip([("a.png", self.png((64, 96))), ("b.png", self.png((64, 96), dot=True))]))
-        self.ok("defect", "add", "--deliverable", "poster", "--bbox", "1,1,20,20", "--kind", "seam",
-                "--member", "b.png", "--note", "seam")
-        self.approve_zip(self.make_zip([("a.png", self.png((64, 96))), ("b.png", self.png((64, 96)))]))
-        self.ok("defect", "close", "--id", "D1", "--status", "resolved", "--note", "ok")
-        run_id = self.run_id(self.gate())
-        self.ok("verdict", "--run", run_id, "--id", "D1", "--status", "pass", "--evidence", "seam gone at 200%")
-        self.assertEqual(self.gate("--run", run_id).returncode, 0)
 
 
-class LogoTests(StudioBase):
-    def setUp(self):
-        super().setUp()
-        self.init()
-        master = self.project / "logo-master.png"
-        draw_logo().save(master)
-        self.ok("approve", "master", "--name", "logo", "--file", master, "--role", "logo")
-
-    def logo_gate(self, logo, offset=(0, 0)):
-        if not self.defects():
-            self.approve_poster(self.poster("broken.png", card=False))  # logo missing when reported
-            self.defect(LOGO_BOX, kind="logo", master="logo", note="logo must match master")
-            self.ok("defect", "close", "--id", "D1", "--status", "resolved", "--note", "recomposited")
-        path = self.poster(card=False, logo=logo, logo_offset=offset)
-        self.approve_poster(path)
-        run_id = self.run_id(self.gate())
-        self.ok("verdict", "--run", run_id, "--id", "D1", "--status", "pass",
-                "--evidence", "logo strokes and star look right")
-        return self.gate("--run", run_id)
-
-    def test_exact_logo_passes(self):
-        run = self.logo_gate(draw_logo())
-        self.assertEqual(run.returncode, 0, run.stdout)
-        self.assertIn("IoU", run.stdout)
-
-    def test_missing_star_fails_on_component_count(self):
-        run = self.logo_gate(draw_logo(star=False))
-        self.assertEqual(run.returncode, 1, run.stdout)
-        self.assertIn("components", run.stdout)
-        self.assertRegex(run.stdout, r"components master 2 / candidate 1")
-
-    def test_blurred_or_shifted_strokes_fail_iou(self):
-        # blurred strokes, and the D strokes shifted away from the star (a misplaced recomposite)
-        for label, logo in (("blur", draw_logo().filter(ImageFilter.GaussianBlur(3))), ("shift", draw_logo(shift=5))):
-            with self.subTest(label):
-                run = self.logo_gate(logo)
-                self.assertEqual(run.returncode, 1, run.stdout)
-                self.assertRegex(run.stdout, r"IoU 0\.[0-8]\d|components master 2 / candidate 1|colour")
-
-    def test_logo_defect_requires_a_logo_master(self):
-        self.approve_poster(self.poster(card=False))
-        run = self.run_cli("defect", "add", "--deliverable", "poster", "--bbox", "1,1,9,9", "--kind", "logo",
-                           "--master", "nope", "--note", "x")
-        self.assertEqual(run.returncode, 2)
 
 
 class BriefTests(StudioBase):
@@ -600,14 +464,6 @@ class BriefTests(StudioBase):
         for text in ("acme", "poster", "D1", "remove the dragon card", "Precedence"):
             self.assertIn(text, out)
 
-    def test_version_mismatch_warns_once_then_updates(self):
-        self.init()
-        state = self.state()
-        state["plugin_version_last_seen"] = "0.0.1"
-        (self.store / "state.json").write_text(json.dumps(state))
-        self.assertIn("0.0.1", self.ok("brief").stdout)
-        self.assertNotEqual(self.state()["plugin_version_last_seen"], "0.0.1")
-        self.assertNotIn("0.0.1", self.ok("brief").stdout)
 
 
 class PreferenceTests(StudioBase):
@@ -681,13 +537,11 @@ class HookTests(StudioBase):
     def test_only_a_report_or_a_question_passes_without_a_gate(self):
         self.ready_store()
         for i, text in enumerate(("Should I remove both pillars or only one?",
-                                  "Checked:\n- spec\nNot checked:\n- D1\nStill failing:\n- poster\n- D1 card still there")):
+                                  "Checked:\n- spec\nNot checked:\n- D1\nStill failing:\n- poster\n- D1 card still there",
+                                  "Blocked: the master logo file is missing, so it is not done.",
+                                  "Mình chưa xong phần logo, cần file gốc.")):
             self.assertEqual(self.stop({"session_id": f"q{i}", "cwd": str(self.project),
                                         "last_assistant_message": text}), "", text)
-        for i, text in enumerate(("Blocked: the master logo file is missing, so it is not done.",
-                                  "Mình chưa xong phần logo, cần file gốc.")):
-            self.assertIn("block", self.stop({"session_id": f"b{i}", "cwd": str(self.project),
-                                              "last_assistant_message": text}), text)
 
     def test_vietnamese_claim_blocks(self):
         self.ready_store()
@@ -734,170 +588,6 @@ class HookTests(StudioBase):
         self.assertTrue(run.stdout.startswith("image-studio: project store is corrupt: "), run.stdout)
 
 
-# ---------------------------------------------------------------- round 2 (red-team findings)
-
-def star_points(cx, cy, r):
-    import math
-    return [(cx + (r if i % 2 == 0 else r * .45) * math.cos(-math.pi / 2 + i * math.pi / 5),
-             cy + (r if i % 2 == 0 else r * .45) * math.sin(-math.pi / 2 + i * math.pi / 5)) for i in range(10)]
-
-
-def ring_logo(star=True, star_fill=(0, 0, 0, 255), star_r=14):
-    """200x120 logo: blue ring, blue L, separate black star (the verifier's fixture)."""
-    img = Image.new("RGBA", (200, 120), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-    draw.ellipse((10, 10, 110, 110), outline=(20, 60, 200, 255), width=12)
-    draw.rectangle((125, 20, 140, 110), fill=(20, 60, 200, 255))
-    draw.rectangle((125, 95, 185, 110), fill=(20, 60, 200, 255))
-    if star:
-        draw.polygon(star_points(175, 30, star_r) if star_r >= 10 else star_points(165, 40, star_r), fill=star_fill)
-    return img
-
-
-def busy_background():
-    import random
-    rng = random.Random(1)
-    img = Image.new("RGB", (600, 400))
-    draw = ImageDraw.Draw(img)
-    for y in range(400):
-        draw.line((0, y, 600, y), fill=(y // 2, 100 + y // 4, 200 - y // 3))
-    for _ in range(300):
-        x, y, r = rng.randrange(600), rng.randrange(400), rng.randrange(3, 25)
-        draw.ellipse((x, y, x + r, y + r), fill=tuple(rng.randrange(256) for _ in range(3)))
-    return img
-
-
-LX, LY = 200, 140
-TIGHT, LOOSE = [LX, LY, LX + 200, LY + 120], [LX - 20, LY - 20, LX + 220, LY + 140]
-
-
-def composite(base, logo, pos=(LX, LY)):
-    img = base.copy().convert("RGBA")
-    img.alpha_composite(logo, pos)
-    return img if base.mode == "RGBA" else img.convert("RGB")
-
-
-def logo_cases(base):
-    master = ring_logo()
-    red = master.copy()
-    r, g, b, a = red.split()
-    red = Image.merge("RGBA", (r.point(lambda v: 180), g.point(lambda v: 30), b.point(lambda v: 30), a))
-    patch = base.copy().convert("RGBA")
-    ImageDraw.Draw(patch).rectangle((LX - 8, LY - 8, LX + 208, LY + 128), fill=(255, 255, 255, 255))
-    patch = patch if base.mode == "RGBA" else patch.convert("RGB")
-    card = Image.new("RGBA", master.size, (250, 245, 230, 255))
-    card.alpha_composite(master)
-    return {
-        "correct": ("pass", composite(base, master)),
-        "scale08_lanczos": ("pass", composite(base, master.resize((160, 96), Image.LANCZOS), (LX + 20, LY + 12))),
-        "blur08": ("pass", composite(base, master.filter(ImageFilter.GaussianBlur(0.8)))),
-        "missing_star": ("fail", composite(base, ring_logo(star=False))),
-        "white_star": ("fail", composite(base, ring_logo(star_fill=(255, 255, 255, 255)))),
-        "double_logo": ("fail", composite(composite(base, red, (LX + 6, LY + 5)), master)),
-        "double_logo_same_colour": ("fail", composite(composite(base, master, (LX + 6, LY + 5)), master)),
-        "white_patch": ("fail", composite(patch, master)),
-        "opaque_rectangle": ("fail", composite(base, card)),
-    }
-
-
-class FakeStore:
-    def __init__(self, root, master_path, module):
-        self.root = root
-        self.state = {"masters": {"logo": {"path": master_path.name, "sha256": module.sha256_file(master_path)}}}
-
-
-class LogoMatrixTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.module = load_module()
-        cls.tmp = tempfile.TemporaryDirectory()
-        cls.root = Path(cls.tmp.name)
-        ring_logo().save(cls.root / "master.png")
-        cls.store = FakeStore(cls.root, cls.root / "master.png", cls.module)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.tmp.cleanup()
-
-    def check(self, img, bbox, store=None):
-        return self.module.logo_check(store or self.store, {"id": "D1", "master": "logo", "bbox": bbox}, img, 0.90)
-
-    def test_matrix_on_solid_transparent_and_busy_backgrounds(self):
-        backgrounds = {"solid": Image.new("RGB", (600, 400), (230, 120, 60)),
-                       "transparent": Image.new("RGBA", (600, 400), (0, 0, 0, 0)),
-                       "busy": busy_background()}
-        for bg_name, base in backgrounds.items():
-            for name, (want, img) in logo_cases(base).items():
-                for box_name, bbox in (("tight", TIGHT), ("loose", LOOSE)):
-                    with self.subTest(bg=bg_name, case=name, bbox=box_name):
-                        status, text = self.check(img, bbox)
-                        if want == "fail" and bg_name == "busy" and name not in ("missing_star", "white_star"):
-                            self.assertIn(status, ("fail", "inconclusive"), text)  # needs an independent verdict
-                        elif want == "pass" and bg_name == "busy":
-                            self.assertIn(status, ("pass", "inconclusive"), text)
-                        else:
-                            self.assertEqual(status, want, text)
-
-    def test_tiny_star_still_counts(self):
-        for radius in (8, 5, 3):
-            master = ring_logo(star_r=radius)
-            path = self.root / f"m{radius}.png"
-            master.save(path)
-            store = FakeStore(self.root, path, self.module)
-            for bg in ((255, 255, 255, 255), (0, 0, 0, 0)):
-                for logo, want in ((master, "pass"), (ring_logo(star=False), "fail")):
-                    img = Image.new("RGBA", (600, 400), bg)
-                    img.alpha_composite(logo, (LX, LY))
-                    img = img.convert("RGB") if bg[3] == 255 else img
-                    with self.subTest(radius=radius, bg=bg, want=want):
-                        status, text = self.check(img, [190, 130, 410, 270], store)
-                        self.assertEqual(status, want, text)
-
-    def test_aspect_ratio_change_fails(self):
-        img = composite(Image.new("RGB", (600, 400), (230, 120, 60)), ring_logo().resize((200, 90), Image.LANCZOS))
-        status, text = self.check(img, TIGHT)
-        self.assertEqual(status, "fail", text)
-        self.assertIn("aspect", text)
-
-
-class LogoGateRulesTests(StudioBase):
-    def setUp(self):
-        super().setUp()
-        self.init()
-        ring_logo().save(self.project / "master.png")
-        self.ok("approve", "master", "--name", "logo", "--file", self.project / "master.png", "--role", "logo")
-
-    def approve_big(self, img, name):
-        img.save(self.project / name)
-        self.ok("approve", "deliverable", "--name", "poster", "--file", self.project / name, "--width", 600,
-                "--height", 400, "--alpha", "any", "--format", "PNG")
-
-    def test_busy_background_needs_an_independent_verdict(self):
-        base = busy_background()
-        self.approve_big(base, "before.png")
-        self.defect(LOOSE, kind="logo", master="logo", note="logo missing")
-        self.approve_big(composite(base, ring_logo()), "after.png")
-        self.ok("defect", "close", "--id", "D1", "--status", "resolved", "--note", "logo recomposited")
-        run_id = self.run_id(self.gate())
-        self.ok("verdict", "--run", run_id, "--id", "D1", "--status", "pass", "--evidence", "logo matches at 200%")
-        run = self.gate("--run", run_id)
-        self.assertEqual(run.returncode, 1, run.stdout)
-        self.assertIn("inconclusive", run.stdout)
-        self.assertIn("independent", run.stdout)
-        self.ok("verdict", "--run", run_id, "--id", "D1", "--status", "pass", "--reviewer", "independent",
-                "--evidence", "reviewer compared logo with master at 200%")
-        self.assertEqual(self.gate("--run", run_id).returncode, 0)
-
-    def test_logo_defect_without_master_is_governed_by_the_verdict(self):
-        base = Image.new("RGB", (600, 400), (230, 120, 60))
-        self.approve_big(base, "before.png")
-        self.defect(TIGHT, kind="logo", note="logo missing")
-        self.approve_big(composite(base, ring_logo()), "after.png")
-        self.ok("defect", "close", "--id", "D1", "--status", "resolved", "--note", "logo recomposited")
-        run_id = self.run_id(self.gate())
-        self.assertIn("logo check skipped (no master); manual verdict governs", self.gate("--run", run_id).stdout)
-        self.ok("verdict", "--run", run_id, "--id", "D1", "--status", "pass", "--evidence", "logo matches at 200%")
-        self.assertEqual(self.gate("--run", run_id).returncode, 0)
 
 
 class ResolvedProofTests(StudioBase):
@@ -958,16 +648,6 @@ class ResolvedProofTests(StudioBase):
         self.assertIn("D1 accepted by user (wontfix): keep the dragon card, it is part of the set", run.stdout)
         self.assertNotIn("remove the dragon card", run.stdout)
 
-    def test_iou_threshold_can_only_be_raised(self):
-        for value in ("0.5", "0.89", "1.5"):
-            self.assertEqual(self.gate("--iou-threshold", value).returncode, 2, value)
-        run = self.gate("--iou-threshold", "0.95")
-        checklist = json.loads((self.run_dir(self.run_id(run)) / "checklist.json").read_text())
-        self.assertEqual(checklist["iou_threshold"], 0.95)
-        self.ok("defect", "close", "--id", "D1", "--status", "wontfix", "--note", "keep", "--quote", "keep it")
-        run_id = self.run_id(self.gate("--iou-threshold", "0.95"))
-        self.assertEqual(self.gate("--run", run_id).returncode, 0)
-        self.assertEqual(self.state()["gates"]["poster"]["iou_threshold"], 0.95)
 
     def test_defect_that_disappears_fails_the_gate(self):
         self.approve_poster(self.poster(card=False))
@@ -1047,123 +727,67 @@ class GateTrustTests(StudioBase):
             self.assertIn("block", self.stop("Done.", session=run_id), run_id)
             self.assertIn("gate not passed", self.ok("brief").stdout)
 
-    def test_no_deliverables_blocks_once_asking_for_approval(self):
-        self.init()
-        out = self.stop("Done, the poster is final.")
-        self.assertIn("approve deliverable first", json.loads(out)["reason"])
-        self.assertEqual(self.stop("Done, the poster is final."), "")
-
     def test_marker_is_per_message(self):
         self.init()
         self.approve_poster(self.poster(card=False))
+        self.defect(list(CARD), note="card on table")
         self.assertIn("block", self.stop("Done."))
         self.assertEqual(self.stop("Done."), "")  # same message again in the same turn
         self.assertEqual(self.stop("Done again, all fixed.", active=True), "")
         self.assertIn("block", self.stop("Done again, all fixed."))  # a later turn with a new claim
 
 
-# ---------------------------------------------------------------- round 3 (second red team)
-
-def verify3_master(star=(0, 0, 0)):
-    """120x80 logo from the round-3 verifier: blue ring, black star inside it, blue bar and flag."""
-    import math
-    img = Image.new("RGBA", (120, 80), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-    draw.ellipse((5, 5, 75, 75), outline=(20, 90, 200, 255), width=8)
-    if star:
-        draw.polygon([(40 + (14 if i % 2 == 0 else 14 / 2.5) * math.cos(math.pi / 2 + i * math.pi / 5),
-                       40 - (14 if i % 2 == 0 else 14 / 2.5) * math.sin(math.pi / 2 + i * math.pi / 5))
-                      for i in range(10)], fill=star + (255,))
-    draw.rectangle((85, 15, 95, 65), fill=(20, 90, 200, 255))
-    draw.rectangle((100, 15, 115, 25), fill=(20, 90, 200, 255))
-    return img
-
-
-def verify3_photo(kind, seed):
-    import random
-    rng = random.Random(seed)
-    if kind == "dark":
-        img, lo, hi = Image.new("RGB", (400, 300), (40, 40, 45)), 0, 120
-    else:
-        img, lo, hi = Image.new("RGB", (400, 300), (90, 120, 80)), 0, 256
-    draw = ImageDraw.Draw(img)
-    for _ in range(300 if kind == "dark" else 400):
-        x, y, r = rng.randrange(400), rng.randrange(300), rng.randrange(5 if kind == "dark" else 3, 30 if kind == "dark" else 25)
-        draw.ellipse((x - r, y - r, x + r, y + r), fill=tuple(rng.randrange(lo, hi) for _ in range(3)))
-    return img.filter(ImageFilter.GaussianBlur(3)) if kind == "dark" else img
-
-
-class BusyPhotoLogoTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.module = load_module()
-        cls.tmp = tempfile.TemporaryDirectory()
-        root = Path(cls.tmp.name)
-        verify3_master().save(root / "master.png")
-        cls.store = FakeStore(root, root / "master.png", cls.module)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.tmp.cleanup()
-
-    def check(self, base, logo, size=None):
-        img = base.copy()
-        logo = logo.resize(size, Image.LANCZOS) if size else logo
-        img.paste(logo, (150, 100 if not size else 108), logo)
-        return self.module.logo_check(self.store, {"id": "D1", "master": "logo", "bbox": [140, 90, 280, 190]},
-                                      img, 0.90)
-
-    def test_correct_logo_on_busy_photos_is_never_a_hard_fail(self):
-        for kind, seed in (("dark", 1), ("dark", 2), ("dark", 3), ("blobs", 7)):
-            with self.subTest(kind=kind, seed=seed):
-                status, text = self.check(verify3_photo(kind, seed), verify3_master())
-                self.assertIn(status, ("pass", "inconclusive"), text)
-
-    def test_hard_failures_stay_hard_on_busy_photos(self):
-        for kind, seed in (("dark", 1), ("blobs", 7)):
-            base = verify3_photo(kind, seed)
-            for label_, logo, size in (("white star", verify3_master(star=(255, 255, 255)), None),
-                                       ("squashed", verify3_master(), (120, 64))):
-                with self.subTest(kind=kind, case=label_):
-                    status, text = self.check(base, logo, size)
-                    self.assertEqual(status, "fail", text)
-
 
 class FinalMessageTests(unittest.TestCase):
-    BLOCK = ["Done. The logo is fixed.", "Đã xong, logo đã sửa.", "Hoàn thành.", "Xong rồi, không còn lỗi nào.", "✅",
-             "Deliverable exported.", "All defects resolved, D3 no longer fails", "Here is the final file.",
-             "Blocked: the master logo file is missing, so it is not done.", "Đã kiểm tra logo xong.",
-             "Checked: everything", "Is it fine? I think so.", "Done.\nChecked: logo\nNot checked: corners",
-             unicodedata.normalize("NFD", "Đã xong"), "Done.",
-             "Done. Anything else?", "Hoàn thành! Bạn muốn gì tiếp?",
-             "All good, shipped. Anything else?",
-             "Done with the crop sheet.\nWhich version do you prefer?",
-             "Done.\n\nChecked\nNot checked\nStill failing",
-             "Checked:\nNot checked:\nStill failing:"]
-    ALLOW = ["Checked:\n- spec\nNot checked:\n- D2\nStill failing:\n- D1 card",
-             "## Checked\n- logo\n## Not checked\n- none\n## Still failing\n- D3",
-             "**Checked:** spec\n**Not checked:** D2\n**Still failing:** none",
-             "Đã kiểm:\n- logo\nChưa kiểm:\n- góc\nCòn lỗi:\n- D2",
-             "Should I remove both pillars or only one?", "Bạn muốn xuất thêm size khác không？",
-             "Should I fix D1 now?",
-             "Bạn Đạt ơi, fix D1 không?",
-             "Checked: spec. Not checked: D2. Still failing: D1."]
+    BLOCK = [
+        "Done. The logo is fixed.",
+        "Đã xong, logo đã sửa.",
+        "Hoàn thành.",
+        "Xong rồi, không còn lỗi nào.",
+        "All defects resolved, D3 no longer fails",
+        "Here is the final file, ready to deliver.",
+        "Đã kiểm tra logo xong.",
+        "Done.",
+        "All good, ready to deliver.",
+        "Đã sửa xong D4",
+        "Đã fix rồi",
+        "Ổn rồi.",
+        "Giao ảnh.",
+        "finished the work",
+        "completely resolved",
+    ]
+    ALLOW = [
+        "Đang chạy gate cho poster.",
+        "Here is v7 for review.",
+        "Chưa xong, còn D4.",
+        "not done yet",
+        "chưa hoàn thành",
+        "chưa fix",
+        "Checked:\n- spec\nNot checked:\n- D2\nStill failing:\n- D1 card",
+        "## Checked\n- logo\n## Not checked\n- none\n## Still failing\n- D3",
+        "**Checked:** spec\n**Not checked:** D2\n**Still failing:** none",
+        "Đã kiểm:\n- logo\nChưa kiểm:\n- góc\nCòn lỗi:\n- D2",
+        "Should I remove both pillars or only one?",
+        "Bạn muốn xuất thêm size khác không？",
+        "Should I fix D1 now?",
+        "Bạn Đạt ơi, fix D1 không?",
+        "Done. Anything else?",
+        "Hoàn thành! Bạn muốn gì tiếp?",
+        "All good, shipped. Anything else?",
+        "Done with the crop sheet.\nWhich version do you prefer?",
+    ]
 
-    def test_table(self):
+    def test_claims_completion(self):
         module = load_module()
         for text in self.BLOCK:
-            self.assertFalse(module.allowed_final_message(text), text)
-        for text in self.ALLOW:
-            self.assertTrue(module.allowed_final_message(text), text)
+            self.assertTrue(module.claims_completion(text), text)
+        for text in self.ALLOW[:6]:
+            self.assertFalse(module.claims_completion(text), text)
 
-    def test_required_still_failing(self):
+    def test_question_or_report_never_blocks(self):
         module = load_module()
-        fake = "Checked: all. Not checked: none. Still failing: none. Done!"
-        self.assertFalse(module.allowed_final_message(fake, required_still_failing=["D1"]))
-        self.assertFalse(module.allowed_final_message(fake, required_still_failing=["poster"]))
-        self.assertFalse(module.allowed_final_message(fake, required_still_failing=["D1", "poster"]))
-        honest = "Checked: all. Not checked: none. Still failing: D1, poster. Done!"
-        self.assertTrue(module.allowed_final_message(honest, required_still_failing=["D1", "poster"]))
+        for text in self.ALLOW[6:]:
+            self.assertTrue(module.is_question(text) or module.has_report_headings(text), text)
 
 
 class Round3HookTests(StudioBase):
@@ -1177,43 +801,27 @@ class Round3HookTests(StudioBase):
         self.assertEqual((run.returncode, run.stderr), (0, ""))
         return run.stdout
 
-    def test_any_final_message_blocks_without_a_gate(self):
-        self.init()
-        self.approve_poster(self.poster())
-        must_block = ("Xong rồi, không còn lỗi nào.", "✅", "Deliverable exported.",
-                      "All defects resolved, D3 no longer fails", "Done.")
-        for i, text in enumerate(must_block):
-            self.assertIn("Checked / Not checked / Still failing", json.loads(self.stop(text, f"x{i}"))["reason"])
-        self.assertIn("block", self.stop("Checked:\n- spec\nNot checked:\n- D2\nStill failing:\n- none", "blk_none"))
-        self.assertEqual(self.stop("Checked:\n- spec\nNot checked:\n- D2\nStill failing:\n- poster", "allow_honest"), "")
-        self.assertEqual(self.stop("Which version do you prefer?", "allow_q"), "")
-
     def test_gate_valid_for_every_deliverable_never_blocks(self):
         self.init()
         self.approve_poster(self.poster())
         self.assertEqual(self.gate().returncode, 0)
         self.assertEqual(self.stop("Done."), "")
 
-    def test_blocks_when_no_deliverable_approved(self):
-        self.init()
-        out = json.loads(self.stop("Done."))
-        self.assertIn("this project has no approved deliverable", out["reason"])
-
     def test_same_message_different_turn_id_blocks_again(self):
         self.init()
         self.approve_poster(self.poster())
-        self.assertIn("block", self.stop("Exported.", turn="t1"))
-        self.assertEqual(self.stop("Exported.", turn="t1"), "")
-        self.assertIn("block", self.stop("Exported.", turn="t2"))
+        self.assertIn("block", self.stop("Done.", turn="t1"))
+        self.assertEqual(self.stop("Done.", turn="t1"), "")
+        self.assertIn("block", self.stop("Done.", turn="t2"))
 
     def test_same_message_blocks_again_after_the_store_changes(self):
         self.init()
         self.approve_poster(self.poster())
-        self.assertIn("block", self.stop("Exported."))
-        self.assertEqual(self.stop("Exported."), "")
+        self.assertIn("block", self.stop("Done."))
+        self.assertEqual(self.stop("Done."), "")
         self.defect(list(CARD), note="remove the card")
-        self.assertIn("block", self.stop("Exported."))
-        self.assertEqual(self.stop("Exported.", active=True), "")
+        self.assertIn("block", self.stop("Done."))
+        self.assertEqual(self.stop("Done.", active=True), "")
 
     def test_read_only_store_still_blocks(self):
         if hasattr(os, "geteuid") and os.geteuid() == 0:
@@ -1222,9 +830,9 @@ class Round3HookTests(StudioBase):
         self.approve_poster(self.poster())
         os.chmod(self.store, 0o555)
         try:
-            self.assertIn("block", self.stop("Exported."))
-            self.assertIn("block", self.stop("Exported."))
-            self.assertEqual(self.stop("Exported.", active=True), "")
+            self.assertIn("block", self.stop("Done."))
+            self.assertIn("block", self.stop("Done."))
+            self.assertEqual(self.stop("Done.", active=True), "")
         finally:
             os.chmod(self.store, 0o755)
 
@@ -1232,9 +840,9 @@ class Round3HookTests(StudioBase):
         self.init()
         self.approve_poster(self.poster())
         (self.store / "defects.jsonl").write_text("{broken\n")
-        out = json.loads(self.stop("Exported."))
+        out = json.loads(self.stop("Done."))
         self.assertIn("project store is corrupt", out["reason"])
-        self.assertEqual(self.stop("Exported."), "")
+        self.assertEqual(self.stop("Done."), "")
         run = self.run_cli("hook", "session-start", stdin=json.dumps({"cwd": str(self.project)}))
         self.assertTrue(run.stdout.startswith("image-studio: project store is corrupt: "), run.stdout)
 
@@ -1250,33 +858,6 @@ class Round3StoreTests(StudioBase):
         run = self.run_cli("init", "--project", sub, "--brand", "acme")
         self.assertEqual(run.returncode, 2)
         self.assertIn(str(self.store), run.stderr)
-
-    def test_replacing_a_master_needs_a_quote_and_is_reported(self):
-        ring_logo().save(self.project / "m1.png")
-        ring_logo(star_fill=(200, 0, 0, 255)).save(self.project / "m2.png")
-        self.ok("approve", "master", "--name", "logo", "--file", self.project / "m1.png", "--role", "logo")
-        base = Image.new("RGB", (600, 400), (230, 120, 60))
-        base.save(self.project / "before.png")
-        self.ok("approve", "deliverable", "--name", "poster", "--file", self.project / "before.png", "--width", 600,
-                "--height", 400, "--format", "PNG")
-        self.defect(TIGHT, kind="logo", master="logo", note="logo missing")
-        self.assertEqual(self.defects()[0]["master_sha256"], self.state()["masters"]["logo"]["sha256"])
-        run = self.run_cli("approve", "master", "--name", "logo", "--file", self.project / "m2.png", "--role", "logo")
-        self.assertEqual(run.returncode, 2)
-        self.assertIn("--quote", run.stderr)
-        self.ok("approve", "master", "--name", "logo", "--file", self.project / "m2.png", "--role", "logo",
-                "--quote", "use the red-star logo from now on")
-        composite(base, ring_logo(star_fill=(200, 0, 0, 255))).save(self.project / "after.png")
-        self.ok("approve", "deliverable", "--name", "poster", "--file", self.project / "after.png")
-        self.ok("defect", "close", "--id", "D1", "--status", "resolved", "--note", "new logo")
-        run = self.gate()
-        self.assertIn("D1 master replaced by user: use the red-star logo from now on", run.stdout)
-        self.assertNotIn("D1 logo vs master logo", run.stdout.split("Still failing:")[1])
-        state = self.state()  # a swap behind the gate's back (no quote) fails
-        state["masters"]["logo"].pop("replaced")
-        (self.store / "state.json").write_text(json.dumps(state))
-        run = self.gate()
-        self.assertIn("has no user quote", run.stdout)
 
     def test_trivial_change_does_not_resolve_a_defect(self):
         self.approve_poster(self.poster())
@@ -1530,6 +1111,198 @@ class SourceTests(unittest.TestCase):
             self.assertIn(name, run.stdout)
         self.assertIn("pref add does not use the project store", run.stdout)
         self.assertIn("--quote", run.stdout)
+
+
+class SliceBNewBehaviorTests(StudioBase):
+    def stop(self, message, session="s", active=False, turn=None):
+        payload = {"session_id": session, "cwd": str(self.project),
+                   "stop_hook_active": active,
+                   "last_assistant_message": message}
+        if turn is not None:
+            payload["turn_id"] = turn
+        run = self.run_cli("hook", "stop", stdin=json.dumps(payload))
+        self.assertEqual((run.returncode, run.stderr), (0, ""))
+        return run.stdout
+
+    def test_stop_hook_completion_claims_table(self):
+        self.init()
+        self.approve_poster(self.poster())
+        must_block = [
+            "Xong rồi.",
+            "Done.",
+            "All defects fixed, ready to deliver",
+            "Đã sửa xong D4",
+            "Xong rồi, không còn lỗi nào.",
+            "The poster is ready.",
+            "Here is the final file: out.png",
+            "Good to go",
+        ]
+        for text in must_block:
+            out = self.stop(text, session="blk")
+            data = json.loads(out)
+            self.assertEqual(data.get("decision"), "block", text)
+            self.assertIn("plain words", data.get("reason", ""), text)
+            self.assertIn("poster has not passed the final check", data.get("reason", ""), text)
+
+        must_not_block = [
+            "Đang chạy gate cho poster.",
+            "Here is v7 for review.",
+            "Chưa xong, còn D4.",
+            "Checked:\n- spec\nNot checked:\n- none\nStill failing:\n- none",
+            "Which version do you prefer?",
+            "Can you check this?",
+            "not done yet",
+            "chưa hoàn thành",
+            "chưa fix",
+            "Đã sửa giao diện của poster.",
+            "Giao diện poster đã chỉnh màu nền.",
+            "The image is not completely fixed yet",
+            "D2 has not been fixed",
+            "It isn't done",
+            "I haven't finished yet",
+            "I fixed the horn edge; next I will check the logo.",
+            "Resolved D2, still working on D3.",
+            "Mình đã sửa xong D1, D2 vẫn còn lỗi",
+        ]
+        for text in must_not_block:
+            out = self.stop(text, session="allow")
+            self.assertEqual(out, "", text)
+
+    def test_session_start_card_format_and_size_bound(self):
+        self.init()
+        self.approve_poster(self.poster())
+        self.defect(list(CARD), note="dragon card to remove")
+        self.ok("pref", "add", "--brand", "acme", "--rule", "No bevels", "--check", "edges", "--confirmed")
+        payload = json.dumps({"cwd": str(self.project), "source": "startup"})
+        run = self.run_cli("hook", "session-start", stdin=payload)
+        self.assertEqual(run.returncode, 0)
+        out = run.stdout
+        self.assertLessEqual(len(out), 2400)
+        self.assertIn("image-studio project memory", out)
+        self.assertIn("D1", out)
+        self.assertIn("poster", out)
+        self.assertIn("No bevels", out)
+        self.assertIn("Commands: run studio_state.py --help; do not read its source.", out)
+
+    def test_session_start_card_size_bound_with_30_open_defects(self):
+        self.init()
+        self.approve_poster(self.poster())
+        for i in range(30):
+            self.defect([1, 1, 20, 20], note=f"defect number {i} " + "long description " * 10)
+        for i in range(5):
+            self.defect([1, 1, 20, 20], note=f"resolved defect {i}")
+            self.ok("defect", "close", "--id", f"D{31 + i}", "--status", "resolved", "--note", "fixed")
+        payload = json.dumps({"cwd": str(self.project), "source": "startup"})
+        run = self.run_cli("hook", "session-start", stdin=payload)
+        self.assertEqual(run.returncode, 0)
+        out = run.stdout
+        self.assertLessEqual(len(out), 2400)
+        for i in range(1, 31):
+            self.assertIn(f"D{i}", out)
+        self.assertIn("5 resolved - regression-checked by the gate", out)
+        self.assertIn("Commands: run studio_state.py --help; do not read its source.", out)
+
+    def test_legacy_store_does_not_crash(self):
+        self.init()
+        poster_path = self.poster()
+        module = load_module()
+        digest = module.sha256_file(poster_path)
+        state = {
+            "schema_version": 1,
+            "brand": "acme",
+            "plugin_version_last_seen": "2.3.0",
+            "deliverables": {
+                "poster": {
+                    "spec": {"width": 200, "height": 150, "format": "PNG", "alpha": "any"},
+                    "current_sha256": digest,
+                    "path": "poster.png",
+                }
+            },
+            "masters": {
+                "logo": {"path": "masters/logo.png", "sha256": "0" * 64, "role": "logo"}
+            },
+            "decisions": [{"time": "2026-10-18T00:00:00Z", "text": "approved master", "quote": ""}],
+            "gates": {},
+        }
+        (self.store / "state.json").write_text(json.dumps(state))
+        defects = [
+            {
+                "id": "D1",
+                "deliverable": "poster",
+                "bbox": [10, 10, 30, 30],
+                "kind": "logo",
+                "status": "open",
+                "note": "legacy logo defect",
+                "master": "logo",
+                "master_sha256": "0" * 64,
+                "member": "none.png",
+                "source": "user",
+            },
+            {
+                "id": "D2",
+                "deliverable": "poster",
+                "bbox": [40, 40, 60, 60],
+                "kind": "seam",
+                "status": "resolved",
+                "note": "legacy defect missing crop and region hash",
+                "source": "user",
+            }
+        ]
+        (self.store / "defects.jsonl").write_text("\n".join(json.dumps(d) for d in defects) + "\n")
+        b_run = self.run_cli("brief")
+        self.assertEqual(b_run.returncode, 0, b_run.stderr)
+        g_run = self.run_cli("gate", "--deliverable", "poster")
+        self.assertEqual(g_run.returncode, 1, g_run.stdout + g_run.stderr)
+        h_start = self.run_cli("hook", "session-start", stdin=json.dumps({"cwd": str(self.project)}))
+        self.assertEqual(h_start.returncode, 0, h_start.stderr)
+        self.assertIn("D1", h_start.stdout)
+        h_stop = self.run_cli("hook", "stop", stdin=json.dumps({"cwd": str(self.project), "last_assistant_message": "Done."}))
+        self.assertEqual(h_stop.returncode, 0, h_stop.stderr)
+        self.assertIn('"decision": "block"', h_stop.stdout)
+
+    def test_epilog_cheat_sheet_has_every_subcommand_with_example(self):
+        run = subprocess.run([sys.executable, str(SCRIPT), "--help"], capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0)
+        for cmd in ("init", "approve deliverable", "defect add", "defect close", "brief", "gate", "verdict", "pref add", "hook"):
+            self.assertIn(cmd, run.stdout)
+        self.init()
+        brief_out = self.ok("brief").stdout
+        self.assertIn("--help", brief_out)
+
+
+
+
+class LiteScopeTests(StudioBase):
+    def stop(self, message, cwd, session="s"):
+        run = self.run_cli("hook", "stop", stdin=json.dumps({"session_id": session, "cwd": str(cwd),
+                                                             "last_assistant_message": message}), cwd=cwd)
+        self.assertEqual((run.returncode, run.stderr), (0, ""))
+        return run.stdout
+
+    def test_nested_git_repo_below_store_project_is_not_policed(self):
+        self.init()
+        self.approve_poster(self.poster())
+        repo = self.project / "work" / "plugin-repo"
+        (repo / ".git").mkdir(parents=True)
+        (repo / "src").mkdir()
+        self.assertEqual(self.stop("Done.", repo / "src"), "")
+        start = self.run_cli("hook", "session-start", stdin=json.dumps({"session_id": "dev", "cwd": str(repo)}), cwd=repo)
+        self.assertEqual(start.stdout, "")
+        self.assertFalse((self.home / "sessions" / "dev.json").exists())
+
+    def test_project_that_is_itself_a_git_repo_is_still_policed(self):
+        (self.project / ".git").mkdir()
+        self.init()
+        self.approve_poster(self.poster())
+        self.assertIn("block", self.stop("Done.", self.project))
+
+    def test_block_reason_names_open_defects_in_plain_words(self):
+        self.init()
+        self.approve_poster(self.poster())
+        did = self.defect(list(CARD), note="dragon card still visible")
+        out = json.loads(self.stop("Xong rồi.", self.project))
+        self.assertIn("dragon card still visible (%s)" % did, out["reason"])
+        self.assertNotIn("Checked / Not checked / Still failing", out["reason"])
 
 
 if __name__ == "__main__":

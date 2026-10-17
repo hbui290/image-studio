@@ -1,5 +1,13 @@
 # Tool readiness and portable setup
 
+## Quick preflight
+
+1. Source & refs: verify clean source, approved references, and target dimensions.
+2. Raster editor: verify ImageMagick (`magick -version`, `magick identify input.png`) or desktop editor for crops, masks, and compositing.
+3. Generator: confirm host image tool (`image_gen.imagegen` in Codex) accepts crop + references; verify access before calling.
+4. Viewing: inspect 100% native pixels and delivered format on actual target surface.
+5. Missing tools: use existing equivalents or report limits; never substitute whole-image generation for controlled repair.
+
 Use this reference before editing on a new or reinstalled machine, or when a new agent inherits the job. The skill is an operating method, not a bundle of executables, model weights, credentials, or source images. Count capabilities first, then use tools already present or set up only what is missing and authorized.
 
 ## How many tools are needed?

@@ -23,7 +23,7 @@ Convert an image brief into checkable requirements, generate a candidate, review
 
 ## Establish the brief
 
-Run step 0 of the loop below first: approved masters and open defects in the project store belong in the brief.
+Run step 0 of the loop below first: approved deliverables and open defects in the project store belong in the brief.
 
 For an image edit whose targets are unclear, use the [image-edit-map](../image-edit-map/SKILL.md) workflow to ask unanswered questions, map sections, and name numbered elements; when the user already named the target, skip the map. Respect explicit instructions to skip mapping or edit directly. For new generation, ask only for information essential to the result; do not require a reference image.
 
@@ -43,7 +43,7 @@ Write `brief.json` following [the brief contract](references/brief.schema.json).
 7. **Gate before claiming done.** In a project with a store, run `gate --deliverable` once before telling the user the deliverable is done; follow [using the store in a skill](../image-verify/references/project-memory.md#using-the-store-in-a-skill).
 8. **Deliver.** Show the clean image, changes, check results, remaining uncertainty, and a before/after comparison when useful. Acceptance by a model is not human approval or a measured success rate. Save the candidate, report, file checks, decision, and repair prompt for each round.
 
-For work that spans multiple repair rounds or turns, keep a task-level [repair history](../image-repair/references/repair-history.md) beside the round folders. Read it before each new attempt and append the observed result, rejected method, and next method; round folders alone do not preserve context across separate chats.
+For work that spans multiple repair rounds or turns, keep a task-level [repair history](../image-repair/references/repair-rules.md) beside the round folders. Read it before each new attempt and append the observed result, rejected method, and next method; round folders alone do not preserve context across separate chats.
 
 Continue through generation and repair during the active task; do not stop at writing a proposed repair when execution is authorized and available. This is an agent-orchestrated loop: the scripts review and decide; the host agent invokes its image tool between rounds.
 
