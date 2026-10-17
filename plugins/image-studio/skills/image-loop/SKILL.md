@@ -23,6 +23,8 @@ Convert an image brief into checkable requirements, generate a candidate, review
 
 ## Establish the brief
 
+Run step 0 of the loop below first: approved masters and open defects in the project store belong in the brief.
+
 For an image edit whose targets are unclear, use the [image-edit-map](../image-edit-map/SKILL.md) workflow to ask unanswered questions, map sections, and name numbered elements; when the user already named the target, skip the map. Respect explicit instructions to skip mapping or edit directly. For new generation, ask only for information essential to the result; do not require a reference image.
 
 Separate subject/content, composition, typography, local color, layer order, grading, medium, lighting, and output requirements. Every reference has a declared role. Record exact text and line breaks. Distinguish protected content from changeable properties. A review must not invent aesthetic requirements absent from the brief.
@@ -31,13 +33,25 @@ Write `brief.json` following [the brief contract](references/brief.schema.json).
 
 ## Execute the loop
 
+0. **Load project memory.** Run `python3 <skills>/image-verify/scripts/studio_state.py brief`. If it finds a `.image-studio/` store, tell the user in 3–5 lines what was loaded: deliverables, approved masters, open defects, and preferences. If the user sent a screenshot of a defect, record it with `defect add` before editing. If it exits 2 with no store and the job spans several rounds, involves a brand or logo, or the user reports a defect, create one: `init --project <project folder> --brand <brand>` (ask the user when either is unclear; never the home folder or inside a folder that already has a store), then `approve master` for each master the user approved, `approve deliverable` for the current file, and `defect add` for each reported defect. See [project memory](../image-verify/references/project-memory.md).
 1. **Capability check.** Identify an available image generation/editing tool and an independent image-input reviewer. Use host tools under their actual instructions. Never silently substitute an image provider or bypass a tool restriction. A cheaper text model without image input is not a vision reviewer.
 2. **Generate.** Save the exact prompt, selected references, tool/model identifiers if exposed, and actual clean output. Do not invent an underlying model name for a tool that hides it. Keep source images untouched. Use a source or last accepted clean candidate, never an annotated map, as the editing input.
 3. **Review.** Give an independent reviewer the original clean source when editing, the candidate, and the acceptance criteria. Do not tell it that the image is good, what another reviewer concluded, or what result is expected. Use a configured smaller vision model when it is adequate. A same-agent self-check must be labeled as such if independence is unavailable.
 4. **Validate.** Run file checks and enforce complete criterion coverage. Unknown, omitted, malformed, or contradictory results cannot count as passes. Exact font identification, pixel identity, and hidden layer recovery cannot be proven by a vision model alone.
 5. **Decide.** If all visual and file checks pass, mark `accepted_by_checks` and deliver for the person's judgment. If any check is uncertain, stop for stronger inspection or a user decision. If there is a concrete failure, emit a narrowly targeted repair prompt and execute it. Re-review the repaired image against the complete original brief, including all protected properties.
 6. **Bound retries.** Default to at most three repairs after the initial candidate; the user can lower the limit. Stop if the same set of checks fails in two consecutive reviews (one repair fixed nothing), on a provider failure, or when the agreed budget is exhausted. Never silently retry a failed external call. Preserve the best candidate that passes protected criteria; if none does, retain the source as the safe fallback. Do not overwrite accepted work with an unverified repair.
-7. **Deliver.** Show the clean image, changes, check results, remaining uncertainty, and a before/after comparison when useful. Acceptance by a model is not human approval or a measured success rate. Save the candidate, report, file checks, decision, and repair prompt for each round.
+7. **Gate before claiming done.** In a project with a store, never call a deliverable done or verified until the gate exits 0:
+   ```bash
+   python3 <skills>/image-verify/scripts/studio_state.py approve deliverable --name N --file F   # only if the file changed
+   python3 <skills>/image-verify/scripts/studio_state.py defect close --id D<n> --status resolved --note "what changed"   # each fixed defect
+   python3 <skills>/image-verify/scripts/studio_state.py gate --deliverable N                     # prints the run id and Next: commands
+   python3 <skills>/image-verify/scripts/studio_state.py verdict --run <run-id> --id D<n> --status pass --evidence "what the crop shows"
+   python3 <skills>/image-verify/scripts/studio_state.py gate --deliverable N --run <run-id>
+   ```
+   Open each crop before writing its verdict; use `fail` or `uncertain` when it is not clearly fixed. Report the gate's Checked / Not checked / Still failing lines as they are. Deliver only after it exits 0; when the gate has not passed, end the turn with the Checked / Not checked / Still failing report or a question. Details: [the gate](../image-verify/references/project-memory.md#the-gate).
+8. **Deliver.** Show the clean image, changes, check results, remaining uncertainty, and a before/after comparison when useful. Acceptance by a model is not human approval or a measured success rate. Save the candidate, report, file checks, decision, and repair prompt for each round.
+
+For work that spans multiple repair rounds or turns, keep a task-level [repair history](../image-repair/references/repair-history.md) beside the round folders. Read it before each new attempt and append the observed result, rejected method, and next method; round folders alone do not preserve context across separate chats.
 
 Continue through generation and repair during the active task; do not stop at writing a proposed repair when execution is authorized and available. This is an agent-orchestrated loop: the scripts review and decide; the host agent invokes its image tool between rounds.
 

@@ -146,7 +146,7 @@ In commands, `<skills>` means the folder that holds the Image Studio skill folde
 Exit codes:
 
 - 0: `validate` printed `VALID: ...`, `compile` wrote the prompt, or `self-check` printed `PASS: ...`.
-- 2: bad input, with an `ERROR: ...` line on stderr: a missing or unreadable file, invalid JSON, a schema or semantic error, `compile --output` naming a file that already exists (pass `--force` to overwrite; the source JSON is never overwritten), or `--mode edit` without a requested change (a `selections` entry whose action is not `keep`) or without the clean target as an attachment. The bundled VELLUM example has empty `selections`, so `compile --mode edit` on it exits 2.
+- 2: bad input, with an `ERROR: ...` line on stderr: a missing or unreadable file, invalid JSON, a schema or semantic error, `compile --output` naming a file that already exists (pass `--force` to overwrite; the source JSON is never overwritten), or `--mode edit` without a requested change (a `selections` entry whose action is not `keep`) or without the clean target as an attachment (a `target` source with `selected_for_use: true` and a non-null `path`). The bundled VELLUM example has empty `selections`, so `compile --mode edit` on it exits 2.
 
 ## Stop conditions
 

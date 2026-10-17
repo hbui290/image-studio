@@ -1,5 +1,32 @@
 # Changelog
 
+## 2.3.0-local.1 (2026-10-17)
+
+Project memory and an evidence gate, so an agent remembers approved work and open defects across chats and cannot claim "done" without checked evidence. Built from a review of a real session where most corrections came from false completion claims and forgotten approved designs.
+
+- **image-verify:** new `scripts/studio_state.py` keeps a project store in `.image-studio/` (deliverables with approved hashes, masters with roles and replacement history, append-only decisions, stable defect IDs in `defects.jsonl`, and reported crops in `defects/`) and bounded per-brand and general preferences in `~/.image-studio/`. `init` refuses inside the home folder or inside a folder whose ancestor has a store. Replacing an approved master on an existing name with a different hash requires `--quote`; logo defects pin `master_sha256` and report a quoted replacement as "master replaced by user". `defect add` saves reported region crops and rejects a bbox under 16×16 px or 0.1% of the image unless `--quote` records the user's words. `brief` prints a bounded snapshot that never drops an open defect, and warns on defect ID gaps or when the plugin version changed. `gate` checks the approved file hash, size, format, and alpha, failing on defect ID gaps or disappeared defects. For ZIP deliverables, every image is checked, unopenable extensionless or image members fail, and project memory (`.image-studio/` at any depth or nested ZIP, or `state.json` next to `defects.jsonl` in the same folder) fails. The gate writes 100% and 200% crops of every defect, and passes only when every defect has a verdict tied to this run's crops and none is open. A defect marked resolved fails while its pixels are unchanged or fewer than 5% of bbox pixels changed by >8 per channel vs `.image-studio/defects/D<n>-reported.png`; `wontfix` and a changed deliverable spec need the user's words (`--quote`); the IoU threshold can only be raised. On a busy background colour-sensitive logo sub-checks become inconclusive (requiring `--reviewer independent`), while hard fails stay for missing components, component colour, and aspect ratio. The gate re-renders a reused run's crops and refuses edited checklists and forged gate records. Reference: `references/project-memory.md`.
+- **hooks:** the plugin ships `hooks/hooks.json`. At session start it prints the brief of the project store, printing one warning if the store is corrupt. At stop, with a store and no valid gate (or no approved deliverable), ANY final message is blocked unless it contains all three report headings Checked / Not checked / Still failing (or Đã kiểm / Chưa kiểm / Còn lỗi; heading followed by ":" or line end) or is a question (last non-empty line ends with ? or ？); keyword claim detection is removed. The marker combines session, turn, message, and store fingerprint, never blocking when `stop_hook_active` is true. A read-only store still blocks, and a corrupt store blocks with the reason. Both hooks exit 0 silently when python3, the script, or a store is missing. Codex asks you to trust each hook once.
+- **image-repair, image-verify, image-loop, image-edit-map, image-enhance:** step 0 loads project memory and records user-reported defects; the last step before delivery runs the gate and reports Checked / Not checked / Still failing.
+- **image-repair:** repair history reuses the store's defect IDs; `defects.jsonl` is the source of truth for status.
+- **image-repair, image-loop, image-verify:** add a task-level repair history for carrying source coordinates, rejected methods, and review evidence across rounds and chats. Repeated defects require a different method. This explicit handoff record complements project memory; neither feature is automatic model learning.
+- **image-repair:** object removal now requires a distinct residue sweep for frame edges/corners, border fragments, glow/color spill, shadows, and occluded slivers; “no recognizable silhouette” alone cannot pass. Added after a review missed small card-colored strokes behind a dragon horn.
+
+## 2.2.5-local.2 (2026-10-17)
+
+Fixes from a fifth review. Every behavior fix has a regression test (180 tests before, 207 after).
+
+- **image-loop:** `review.py` ends a damaged candidate (for example a TIFF whose later frame has no dimensions) with a clear message and exit 2 instead of a traceback, and finds the transparent pixels of a 16-bit grayscale PNG that uses a tRNS value.
+- **image-verify:** in 16-bit and float images the audit counts a pixel whose transparency changed as changed, holds a change below 8 levels (8 × 257 in 16-bit, 8/255 of the value range in float) as barely visible, and treats a tRNS value that no pixel uses as opaque. The 0.5% barely-visible threshold no longer rounds down.
+- **image-enhance:** `compare_display.py` accepts a faithful resize of a very wide image and rejects a crop of a very tall one (aspect checked to within 1 pixel of rounding), refuses floating-point images and a `--width` beyond Pillow's pixel limit with exit 2. The 16-bit test fixture now saves on Pillow 13.
+- **image-edit-map:** `validate_spec.py --image` says dimensions were not verified when the spec does not report them, exits 2 for a missing or unknown `--image-id`, requires a reason in the note of an unknown observation, and requires section IDs to carry their image prefix.
+- **image-reconstruction:** `validate` refuses unpaired surrogate code points, `compile --mode edit` requires the target attachment to have a path, and `visual-map.html` now refuses inherited property names and integers written as floats, matching the script.
+- **image-repair:** brand repair gates name the `stop_repeated_failure` rule and drop a maintainer-only note.
+
+## 2.2.5-local.1 (2026-10-17)
+
+- Document brand repair gates: freeze approved sources, distinguish material from silhouette references, inspect old-logo removal before placement, and review every logo occurrence.
+- Document mask-alpha and composite-state pitfalls, opaque-body checks for cutouts, repeated-failure stops, and final-export/ZIP visual review. Local documentation release only; no image-model or script behavior changed.
+
 ## 2.2.4 (2026-10-02)
 
 Fixes from a fourth review. Every behavior fix has a regression test (173 tests before, 180 after).

@@ -41,7 +41,7 @@ Every extracted attribute uses an observation object:
 }
 ```
 
-Allowed bases: `source_metadata`, `pixel_measurement`, `visual_observation`, `visual_estimate`, `user_supplied`, `unknown`. Confidence: `high`, `medium`, `low`, `unknown`. Numeric values remain estimates unless supported by measurement. Unknown observations have `value: null`, `basis: "unknown"`, `confidence: "unknown"`, and a reason in `note`. Confidence describes evidence strength, not a calibrated probability.
+Allowed bases: `source_metadata`, `pixel_measurement`, `visual_observation`, `visual_estimate`, `user_supplied`, `unknown`. Confidence: `high`, `medium`, `low`, `unknown`. Numeric values remain estimates unless supported by measurement. Unknown observations have `value: null`, `basis: "unknown"`, `confidence: "unknown"`, and a reason in `note`; the schema rejects a blank `note` on an unknown observation. Confidence describes evidence strength, not a calibrated probability.
 
 Category arrays contain scoped attribute records: `target_id` references an image or element; `attributes` holds observations. For example a typography record may contain `font_family`, `font_class`, `weight`, and `line_height_relative`. Spell out units in attribute names or notes. Grade only the photo if the surrounding typography is meant to stay unaffected. Each image must have a picture-type record, even if its medium is unknown.
 

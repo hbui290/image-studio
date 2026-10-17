@@ -1,0 +1,139 @@
+{
+  "name": "Brand logo replacement across packaging and cards",
+  "intent": "Replace the brand logo across three occurrences (pack front, card front, card back) using the approved master with clean alpha and plates, preserving all surrounding areas.",
+  "criteria": [
+    {
+      "id": "pack_front_master",
+      "target": "pack front logo master",
+      "kind": "requested",
+      "requirement": "The logo comes from the approved master brand asset with canonical geometry, typography, and color."
+    },
+    {
+      "id": "pack_front_features",
+      "target": "pack front logo canonical marks",
+      "kind": "requested",
+      "requirement": "The black star and the D tail are present, sharp, and correctly positioned relative to each other."
+    },
+    {
+      "id": "pack_front_old_removed",
+      "target": "pack front clean plate",
+      "kind": "requested",
+      "requirement": "The old logo is fully removed before compositing; no residual lettering, old ink, shadows, or outlines remain."
+    },
+    {
+      "id": "pack_front_no_halo",
+      "target": "pack front logo background",
+      "kind": "requested",
+      "requirement": "There is no background patch or halo around the logo; surface texture, lighting, and packaging finish blend seamlessly."
+    },
+    {
+      "id": "pack_front_alpha_edge",
+      "target": "pack front logo alpha edge",
+      "kind": "requested",
+      "requirement": "The alpha edge is clean with no matte fringes, color bleed, white border, or haloing along the mark contours."
+    },
+    {
+      "id": "pack_front_not_stacked",
+      "target": "pack front logo placement",
+      "kind": "requested",
+      "requirement": "The logo is not stacked twice, ghosted, or double-printed; exactly one logo instance appears on the pack front."
+    },
+    {
+      "id": "pack_front_surroundings",
+      "target": "pack front surrounding area",
+      "kind": "protected",
+      "requirement": "Preserve the packaging texture, folds, seams, surface shading, and surrounding graphics around the pack front logo occurrence visually."
+    },
+    {
+      "id": "card_front_master",
+      "target": "card front logo master",
+      "kind": "requested",
+      "requirement": "The logo comes from the approved master brand asset with canonical geometry, typography, and color."
+    },
+    {
+      "id": "card_front_features",
+      "target": "card front logo canonical marks",
+      "kind": "requested",
+      "requirement": "The black star and the D tail are present, sharp, and correctly positioned relative to each other."
+    },
+    {
+      "id": "card_front_old_removed",
+      "target": "card front clean plate",
+      "kind": "requested",
+      "requirement": "The old logo is fully removed before compositing; no residual lettering, old ink, shadows, or outlines remain."
+    },
+    {
+      "id": "card_front_no_halo",
+      "target": "card front logo background",
+      "kind": "requested",
+      "requirement": "There is no background patch or halo around the logo; card surface texture and lighting blend seamlessly."
+    },
+    {
+      "id": "card_front_alpha_edge",
+      "target": "card front logo alpha edge",
+      "kind": "requested",
+      "requirement": "The alpha edge is clean with no matte fringes, color bleed, white border, or haloing along the mark contours."
+    },
+    {
+      "id": "card_front_not_stacked",
+      "target": "card front logo placement",
+      "kind": "requested",
+      "requirement": "The logo is not stacked twice, ghosted, or double-printed; exactly one logo instance appears on the card front."
+    },
+    {
+      "id": "card_front_surroundings",
+      "target": "card front surrounding area",
+      "kind": "protected",
+      "requirement": "Preserve the card front artwork, border rails, character illustration, and surface finish around the card front logo occurrence visually."
+    },
+    {
+      "id": "card_back_master",
+      "target": "card back logo master",
+      "kind": "requested",
+      "requirement": "The logo comes from the approved master brand asset with canonical geometry, typography, and color."
+    },
+    {
+      "id": "card_back_features",
+      "target": "card back logo canonical marks",
+      "kind": "requested",
+      "requirement": "The black star and the D tail are present, sharp, and correctly positioned relative to each other."
+    },
+    {
+      "id": "card_back_old_removed",
+      "target": "card back clean plate",
+      "kind": "requested",
+      "requirement": "The old logo is fully removed before compositing; no residual lettering, old ink, shadows, or outlines remain."
+    },
+    {
+      "id": "card_back_no_halo",
+      "target": "card back logo background",
+      "kind": "requested",
+      "requirement": "There is no background patch or halo around the logo; card pattern and lighting blend seamlessly."
+    },
+    {
+      "id": "card_back_alpha_edge",
+      "target": "card back logo alpha edge",
+      "kind": "requested",
+      "requirement": "The alpha edge is clean with no matte fringes, color bleed, white border, or haloing along the mark contours."
+    },
+    {
+      "id": "card_back_not_stacked",
+      "target": "card back logo placement",
+      "kind": "requested",
+      "requirement": "The logo is not stacked twice, ghosted, or double-printed; exactly one logo instance appears on the card back."
+    },
+    {
+      "id": "card_back_surroundings",
+      "target": "card back surrounding area",
+      "kind": "protected",
+      "requirement": "Preserve ornamental card back pattern, symmetry, framing, and surface texture around the card back logo occurrence visually."
+    }
+  ],
+  "file_checks": {
+    "width": 2048,
+    "height": 2048,
+    "format": "PNG",
+    "alpha_required": false
+  },
+  "max_repairs": 3
+}

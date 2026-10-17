@@ -15,8 +15,8 @@ SKILL = ROOT / "plugins/image-studio/skills/image-reconstruction"
 NODE = shutil.which("node")
 RUNNER = """
 const page = require(process.argv[2]);
-const {spec, schema} = JSON.parse(require('fs').readFileSync(0, 'utf8'));
-try { const c = page.compileSpec(spec, schema); console.log(JSON.stringify({full: c.rendering_prompt, edit: c.edit_prompt})); }
+const {text, schema} = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+try { const c = page.compileSpec(page.parseJSON(text), schema); console.log(JSON.stringify({full: c.rendering_prompt, edit: c.edit_prompt})); }
 catch (error) { console.log(JSON.stringify({error: error.message})); }
 """
 
@@ -50,7 +50,7 @@ class VisualMapParity(unittest.TestCase):
         return json.loads(found.group(1))
 
     def js(self, spec):
-        run = subprocess.run([NODE, str(Path(self.tmp.name) / "run.js"), str(self.page)], input=json.dumps({"spec": spec, "schema": self.embedded("contract")}),
+        run = subprocess.run([NODE, str(Path(self.tmp.name) / "run.js"), str(self.page)], input=json.dumps({"text": json.dumps(spec), "schema": self.embedded("contract")}),
                              capture_output=True, text=True, check=True)
         return json.loads(run.stdout)
 
@@ -115,9 +115,11 @@ class VisualMapParity(unittest.TestCase):
         number_key["elements"][0]["appearance"]["2"] = number_key["elements"][0]["appearance"]["color"]
         big = copy.deepcopy(self.vellum)  # JavaScript cannot hold this integer exactly
         big["revision"] = 2 ** 53 + 1
+        float_int = copy.deepcopy(self.vellum)  # Python reads 1.0 as a float, which is not an integer
+        float_int["revision"] = 1.0
         cases = (("blank name", blank), ("keep with properties", keep_props), ("move with color", move_color),
                  ("casefold overlap", casefold), ("sharp s", sharp_s), ("separator name", separator),
-                 ("number property name", number_key), ("unsafe integer", big))
+                 ("number property name", number_key), ("unsafe integer", big), ("integer written as float", float_int))
         for label, spec in cases:
             with self.assertRaises(self.rc.Invalid, msg=label):
                 self.rc.validate(spec)

@@ -33,6 +33,8 @@ def validate(data, schema):
             x, y, w, h = item['bbox']
             if w <= 0 or h <= 0 or x + w > 1.000000001 or y + h > 1.000000001:
                 errors.append(f'{prefix}: bounding box must have area and fit within the source image')
+            if kind == 'sections' and not prefix.startswith(f"{item['image_id']}:S"):
+                errors.append(f"{prefix}: id must start with {item['image_id']}:S (image_id:S + number)")
             if kind == 'elements':
                 section = sections.get(item['section_id'])
                 if not section or section['image_id'] != item['image_id']:
@@ -99,21 +101,25 @@ def main():
             errors = validate(data, schema)
         except RecursionError:
             raise ValueError('JSON nesting is too deep')
+        unverified = []
         if args.image and not errors:
             from PIL import Image, ImageOps
             selected = [x for x in data['images'] if x['id'] == args.image_id] if args.image_id else data['images']
+            if args.image_id and not selected:
+                raise ValueError(f'--image-id {args.image_id}: no image with that ID in the spec')
             if len(selected) != 1:
-                errors.append('Select exactly one image with --image-id for metadata verification.')
-            else:
-                try:
-                    with Image.open(args.image) as opened:
-                        im = ImageOps.exif_transpose(opened)  # compare displayed dimensions
-                        for key, actual in [('width_px', im.width), ('height_px', im.height)]:
-                            claim = selected[0]['metadata'].get(key, {}).get('value')
-                            if claim is not None and (type(claim) is not int or claim != actual):
-                                errors.append(f'{key}: extracted value {claim} differs from decoded file {actual}')
-                except Image.DecompressionBombError as exc:
-                    raise ValueError(f'Image is too large to verify safely: {exc}')
+                raise ValueError('The spec describes more than one image; pass --image-id to choose the one for --image.')
+            try:
+                with Image.open(args.image) as opened:
+                    im = ImageOps.exif_transpose(opened)  # compare displayed dimensions
+                    for key, actual in [('width_px', im.width), ('height_px', im.height)]:
+                        claim = selected[0]['metadata'].get(key, {}).get('value')
+                        if claim is None:
+                            unverified.append(key)
+                        elif type(claim) is not int or claim != actual:
+                            errors.append(f'{key}: extracted value {claim} differs from decoded file {actual}')
+            except Image.DecompressionBombError as exc:
+                raise ValueError(f'Image is too large to verify safely: {exc}')
     except ImportError:
         print('Missing dependency: install jsonschema, and Pillow when using --image.', file=sys.stderr)
         return 2
@@ -124,7 +130,13 @@ def main():
         for error in errors:
             print(error, file=sys.stderr)
         return 1
-    print('PASS: schema, geometry, IDs, and cross-references'+('; reported dimensions match decoded image' if args.image else '')+'. Visual accuracy not checked.')
+    if not args.image:
+        dimensions = ''
+    elif unverified:
+        dimensions = f"; dimensions not verified: {', '.join(unverified)} not reported in the spec"
+    else:
+        dimensions = '; reported dimensions match decoded image'
+    print('PASS: schema, geometry, IDs, and cross-references' + dimensions + '. Visual accuracy not checked.')
     return 0
 
 

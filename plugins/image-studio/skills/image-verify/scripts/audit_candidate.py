@@ -199,6 +199,26 @@ def open_image(path):
     return image, image_format, frames
 
 
+def has_transparent_pixel(image):
+    """True when some decoded pixel is transparent."""
+    from PIL import ImageMath
+
+    if image.mode in HIGH_PRECISION:
+        # convert("RGBA") clamps 16-bit values and the tRNS value to 255; compare at full precision instead.
+        clear = clear_value(image)
+        if clear is None:
+            return False
+        wide = image.convert("F")
+        if hasattr(ImageMath, "lambda_eval"):
+            hits = ImageMath.lambda_eval(lambda env: env["m"] == clear, m=wide)
+        else:
+            hits = ImageMath.eval("m == t", m=wide, t=clear)
+        return hits.getextrema()[1] > 0
+    if image.mode not in ("RGBA", "LA", "PA") and "transparency" not in image.info:
+        return False
+    return image.convert("RGBA").getchannel("A").getextrema()[0] < 255
+
+
 def editable_mask(image):
     """255 where the final acceptance mask permits change: nonzero luminance and not transparent."""
     from PIL import ImageChops
@@ -219,19 +239,55 @@ def editable_mask(image):
     return ImageChops.darker(ImageChops.lighter(ImageChops.lighter(red, green), blue), alpha)
 
 
+def clear_value(image):
+    """The single gray value a tRNS chunk marks fully transparent, or None when there is none."""
+    value = image.info.get("transparency")
+    return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+VISIBLE_DELTA = 8  # 8-bit levels; a smaller difference on every channel is not seen at normal viewing
+
+
+def wide_map(source, candidate, visible):
+    """changed_map or visible_map for 16-bit or float grayscale, compared at full precision.
+
+    A pixel transparent in exactly one image changed; one transparent in both did not. A visible change moves
+    VISIBLE_DELTA 8-bit levels: VISIBLE_DELTA * 257 on the 16-bit scale, or VISIBLE_DELTA / 255 of the value
+    range of both images for floating point, which has no fixed scale.
+    """
+    from PIL import ImageMath
+
+    # ponytail: single-channel wide compare; 32-bit integers beyond int32 range are not expected in images.
+    mode = "F" if "F" in (source.mode, candidate.mode) else "I"
+    first, second = source.convert(mode), candidate.convert(mode)
+    delta = 0
+    if visible and mode == "I":
+        delta = VISIBLE_DELTA * 257
+    elif visible:
+        low = min(first.getextrema()[0], second.getextrema()[0])
+        high = max(first.getextrema()[1], second.getextrema()[1])
+        delta = VISIBLE_DELTA * (high - low) / 255
+    ta, tb = clear_value(source), clear_value(candidate)
+    values = dict(a=first, b=second, d=delta, ta=ta or 0, ha=int(ta is not None), tb=tb or 0, hb=int(tb is not None))
+    # ca/cb: 1 where that image is transparent. Moved enough and not hidden in both, or transparent in only one.
+    if hasattr(ImageMath, "lambda_eval"):
+        def compute(env):
+            a, b = env["a"], env["b"]
+            ca, cb = (a == env["ta"]) * env["ha"], (b == env["tb"]) * env["hb"]
+            return ((((a != b) * (abs(a - b) >= env["d"])) * (1 - ca * cb) + abs(ca - cb)) > 0) * 255
+        out = ImageMath.lambda_eval(compute, **values)
+    else:
+        out = ImageMath.eval("((((a != b) * (abs(a - b) >= d)) * (1 - ((a == ta) * ha) * ((b == tb) * hb))"
+                             " + abs((a == ta) * ha - (b == tb) * hb)) > 0) * 255", **values)
+    return out.convert("L")
+
+
 def changed_map(source, candidate):
     """255 where the decoded pixels differ, compared without reducing 16-bit or float precision."""
-    from PIL import ImageChops, ImageMath
+    from PIL import ImageChops
 
     if source.mode in HIGH_PRECISION or candidate.mode in HIGH_PRECISION:
-        # ponytail: single-channel wide compare; 32-bit integers beyond int32 range are not expected in images.
-        mode = "F" if "F" in (source.mode, candidate.mode) else "I"
-        first, second = source.convert(mode), candidate.convert(mode)
-        if hasattr(ImageMath, "lambda_eval"):
-            out = ImageMath.lambda_eval(lambda env: (abs(env["a"] - env["b"]) > 0) * 255, a=first, b=second)
-        else:
-            out = ImageMath.eval("(abs(a - b) > 0) * 255", a=first, b=second)
-        return out.convert("L")
+        return wide_map(source, candidate, visible=False)
     source, candidate = source.convert("RGBA"), candidate.convert("RGBA")
     channels = ImageChops.difference(source, candidate).split()
     changed = channels[0]
@@ -243,15 +299,12 @@ def changed_map(source, candidate):
     return ImageChops.darker(changed, any_alpha.point(lambda value: 255 if value else 0))
 
 
-VISIBLE_DELTA = 8  # 8-bit levels; a smaller difference on every channel is not seen at normal viewing
-
-
 def visible_map(source, candidate):
-    """255 where some 8-bit channel moved by VISIBLE_DELTA or more (wide modes: any change counts)."""
+    """255 where some 8-bit channel moved by VISIBLE_DELTA or more (wide modes: the same step, scaled; see wide_map)."""
     from PIL import ImageChops
 
     if source.mode in HIGH_PRECISION or candidate.mode in HIGH_PRECISION:
-        return changed_map(source, candidate)
+        return wide_map(source, candidate, visible=True)
     source, candidate = source.convert("RGBA"), candidate.convert("RGBA")
     channels = ImageChops.difference(source, candidate).split()
     largest = channels[0]
@@ -288,7 +341,7 @@ def too_small_changes(checks, results, pixels, targets):
             continue
         _, _, width, height = targets[item["target_id"]]
         seen = pixels["visible_by_target"][item["target_id"]]
-        if seen < max(4, width * height // 200):  # under 0.5% of the target box
+        if seen < 4 or seen * 200 < width * height:  # under 0.5% of the target box, exactly
             found[check_id] = seen
     return found
 
@@ -424,8 +477,7 @@ def main():
             issues.append("candidate decoded format differs from the contract")
         if candidate_frames > 1:
             issues.append("candidate is animated; only its first frame could be checked")
-        if canvas.get("alpha_required") and (candidate.mode not in ("RGBA", "LA", "PA") and "transparency" not in candidate.info
-                                             or candidate.convert("RGBA").getchannel("A").getextrema()[0] == 255):
+        if canvas.get("alpha_required") and not has_transparent_pixel(candidate):
             issues.append("candidate has no transparent pixels but the contract requires transparency")
         if source and candidate.size != source.size:
             issues.append("source and candidate dimensions differ; source-coordinate comparison is invalid")

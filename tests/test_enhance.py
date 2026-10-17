@@ -98,9 +98,11 @@ class CompareDisplay(unittest.TestCase):
 
     def test_16_bit_grayscale_source_matches_its_8_bit_copy(self):
         gray = self.source.convert("L")
-        gray.convert("I").point(lambda v: v * 257).save(self.dir / "source.png")  # 16-bit grayscale PNG
+        # 16-bit grayscale PNG; Pillow 13 no longer writes mode "I" as PNG, so save it as I;16.
+        gray.convert("I").point(lambda v: v * 257).convert("I;16").save(self.dir / "source.png")
         with Image.open(self.dir / "source.png") as saved:
             self.assertIn(saved.mode, ("I;16", "I"))  # Pillow before 9 opens it as "I"
+            self.assertGreater(saved.getextrema()[1], 255, "source must keep 16-bit values")
         _, deep = self.compare(self.truth.convert("L"), out="deep")
         gray.save(self.dir / "source.png")
         _, flat = self.compare(self.truth.convert("L"), out="flat")

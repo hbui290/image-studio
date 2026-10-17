@@ -119,7 +119,8 @@ class PixelTests(Case):
         self.contract(keep=False, locked=False)
         Image.new("I;16", (100, 100), 1000).save(self.dir / "s.png")
         candidate = Image.new("I;16", (100, 100), 1000)
-        ImageDraw.Draw(candidate).rectangle((0, 0, 49, 99), fill=2000)
+        # 8 * 257: a visible step on the 16-bit scale, still far above 255.
+        ImageDraw.Draw(candidate).rectangle((0, 0, 49, 99), fill=1000 + 8 * 257)
         candidate.save(self.dir / "c.png")
         review = self.dir / "r.json"
         review.write_text(json.dumps({"results": [{"id": "C1", "status": "pass", "evidence": "seen"}]}))

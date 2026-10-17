@@ -1,0 +1,28 @@
+{
+  "description": "Image Studio project memory: print the .image-studio brief at session start; at stop, block a completion claim once when the evidence gate has not passed. Both exit 0 when python3, the script, or a project store is missing.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "S=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/skills/image-verify/scripts/studio_state.py\"; if command -v python3 >/dev/null 2>&1 && [ -f \"$S\" ]; then python3 \"$S\" hook session-start 2>/dev/null; fi; exit 0",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "S=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/skills/image-verify/scripts/studio_state.py\"; if command -v python3 >/dev/null 2>&1 && [ -f \"$S\" ]; then python3 \"$S\" hook stop 2>/dev/null; fi; exit 0",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

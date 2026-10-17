@@ -269,6 +269,31 @@ class ReviewFixTests(unittest.TestCase):
         self.assertEqual(self.decision()["action"], "accepted_by_checks")
         self.assertTrue((self.dir / "out/run.json").exists())
 
+    # 16. a TIFF whose second IFD has no dimensions raises TypeError in Pillow
+    def test_candidate_with_broken_tiff_frame_is_clean(self):
+        import io
+        import struct
+        buf = io.BytesIO()
+        Image.new("RGB", (8, 8), "white").save(buf, "TIFF")
+        data = bytearray(buf.getvalue())
+        ifd = struct.unpack_from("<I", data, 4)[0]
+        next_ifd = ifd + 2 + 12 * struct.unpack_from("<H", data, ifd)[0]
+        data[next_ifd:next_ifd + 4] = struct.pack("<I", len(data))
+        data += struct.pack("<HHHII", 1, 259, 3, 1, 1) + struct.pack("<I", 0)  # Compression tag only
+        (self.dir / "bad.tif").write_bytes(bytes(data))
+        self.brief["file_checks"]["format"] = "TIFF"
+        result = self.review("--report", self.put("r.json", report()), candidate="bad.tif")
+        self.assertClean(result)
+        self.assertIn("candidate", result.stderr)
+
+    # 17. a 16-bit grayscale tRNS value is real transparency
+    def test_16_bit_trns_counts_as_transparent(self):
+        Image.new("I;16", (8, 8), 1000).save(self.dir / "t.png", transparency=1000)
+        self.brief["file_checks"]["alpha_required"] = True
+        result = self.review("--report", self.put("r.json", report()), candidate="t.png")
+        self.assertClean(result, 0)
+        self.assertEqual(self.decision()["action"], "accepted_by_checks")
+
 
 if __name__ == "__main__":
     unittest.main()

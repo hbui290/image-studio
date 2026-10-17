@@ -59,6 +59,14 @@ def type_matches(value, kind):
     }[kind]
 
 
+def check_text(text, path):
+    # A lone surrogate survives json.loads but cannot be written as UTF-8, so compile would fail later.
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        raise Invalid(f"{path}: text contains an unpaired surrogate code point")
+
+
 def schema_check(value, rule, root, path="$"):
     if "$ref" in rule:
         ref = root
@@ -78,6 +86,7 @@ def schema_check(value, rule, root, path="$"):
         for key in rule.get("required", []):
             require(key in value, f"{path}: missing {key}")
         for key, item in value.items():
+            check_text(key, path)
             child = rule.get("properties", {}).get(key)
             if child is None:
                 extra = rule.get("additionalProperties", True)
@@ -93,6 +102,7 @@ def schema_check(value, rule, root, path="$"):
         for index, item in enumerate(value):
             schema_check(item, rule.get("items", {}), root, f"{path}[{index}]")
     elif isinstance(value, str):
+        check_text(value, path)
         require(len(value) >= rule.get("minLength", 0), f"{path}: string too short")
         if "pattern" in rule:
             pattern = rule["pattern"]
@@ -546,8 +556,8 @@ def compile_spec(spec, mode="full"):
     if review["criterion_ids"]:
         warnings.append("Baseline checks requiring reconciliation before scoring: " + ", ".join(review["criterion_ids"]) + ".")
     if mode == "edit":
-        require(any(source["role"] == "target" for source in attachments),
-                "Compact edit mode needs the clean target selected as an actual image input")
+        require(any(source["role"] == "target" and source["path"] is not None for source in attachments),
+                "Compact edit mode needs the clean target selected as an actual image input with a path")
         require(any(selection["action"] != "keep" for selection in spec["selections"]),
                 "Compact edit mode needs a requested change")
         start = lines.index("\nREQUESTED CHANGES") + 1

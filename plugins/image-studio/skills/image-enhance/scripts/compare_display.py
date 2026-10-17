@@ -200,6 +200,8 @@ def box_arg(text):
 def load_image(path, Image, ImageOps):
     """RGB, or RGBA when the image has transparent pixels."""
     image = ImageOps.exif_transpose(Image.open(path))
+    if image.mode == "F":
+        raise ValueError(f"{path} is a floating-point image with no fixed value scale; save an 8-bit or 16-bit copy")
     if image.mode in ("I", "I;16", "I;16B", "I;16L", "I;16N"):
         image = image.convert("I").point(lambda v: v * (1 / 256))  # 16-bit gray to 8-bit; plain convert clips at 255
     if image.mode in ("RGBA", "LA", "PA") or "transparency" in image.info:
@@ -230,8 +232,15 @@ def main():
         cutout = "RGBA" in (source.mode, candidate.mode)
         if cutout:
             source, candidate = source.convert("RGBA"), candidate.convert("RGBA")
-        if abs(source.width / source.height - candidate.width / candidate.height) > 0.01:
+        # A faithful resize rounds one side, so one side must equal the other scaled, within 1 pixel.
+        if (abs(round(source.height * candidate.width / source.width) - candidate.height) > 1
+                and abs(round(source.width * candidate.height / source.height) - candidate.width) > 1):
             raise ValueError("source and candidate aspect ratios differ; compare the same framing")
+        limit = Image.MAX_IMAGE_PIXELS
+        for image in (source, candidate):
+            if limit and args.width * round(image.height * args.width / image.width) > limit:
+                raise ValueError(f"--width {args.width} makes a {image.width}x{image.height} image too large to "
+                                 f"display (over {limit} pixels); use a smaller --width")
         for x, y, w, h in args.crop:
             if x + w > source.width or y + h > source.height:
                 raise ValueError(f"crop {x},{y},{w},{h} falls outside the source")

@@ -23,6 +23,7 @@ A worked case that combines a repaint, an upscale, and masked repairs is the [ta
 
 ## Steps
 
+0. **Load project memory.** Run `python3 <skills>/image-verify/scripts/studio_state.py brief`. If it finds a `.image-studio/` store, tell the user in 3–5 lines what was loaded: deliverables, approved masters, open defects, and preferences. If the user sent a screenshot of a defect, record it with `defect add` before editing. If it exits 2 with no store and the job spans several rounds, involves a brand or logo, or the user reports a defect, create one: `init --project <project folder> --brand <brand>` (ask the user when either is unclear; never the home folder or inside a folder that already has a store), then `approve master` for each master the user approved, `approve deliverable` for the current file, and `defect add` for each reported defect. See [project memory](../image-verify/references/project-memory.md).
 1. **Diagnose first** with [image-inspect](../image-inspect/SKILL.md) when the image sits on a page: CSS scaling, dark overlays, and heavy compression can make a good file look soft. If the served file is soft but the master is sharp, re-export from the master instead.
 2. **Find the tools** (never assume, never skip one that is present):
    ```bash
@@ -51,7 +52,16 @@ A worked case that combines a repaint, an upscale, and masked repairs is the [ta
    `visible_improvement: false` means stop and report what failed (invisible, not sharper, color shifted, or content moved). Show `before-after.png` and the crops to the user either way. Record rejected models in one line each.
 6. **Transparent PNG with jagged or outlined edges**: the halo is in the edge pixels, so upscaling only enlarges it. Follow the [cutout edges](references/recipes.md#cutout-edges) order: check that the transparency is real, upscale, shrink the edge, make the body solid, redraw a simple outline as a vector path, and regenerate the edge through image-repair only when that is not enough. Prove the upscale, shrink, and solid steps with step 5; a redrawn or regenerated edge is new pixels, so verify it with image-verify as the recipe says.
 7. **If still soft where it matters** (faces, props with no real detail), the pixels do not exist: hand those regions to [image-repair](../image-repair/SKILL.md) with references.
-8. **Deliver** with the [export](references/recipes.md#web-export) and [cutout](references/recipes.md#background-removal) recipes. A brightness or color grade is a separate, requested change, not part of sharpening.
+8. **Export** with the [export](references/recipes.md#web-export) and [cutout](references/recipes.md#background-removal) recipes. A brightness or color grade is a separate, requested change, not part of sharpening.
+9. **Gate before claiming done.** In a project with a store, never call a deliverable done or verified until the gate exits 0:
+   ```bash
+   python3 <skills>/image-verify/scripts/studio_state.py approve deliverable --name N --file F   # only if the file changed
+   python3 <skills>/image-verify/scripts/studio_state.py defect close --id D<n> --status resolved --note "what changed"   # each fixed defect
+   python3 <skills>/image-verify/scripts/studio_state.py gate --deliverable N                     # prints the run id and Next: commands
+   python3 <skills>/image-verify/scripts/studio_state.py verdict --run <run-id> --id D<n> --status pass --evidence "what the crop shows"
+   python3 <skills>/image-verify/scripts/studio_state.py gate --deliverable N --run <run-id>
+   ```
+   Open each crop before writing its verdict; use `fail` or `uncertain` when it is not clearly fixed. Report the gate's Checked / Not checked / Still failing lines as they are. Hand the exported file to the user only after it exits 0; when the gate has not passed, end the turn with the Checked / Not checked / Still failing report or a question. Details: [the gate](../image-verify/references/project-memory.md#the-gate).
 
 ## Outputs
 
@@ -62,7 +72,7 @@ A worked case that combines a repaint, an upscale, and masked repairs is the [ta
 - `before-after-light.png`: the same on a light backdrop, written only when either image has transparent pixels.
 - `crop-N.png`: one 100% crop pair per `--crop`, numbered from 1.
 
-Exit codes: 0 whenever the comparison ran, including when `visible_improvement` is false, so read the verdict, not the exit code. 2 for bad input: a missing or unreadable file, an existing `--out` folder, a `--width` outside 1 to 16384, different aspect ratios, or a crop outside the source.
+Exit codes: 0 whenever the comparison ran, including when `visible_improvement` is false, so read the verdict, not the exit code. 2 for bad input: a missing or unreadable file, a floating-point (32-bit float) image, an existing `--out` folder, a `--width` outside 1 to 16384 or one that would make a display image over Pillow's pixel limit, different aspect ratios (beyond rounding one side by 1 pixel), or a crop outside the source.
 
 ## Stop conditions
 

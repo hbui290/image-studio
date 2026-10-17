@@ -212,6 +212,9 @@
               },
               "confidence": {
                 "const": "unknown"
+              },
+              "note": {
+                "pattern": "\\S"
               }
             }
           }

@@ -70,14 +70,30 @@ def check_file(path, expected):
     except Image.DecompressionBombError as exc:
         raise OSError(f'image is too large to check safely: {exc}')
     with opened:
-        opened.load()
-        image_format = (opened.format or '').upper()
-        animated = getattr(opened, 'n_frames', 1) > 1
+        try:
+            opened.load()
+            image_format = (opened.format or '').upper()
+            animated = getattr(opened, 'n_frames', 1) > 1
+            im = ImageOps.exif_transpose(opened)
+        except (ValueError, TypeError, SyntaxError) as exc:  # Pillow raises these for some damaged files
+            raise OSError(f'{type(exc).__name__}: {exc}')
         if image_format == 'MPO':  # camera JPEG with an embedded preview frame: a still JPEG
             image_format, animated = 'JPEG', False
-        im = ImageOps.exif_transpose(opened)
         alpha = 'A' in im.getbands() or 'transparency' in im.info
-        transparent = im.convert('RGBA').getchannel('A').getextrema()[0] < 255 if alpha else False
+        if alpha and im.mode in ('I', 'I;16', 'I;16B', 'I;16L', 'F') and 'A' not in im.getbands():
+            # convert('RGBA') ignores a 16-bit tRNS value, so look for that gray level directly.
+            from PIL import ImageMath
+            clear = im.info['transparency']
+            transparent = False
+            if isinstance(clear, (int, float)):
+                wide = im.convert('F')
+                if hasattr(ImageMath, 'lambda_eval'):
+                    hits = ImageMath.lambda_eval(lambda env: (env['m'] == clear) * 255, m=wide)
+                else:
+                    hits = ImageMath.eval('(m == t) * 255', m=wide, t=clear)
+                transparent = hits.getextrema()[1] > 0
+        else:
+            transparent = im.convert('RGBA').getchannel('A').getextrema()[0] < 255 if alpha else False
         actual = {'width': im.width, 'height': im.height, 'format': image_format,
                   'alpha_channel': alpha, 'has_transparent_pixels': transparent,
                   'sha256': hashlib.sha256(Path(path).read_bytes()).hexdigest()}
