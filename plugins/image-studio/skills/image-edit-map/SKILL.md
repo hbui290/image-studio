@@ -13,7 +13,7 @@ Run scripts; do not read their source - use `--help` for usage.
 
 ## Steps
 
-0. **Memory:** if not already in context, run `python3 <skills>/image-verify/scripts/studio_state.py brief`; see [using the store in a skill](../image-verify/references/project-memory.md#using-the-store-in-a-skill).
+0. **Memory:** if not already in context, run `python3 <skills>/image-verify/scripts/studio_state.py brief` (no store: `taste list` and `lesson list` instead); see [using the store in a skill](../image-verify/references/project-memory.md#using-the-store-in-a-skill).
 1. **Inspect** every supplied image; ask for a missing one, never invent contents. Name the edit target and the references; read real dimensions from metadata, not a resized preview.
 2. **Ask** at most three unanswered questions: what should change, what must stay, where it will be used. Skip any the brief already answers.
 3. **Map** only when targets need a picture: number sections and elements on a separate copy ([ImageMagick](https://imagemagick.org) badges from source coordinates; normalized `[x, y, width, height]` boxes converted with the [box rule](../image-verify/references/candidate-audit.md#contract-and-review)) and show the legend. Read [mapping-and-prompts.md](references/mapping-and-prompts.md) only when drawing a map. Honor "just do this" or "skip the map".

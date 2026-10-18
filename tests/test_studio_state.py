@@ -769,11 +769,30 @@ class FinalMessageTests(unittest.TestCase):
         "Bạn muốn xuất thêm size khác không？",
         "Should I fix D1 now?",
         "Bạn Đạt ơi, fix D1 không?",
+    ]
+
+    CLAIM_THEN_QUESTION = (
         "Done. Anything else?",
         "Hoàn thành! Bạn muốn gì tiếp?",
         "All good, shipped. Anything else?",
-        "Done with the crop sheet.\nWhich version do you prefer?",
-    ]
+        "Fixed the hat and it is ready. Want a JPEG too?",
+    )
+    EMPTY_REPORT = (
+        "All done!\nChecked: spec\nNot checked: none\nStill failing: none",
+        "Xong rồi.\nĐã kiểm: logo\nChưa kiểm: không\nCòn lỗi: không có",
+    )
+
+    def test_a_question_after_a_claim_does_not_hide_it(self):
+        module = load_module()
+        for text in self.CLAIM_THEN_QUESTION:
+            self.assertTrue(module.claims_completion(text), text)
+        self.assertFalse(module.claims_completion("Is the poster done?"))
+
+    def test_only_a_report_that_admits_open_work_excuses_a_claim(self):
+        module = load_module()
+        for text in self.EMPTY_REPORT:
+            self.assertFalse(module.admits_unfinished(text), text)
+        self.assertTrue(module.admits_unfinished("Done with D3.\nChecked:\n- D3\nNot checked:\n- none\nStill failing:\n- D4 soft background"))
 
     def test_claims_completion(self):
         module = load_module()
@@ -782,10 +801,10 @@ class FinalMessageTests(unittest.TestCase):
         for text in self.ALLOW[:6]:
             self.assertFalse(module.claims_completion(text), text)
 
-    def test_question_or_report_never_blocks(self):
+    def test_questions_and_honest_reports_pass(self):
         module = load_module()
         for text in self.ALLOW[6:]:
-            self.assertTrue(module.is_question(text) or module.has_report_headings(text), text)
+            self.assertTrue(not module.claims_completion(text) or module.admits_unfinished(text), text)
 
 
 class Round3HookTests(StudioBase):
@@ -1691,6 +1710,31 @@ class ScopeRequestTests(StudioBase):
         self.assertTrue(self.defects()[0]["needs_lesson"])
         self.assertIn("almost nothing changed", run.stdout)
         self.assertIn("has no lesson", run.stdout)
+
+
+class ConcurrencyAndLinkTests(StudioBase):
+    def test_parallel_verdicts_are_all_kept(self):
+        self.init()
+        self.approve_poster(self.poster(card=True, dots=True))
+        ids = [self.defect(list(b)) for b in DOTS]
+        self.approve_poster(self.poster(card=True, dots=False))
+        for did in ids:
+            self.ok("defect", "close", "--id", did, "--status", "resolved", "--note", "removed")
+        run = self.run_id(self.gate())
+        env = dict(os.environ, IMAGE_STUDIO_HOME=str(self.home))
+        procs = [subprocess.Popen([sys.executable, str(SCRIPT), "verdict", "--run", run, "--id", did, "--status", "pass",
+                                   "--evidence", "dot is gone at 100%"], cwd=str(self.project), env=env,
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) for did in ids]
+        for proc in procs: self.assertEqual(proc.wait(), 0)
+        data = json.loads((self.run_dir(run) / "verdicts.json").read_text())
+        self.assertEqual(sorted(data["verdicts"]), sorted(ids))
+
+    def test_taste_with_brand_keeps_the_deliverable_link(self):
+        self.init()
+        self.approve_poster(self.poster())
+        self.ok("taste", "add", "--brand", "zeta", "--deliverable", "poster", "--note", "warm rim light")
+        item = json.loads((self.home / "brands" / "zeta" / "taste.jsonl").read_text().splitlines()[0])
+        self.assertEqual(item["deliverable"], "poster")
 
 
 if __name__ == "__main__":

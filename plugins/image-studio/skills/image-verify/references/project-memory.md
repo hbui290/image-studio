@@ -15,7 +15,7 @@ Run it as `python3 <skills>/image-verify/scripts/studio_state.py <command>` (`<s
 
 ## Taste and lessons
 
-The goal is a designer that gets closer to the user's taste with every job. Both files are shared by every job, under `${IMAGE_STUDIO_HOME:-~/.image-studio}`, and work with or without a project store.
+The goal is a designer that gets closer to the user's taste with every job. Both files are shared by every job, under `${IMAGE_STUDIO_HOME:-~/.image-studio}`, and are recorded with or without a project store. Inside a store the session-start card and `brief` show them; outside one, read them with `taste list [--brand B]` and `lesson list`.
 
 - **Taste:** when the user approves or praises a result ("love this", "keep this one", or the same in the user's language, e.g. Vietnamese "đẹp", "giữ cái này"), record what they liked: `taste add --aspect color|line|composition|detail|lighting|text|style|other --note "what they liked, concretely" --quote "their words"` (add `--deliverable N` in a project). Notes go to `brands/<brand>/taste.jsonl` (the store's brand, or `--brand`), else `taste.jsonl`. The session-start card and `brief` show the 6 newest notes, brand and general merged, under "Your taste"; match them in the first draft.
 - **Lessons:** besides a miss after delivery (step 4 above), record a method that failed twice and the one that then worked: `lesson add --mistake "..." --cause "..." --check "..." --worked "..."`.
@@ -36,7 +36,7 @@ Hard facts for a brand, set with the user: `brand set --brand B --color NAME=#RR
 python3 <skills>/image-verify/scripts/studio_state.py approve deliverable --name N --file F   # only if the file changed
 python3 <skills>/image-verify/scripts/studio_state.py defect close --id D<n> --status resolved --note "what changed"
 python3 <skills>/image-verify/scripts/studio_state.py gate --deliverable N            # prints Run: <id> and Next: steps
-python3 <skills>/image-verify/scripts/studio_state.py verdict --run <id> --id D<n> --status pass --evidence "what the crop shows"
+python3 <skills>/image-verify/scripts/studio_state.py verdict --run <id> --id D<n> --status pass --evidence "what the crop shows" [--reviewer independent]
 python3 <skills>/image-verify/scripts/studio_state.py gate --deliverable N --run <id>
 ```
 
@@ -51,7 +51,7 @@ Open the 100% crop of each defect first; open the 200% crop only when the 100% v
 ## Hooks
 
 - **Session start** (and after compaction) prints a short card: open defects, deliverables and gate status, recent decisions, the user's taste (6 newest notes), up to 5 lessons from earlier jobs, confirmed preferences.
-- **Stop** blocks only a completion claim ("done", "fixed", "ready", or Vietnamese "xong", "hoàn thành"...) while a deliverable has not passed the gate or a defect is open, once per message. The agent then tells the user plainly what is still wrong. Questions, progress updates, negated claims ("not done", Vietnamese "chưa xong"), and reports with Checked / Not checked / Still failing headings pass. A session working in a separate git repo below the project folder is not policed.
+- **Stop** blocks only a completion claim ("done", "fixed", "ready", or Vietnamese "xong", "hoàn thành"...) while a deliverable has not passed the gate or a defect is open, once per message. The agent then tells the user plainly what is still wrong. Questions, progress updates, and negated claims ("not done", Vietnamese "chưa xong") pass; a claim followed by a question ("Done. Anything else?") still counts. A Checked / Not checked / Still failing report passes only when it names something not checked or still failing. A session working in a separate git repo below the project folder is not policed.
 - Both hooks exit 0 silently when python3, the script, or a store is missing. Codex asks the user to trust each hook once; without hooks, run `brief` and `gate` as the steps say.
 
 Keep the store local; never ship `.image-studio/` inside a deliverable, and do not record personal data in notes.

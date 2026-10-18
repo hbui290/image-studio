@@ -93,21 +93,31 @@ COMPLETION_PAT = re.compile(
 
 
 def claims_completion(text):
+    """True when any sentence claims the work is done. A question ("Is it done?") claims nothing,
+    but a claim followed by a question ("Done. Anything else?") still counts."""
     text = unicodedata.normalize("NFC", text or "")
-    for sentence in re.split(r"[.!?\n]+", text):
+    for sentence in re.findall(r"[^.!?？\n]+[.!?？\n]?", text):
+        if sentence.rstrip().endswith(("?", "？")): continue
         masked = NEGATION_PAT.sub(" ", sentence)
         if COMPLETION_PAT.search(masked) and not PROGRESS_PAT.search(masked): return True
     return False
 
 
-def is_question(text):
-    t = unicodedata.normalize("NFC", text or "").strip()
-    return t.endswith("?") or t.endswith("？")
+EMPTY_SECTION = re.compile(r"^[\s*_#>|:-]*(?:none|nothing|\(none\)|n/a|không|không có|-)?[\s*_.]*$", re.I)
 
 
-def has_report_headings(text):
-    t = unicodedata.normalize("NFC", text or "").strip()
-    return all(h.search(t) for h in REPORT_HEADINGS)
+def admits_unfinished(text):
+    """True for a Checked / Not checked / Still failing report that names something still unchecked or failing.
+    A report whose open sections are all empty ("Still failing: none") is a completion claim like any other."""
+    t = unicodedata.normalize("NFC", text or "")
+    hits = [(m.start(), m.end(), i) for i, h in enumerate(REPORT_HEADINGS) for m in h.finditer(t)]
+    if {i for _, _, i in hits} != {0, 1, 2}: return False
+    hits.sort()
+    for n, (start, end, i) in enumerate(hits):
+        if i == 0: continue  # "Checked" lists what passed
+        body = t[end:hits[n + 1][0] if n + 1 < len(hits) else len(t)]
+        if any(not EMPTY_SECTION.match(line) for line in body.splitlines()): return True
+    return False
 
 
 def valid_session_id(session_id):
@@ -217,7 +227,6 @@ class Store:
             if not isinstance(state.get(key), kind):
                 raise UsageError(f"{self.state_path}: state.json field {key!r} is missing or has the wrong type")
         state.setdefault("gates", {})
-        state.setdefault("masters", {})
         return state
 
     def save(self): atomic_write(self.state_path, dump_json(self.state))
@@ -289,8 +298,21 @@ def load_image(data):
     return copy
 
 
+_DECODED = {}
+
+
 def open_image(path, member=None):
-    if member is None: return load_image(Path(path).read_bytes())
+    if member is None:
+        # A gate run crops every defect from the same file; decode it once per process.
+        try: st = Path(path).stat(); key = (str(Path(path).resolve()), st.st_mtime_ns, st.st_size)
+        except OSError: key = None
+        if key not in _DECODED:
+            img = load_image(Path(path).read_bytes())
+            if key is None: return img
+            _DECODED.clear(); _DECODED[key] = img
+        copy = _DECODED[key].copy()
+        copy.format = _DECODED[key].format  # Image.copy() drops the format the spec check reads
+        return copy
     with zipfile.ZipFile(path) as archive:
         info = member if isinstance(member, zipfile.ZipInfo) else archive.getinfo(member)
         if info.file_size > MAX_MEMBER_BYTES: raise ValueError(f"{info.filename} is larger than {MAX_MEMBER_BYTES >> 20} MB")
@@ -442,8 +464,9 @@ def cmd_defect_add(args):
     record = {"deliverable": args.deliverable, "bbox": box, "kind": args.kind, "source": args.source,
               "status": "open", "note": note, "reported_sha256": item["current_sha256"]}
     quote = text_arg(args.quote, "--quote", False)
-    if spec.get("format") == "ZIP" and len(zip_images(path)) > 1:
-        raise UsageError(f"{path.name} holds {len(zip_images(path))} images; approve the image that has the defect as its "
+    members = zip_images(path) if spec.get("format") == "ZIP" else []
+    if len(members) > 1:
+        raise UsageError(f"{path.name} holds {len(members)} images; approve the image that has the defect as its "
                          "own deliverable, then add the defect there")
     try:
         image = target_image(path, spec, record)
@@ -677,15 +700,15 @@ def cmd_taste_add(args):
     brand = ident(args.brand, "--brand") if args.brand is not None else None
     record = {"note": note, "aspect": args.aspect, "time": now()}
     if quote: record["quote"] = quote
-    if brand is None:
-        try: store = open_store(args.project)
-        except UsageError: store = None
-        if store is not None:
-            brand = store.state.get("brand")
-            record["project"] = str(store.root.resolve())
-            if args.deliverable:
-                item = store.deliverable(args.deliverable)
-                record["deliverable"], record["sha256"] = args.deliverable, item.get("current_sha256")
+    try: store = open_store(args.project)
+    except UsageError: store = None
+    if store is not None:
+        brand = brand or store.state.get("brand")
+        record["project"] = str(store.root.resolve())
+        if args.deliverable:
+            item = store.deliverable(args.deliverable)
+            record["deliverable"], record["sha256"] = args.deliverable, item.get("current_sha256")
+    elif args.deliverable: raise UsageError("--deliverable needs a project store")
     path = taste_path(brand)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -918,7 +941,7 @@ def build_brief(store, max_lines):
     prop = sum(1 for st, _ in prefs if st == "proposed")
     if prop: head.append(f"Preferences: {prop} proposed, ask the user to confirm (pref add ... --confirmed).")
     sections = [("Deliverables:", delivs)]
-    sections += [("Your taste (match it):", taste), ("Lessons from earlier jobs (check these):", lessons), ("Confirmed preferences:", conf), ("Recent decisions:", decs), ("Recently resolved defects (regression checks):", [f"- {defect_line(d)}" for d in [d for d in defects if d.get("status") != "open"][::-1]])]
+    sections += [("Your taste (match it):", taste), ("Lessons from earlier jobs (check these):", lessons), ("Confirmed preferences:", conf), ("Recent decisions:", decs), ("Closed defects (resolved ones are re-checked by the gate):", [f"- {defect_line(d)}" for d in [d for d in defects if d.get("status") != "open"][::-1]])]
     lines = list(head)
     budget = max(0, max_lines - len(lines))
     if sum(len(items) + 1 for _, items in sections if items) > budget: budget -= 1
@@ -1406,7 +1429,7 @@ def hook_stop(payload):
     if not isinstance(message, str):
         tr = payload.get("transcript_path")
         message = last_message_from_transcript(tr) if isinstance(tr, str) and tr else ""
-    if not message.strip() or is_question(message) or has_report_headings(message) or not claims_completion(message):
+    if not message.strip() or admits_unfinished(message) or not claims_completion(message):
         return ""
     try:
         store = Store(root)
@@ -1572,14 +1595,29 @@ def build_parser():
     return parser
 
 
+def store_lock(args):
+    """Serialize commands that rewrite one store, so parallel agents do not overwrite each other's defects or verdicts."""
+    if fcntl is None or getattr(args, "command", None) not in ("approve", "defect", "gate", "verdict"): return None
+    try:
+        root = find_store(getattr(args, "project", None) or os.getcwd())
+        if root is None: return None
+        handle = open(root / ".lock", "a")
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        return handle
+    except OSError: return None
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["hook"]: return run_hook(argv[1:])
     args = build_parser().parse_args(argv)
+    lock = store_lock(args)
     try: return args.func(args)
     except UsageError as exc: print(f"error: {exc}", file=sys.stderr)
     except OSError as exc: print(f"error: {exc}", file=sys.stderr)
     except Exception as exc: print(f"error: unexpected {exc.__class__.__name__}: {exc}", file=sys.stderr)
+    finally:
+        if lock is not None: lock.close()
     return 2
 
 

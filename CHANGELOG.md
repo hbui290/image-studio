@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.9.1-local.1 (2026-10-18)
+
+Fixes from a full audit of code and docs (3 independent reviewers).
+
+- **Stop hook:** a completion claim followed by a question ("Done. Anything else?") is no longer let through, and a Checked / Not checked / Still failing report excuses a claim only when it names something not checked or still failing ("Still failing: none" counts as a claim).
+- **Store:** commands that rewrite a store (approve, defect, gate, verdict) take a file lock, so parallel verdicts no longer overwrite each other (seen in the poster job). The gate decodes the deliverable once instead of once per defect. `taste add --brand B --deliverable N` keeps the deliverable link. Leftover `masters` writes removed.
+- **Hooks:** fall back to `python` when `python3` is missing.
+- **Docs:** the designer review runs on a first draft and before delivery, not every repair round; taste and lessons recorded without a store are read with `taste list` / `lesson list`; independent review is "when available" and `verdict --reviewer independent` is documented; the multi-chat repair-history template (duplicated by the store) and restated rules are removed; Codex `transparent_background` is preferred over a magenta key; image-inspiration records the person's pick as taste; several stop rules, exit codes, link labels, and "master" wordings corrected.
+
 ## 2.9.0-local.1 (2026-10-18)
 
 Fixes found by reading the real poster job (13 defects, 16 gate runs).

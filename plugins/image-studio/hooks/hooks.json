@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "S=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/skills/image-verify/scripts/studio_state.py\"; if command -v python3 >/dev/null 2>&1 && [ -f \"$S\" ]; then python3 \"$S\" hook session-start 2>/dev/null; fi; exit 0",
+            "command": "S=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/skills/image-verify/scripts/studio_state.py\"; P=$(command -v python3 || command -v python); if [ -n \"$P\" ] && [ -f \"$S\" ]; then \"$P\" \"$S\" hook session-start 2>/dev/null; fi; exit 0",
             "timeout": 10
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "S=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/skills/image-verify/scripts/studio_state.py\"; if command -v python3 >/dev/null 2>&1 && [ -f \"$S\" ]; then python3 \"$S\" hook stop 2>/dev/null; fi; exit 0",
+            "command": "S=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/skills/image-verify/scripts/studio_state.py\"; P=$(command -v python3 || command -v python); if [ -n \"$P\" ] && [ -f \"$S\" ]; then \"$P\" \"$S\" hook stop 2>/dev/null; fi; exit 0",
             "timeout": 5
           }
         ]

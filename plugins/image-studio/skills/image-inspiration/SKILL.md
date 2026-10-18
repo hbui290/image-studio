@@ -20,7 +20,7 @@ Collect references → name their ingredients → combine selected traits → ge
 Claude Code (a plugin install shows it with the plugin's prefix): `/image-inspiration` `[brief] --mode batch|loop --judge human|llm|hybrid --count 4 --rounds 3 --max-images 12`.
 Codex: `$image-inspiration` with the same instructions. These are arguments interpreted by the host agent, not a standalone slash-command executable. Default: `batch`, `human`, four images. Use one to eight candidates per batch; larger requests need separate bounded batches. `--loop` means `--mode loop`; `--no-loop` means `--mode batch`. Conflicting options require clarification. In loop mode, three rounds includes the first batch; twelve images includes every generation, edit, repair, and failed generation attempt. Before every batch, reduce its size to the remaining image slots; at zero, stop. Never exceed either cap. Smaller user limits take precedence.
 
-`human` asks the person to choose. `llm` uses an available independent vision model. `hybrid` shows that model's ranking and waits for the person's selection. Do not silently switch judges. A model must actually see the candidate images. Read [judging and iteration](references/judging.md) for the loop and decision helper.
+`human` asks the person to choose. `llm` uses an available independent vision model. `hybrid` shows that model's ranking and waits for the person's selection. Do not silently switch judges. A model must actually see the candidate images. Read [judging and iteration](references/judging.md) for the loop and decision helper. When the person picks a variant, record what they liked with `taste add` ([taste and lessons](../image-verify/references/project-memory.md#taste-and-lessons)).
 
 ## Collect and inspect
 

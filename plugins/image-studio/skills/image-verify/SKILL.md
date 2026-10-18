@@ -13,9 +13,9 @@ Run scripts; do not read their source - use `--help` for usage.
 
 ## Operational checklist
 
-0. **Memory:** If not in context, run `python3 <skills>/image-verify/scripts/studio_state.py brief` (see [using the store in a skill](references/project-memory.md#using-the-store-in-a-skill)).
-1. **Reviewer:** Use independent review. Read [independent-review.md](references/independent-review.md) only when setting up reviewer instructions.
-2. **Review checks:** Give each check one `pass`, `fail`, or `uncertain` with visible evidence. Read [acceptance.md](references/acceptance.md) only when evaluating craft checks. Read [repair-rules.md](../image-repair/references/repair-rules.md) only when checking logos, packaging text, or transparent exports. Before showing a new or regenerated image, or before delivery, follow [designer-review.md](references/designer-review.md): tiles, edges, grayscale, thumbnail, lineup, problems first.
+0. **Memory:** If not in context, run `python3 <skills>/image-verify/scripts/studio_state.py brief` (no store: `taste list` and `lesson list` instead) (see [using the store in a skill](references/project-memory.md#using-the-store-in-a-skill)).
+1. **Reviewer:** Use independent review when available (record it with `verdict --reviewer independent`); otherwise label it self-review. Read [independent-review.md](references/independent-review.md) only when setting up reviewer instructions.
+2. **Review checks:** Give each check one `pass`, `fail`, or `uncertain` with visible evidence. Read [acceptance.md](references/acceptance.md) only when evaluating craft checks. Read [repair-rules.md](../image-repair/references/repair-rules.md) only when checking logos, packaging text, or transparent exports. For a first draft or whole-image regeneration, and before delivery, follow [designer-review.md](references/designer-review.md): tiles, edges, grayscale, thumbnail, lineup, problems first.
 3. **Candidate audit:** When exact pixel preservation outside a mask is required:
    ```bash
    python3 <skills>/image-verify/scripts/audit_candidate.py \

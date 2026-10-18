@@ -56,20 +56,4 @@ Separate visible evidence from estimates. A flat image does not reveal original 
 
 Before delivery, use [the verification checklist](verification.md). When returning JSON, conform to [the schema](image-spec.schema.json). Source-specific identifiers, coordinates, and values must come from the current input, not the example file.
 
-## Optional visual preset
-
-If the person explicitly asks for a technical-editorial look, offer a dark or paper-light background, mostly white or black content, restrained blue emphasis, readable typography, and meaningful diagram connections. Confirm the chosen direction; never apply this palette, a fixed canvas size, a brand, or a layout to someone's image by default.
-
-This workflow combines a numbered editing interface with lessons from targeted image revisions. General prompting guidance also informed it: [OpenAI image prompting](https://developers.openai.com/api/docs/guides/image-prompting). Verify current tool capabilities separately; this skill deliberately does not freeze model names or API settings.
-
-## Running the scripts
-
-In commands, `<skills>` means the folder that holds the Image Studio skill folders, which is this skill's parent folder (the host shows the skill's path when it loads); run commands from your working folder. They need Python 3 with jsonschema (and Pillow for `--image`): prefix the command with `uv run --with pillow --with jsonschema` ([uv](https://docs.astral.sh/uv/)), or install them with `python3 -m pip install pillow jsonschema`.
-
-Validate a saved map manifest or spec:
-
-```sh
-python3 <skills>/image-edit-map/scripts/validate_spec.py image-spec.json --image <source image>
-```
-
-`--image` is optional and checks the reported width and height against the decoded file; add `--image-id B` when the spec describes more than one image. If the selected image has no `width_px`/`height_px` value (missing or `null`), the `PASS` line says the dimensions were not verified instead of claiming a match; record the measured dimensions and rerun when the metadata check is required. Exit codes: `0` passed (prints `PASS: ...`; visual accuracy is not checked), `1` the spec is invalid or the dimensions do not match (one problem per line), `2` a file is missing or unreadable, the JSON cannot be parsed, a dependency is missing, or `--image-id` is missing for a multiple-image spec or names no image in it.
+The validate command and its exit codes are in [SKILL.md](../SKILL.md).

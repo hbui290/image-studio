@@ -28,7 +28,7 @@ Describe one asset per image: subject, shape, proportions or aspect ratio, what 
 | Glow, light, or particle effect | `On a pure black (#000000) background; the effect fades smoothly into black. Nothing else in the image.` |
 | Full scene or background | No background rule; say what stays empty and where. |
 
-Magenta separates cleanly from dark or navy subjects where black does not. Key it out with [ImageMagick](https://imagemagick.org) `magick in.png -fuzz 15% -transparent '#FF00FF' cutout.png` (or rembg), then clean any pink fringe with [cutout edges](../../image-enhance/references/cutouts.md#cutout-edges).
+In Codex, prefer `image_gen.imagegen` with `transparent_background`; use the magenta background only when the tool cannot give transparency. Magenta separates cleanly from dark or navy subjects where black does not. Key it out with [ImageMagick](https://imagemagick.org) `magick in.png -fuzz 15% -transparent '#FF00FF' cutout.png` (or rembg), then clean any pink fringe with [cutout edges](../../image-enhance/references/cutouts.md#cutout-edges).
 
 ## 4. References
 

@@ -29,7 +29,7 @@ magick in.png mask-full.png -alpha off -compose CopyOpacity -composite cutout.pn
 
 ## Cutout edges
 
-Symptom: a transparent PNG looks jagged, speckled, or outlined by a gray or white line on a dark or light page, though it looked fine on the backdrop it was made on. Cause: the outermost pixels still carry the old backdrop (a halo or a shadow), and an upscaler sharpened that noise. Work in this order; each step is proved with `compare_display.py`, which for transparent images also writes `before-after-light.png` and reports `edge_noise`, `edge_ratio`, `alpha_iou`, and `body_alpha` (see the SKILL.md Outputs).
+Symptom: a transparent PNG looks jagged, speckled, or outlined by a gray or white line on a dark or light page, though it looked fine on the backdrop it was made on. Cause: the outermost pixels still carry the old backdrop (a halo or a shadow), and an upscaler sharpened that noise. Work in this order; each step is proved with `compare_display.py`, which for transparent images also writes `before-after-light.png` and reports `edge_noise`, `edge_ratio`, `alpha_iou`, and `body_alpha` (explained in [recipes.md](recipes.md#proving-the-gain)).
 
 1. **Check that the transparency is real.** A file can look transparent and be opaque: a painted checkerboard, or a "transparent" generator result whose background is solid black. `opaque=True` means there is no transparency; make the cutout first (rembg, or the [solid backdrop](#solid-backdrop) recipe):
    ```bash

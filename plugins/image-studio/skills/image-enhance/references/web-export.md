@@ -2,18 +2,18 @@
 
 Read by [image-enhance](../SKILL.md) only when the condition named there holds. Upscaling recipes and the measured results are in [recipes.md](recipes.md).
 
-Export from the lossless master, never from a previous WebP:
+Export from the lossless source file, never from a previous WebP:
 
 ```bash
-mw=$(magick identify -format '%w' master.png)
+mw=$(magick identify -format '%w' source.png)
 for w in 3840 2560 1920 1280 768; do
-  [ "$w" -gt "$mw" ] && continue   # skip widths above the master
-  magick master.png -resize "${w}x>" -strip -quality 90 -define webp:method=6 "hero-$w.webp"
-  magick master.png -resize "${w}x>" -strip -quality 60 "hero-$w.avif"
+  [ "$w" -gt "$mw" ] && continue   # skip widths above the source
+  magick source.png -resize "${w}x>" -strip -quality 90 -define webp:method=6 "hero-$w.webp"
+  magick source.png -resize "${w}x>" -strip -quality 60 "hero-$w.avif"
 done
 ```
 
-The width check skips any size wider than the master, so no same-size copy ships under a larger name; `>` also stops ImageMagick from upscaling. Remove skipped widths from the `srcset` below.
+The width check skips any size wider than the source, so no same-size copy ships under a larger name; `>` also stops ImageMagick from upscaling. Remove skipped widths from the `srcset` below.
 
 ```html
 <picture>

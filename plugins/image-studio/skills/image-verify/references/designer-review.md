@@ -1,6 +1,6 @@
 # Designer review
 
-Read by [image-verify](../SKILL.md) before showing a new or regenerated image to the user, and before delivery. It reviews the way a strict art director does: find problems first, everywhere in the image, not only in the region that was edited.
+Read by [image-verify](../SKILL.md) for a first draft (or a whole-image regeneration) and before delivery. In repair rounds, inspect only the changed region and its neighbours at 100%. It reviews the way a strict art director does: find problems first, everywhere in the image, not only in the region that was edited.
 
 ## 1. Make the review views
 
