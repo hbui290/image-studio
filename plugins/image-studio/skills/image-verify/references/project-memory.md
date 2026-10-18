@@ -9,8 +9,9 @@ Run it as `python3 <skills>/image-verify/scripts/studio_state.py <command>` (`<s
 1. **Load once per chat.** If the session-start card is already in context, do not run `brief`; a skill handing off to another does not reload. Otherwise run `brief`.
 2. **Create a store only when needed:** the user reports a defect, approves a deliverable, or asks for one. `init --project <folder> --brand <brand>` (never the home folder or inside a folder that already has a store). The first `approve deliverable --name N --file F` needs `--width W --height H --format PNG` (and `--alpha required|forbidden|any`).
 3. **Record what the user reports:** `defect add --deliverable N --bbox x0,y0,x1,y1 --kind seam|artifact|scope|color|logo|other --note "..."`. A defect that covers most of the image (for example "the whole poster looks soft") is not a local repair: ask the user whether to regenerate the whole image, run image-enhance, or accept it (`defect close --status wontfix --quote "<their words>"`).
-4. **Gate once per delivery attempt**, before telling the user it is done; not after every repair round. Re-run only after a further fix. Deliver only after it exits 0.
-5. **Talk to the user in plain words.** Defect IDs are internal; mention them only in parentheses. When the gate has not passed, say what is still wrong and ask what to do.
+4. **Learn from a miss after delivery.** When the deliverable had already passed the gate, `defect add` says so and marks the defect: also run `lesson add --defect D<n> --mistake "..." --cause "..." --check "..."` (what went wrong, why, and what to check next time). The gate does not pass until that lesson exists. If you delivered without a passing gate and the user rejects the result, add a lesson anyway (without `--defect` when nothing was recorded). Lessons are shared by every job (`${IMAGE_STUDIO_HOME:-~/.image-studio}/lessons.jsonl`); the session-start card and `brief` show the 5 most relevant. When `lesson add` reports that the same kind of mistake happened in 2 or more jobs, ask the user whether to make it a rule (`pref add`, with `--confirmed` only after they agree).
+5. **Gate once per delivery attempt**, before telling the user it is done; not after every repair round. Re-run only after a further fix. Deliver only after it exits 0.
+6. **Talk to the user in plain words.** Defect IDs are internal; mention them only in parentheses. When the gate has not passed, say what is still wrong and ask what to do.
 
 ## The gate
 
@@ -24,7 +25,7 @@ python3 <skills>/image-verify/scripts/studio_state.py gate --deliverable N --run
 
 Open the 100% crop of each defect first; open the 200% crop only when the 100% view is unclear. Write verdicts one at a time (parallel writes overwrite each other), and only after opening the crop; use `fail` or `uncertain` when it is not clearly fixed.
 
-`gate` passes only when: the file's hash equals the approved one and matches the spec; every defect ever recorded on the deliverable (open and resolved, so fixed defects are re-checked) has crops in this run and no IDs are missing; no defect is open; each resolved defect has a `pass` verdict tied to this run's crop and at least 5% of its box changed since it was reported; each `wontfix` carries the user's words. A ZIP deliverable's spec is checked by hash and size only; a defect needs a single-image ZIP and is cropped from that image. Self-verified passes are labelled as such.
+`gate` passes only when: the file's hash equals the approved one and matches the spec; every defect ever recorded on the deliverable (open and resolved, so fixed defects are re-checked) has crops in this run and no IDs are missing; no defect is open; each resolved defect has a `pass` verdict tied to this run's crop and at least 5% of its box changed since it was reported; each `wontfix` carries the user's words; each defect reported after delivery has a lesson. A ZIP deliverable's spec is checked by hash and size only; a defect needs a single-image ZIP and is cropped from that image. Self-verified passes are labelled as such.
 
 ## Preferences
 
@@ -32,7 +33,7 @@ Open the 100% crop of each defect first; open the 200% crop only when the 100% v
 
 ## Hooks
 
-- **Session start** (and after compaction) prints a short card: open defects, deliverables and gate status, recent decisions, confirmed preferences.
+- **Session start** (and after compaction) prints a short card: open defects, deliverables and gate status, recent decisions, up to 5 lessons from earlier jobs, confirmed preferences.
 - **Stop** blocks only a completion claim ("done", "fixed", "xong", "hoàn thành"...) while a deliverable has not passed the gate or a defect is open, once per message. The agent then tells the user plainly what is still wrong. Questions, progress updates, negated claims ("chưa xong"), and reports with Checked / Not checked / Still failing headings pass. A session working in a separate git repo below the project folder is not policed.
 - Both hooks exit 0 silently when python3, the script, or a store is missing. Codex asks the user to trust each hook once; without hooks, run `brief` and `gate` as the steps say.
 

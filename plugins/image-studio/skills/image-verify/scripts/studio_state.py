@@ -27,6 +27,8 @@ import time
 import types
 import unicodedata
 import zipfile
+try: import fcntl
+except ImportError: fcntl = None  # Windows: no lock; lessons are added one at a time
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
@@ -40,6 +42,7 @@ MIN_BOX = 16           # smallest defect box side (px) without a user quote
 MIN_BOX_SHARE = 0.001  # smallest defect box area (share of the image) without a user quote
 CHANGE_LEVEL = 8       # per-channel difference that counts as a changed pixel
 CARD_LIMIT = 2400
+LESSONS_SHOWN = 5      # lessons printed in the session card and brief
 MIN_CHANGED = 0.05     # share of changed pixels a resolved defect's box needs
 MAX_MEMBER_BYTES = 256 << 20
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -449,6 +452,8 @@ def cmd_defect_add(args):
                          f">= {MIN_BOX_SHARE:.1%} of the image); draw a larger box or pass --quote with the user's words")
     if quote: record["quote"] = quote
     defects = store.defects()
+    after_delivery = args.source == "user" and gate_is_valid(store, args.deliverable, defects)
+    if after_delivery: record["needs_lesson"] = True
     numbers = [int(m.group(1)) for m in (DEFECT_ID_RE.match(d["id"]) for d in defects) if m]
     record["id"] = f"D{max(numbers, default=0) + 1}"
     (store.root / "defects").mkdir(exist_ok=True)
@@ -460,6 +465,9 @@ def cmd_defect_add(args):
     defects.append(record)
     store.save_defects(defects)
     print(f"Added defect {record['id']}")
+    if after_delivery:
+        print(f"{args.deliverable} had passed the gate, so this is a miss after delivery. Record what to do differently:\n"
+              f"{SCRIPT_HINT} lesson add --defect {record['id']} --mistake \"...\" --cause \"...\" --check \"...\"")
     return 0
 
 
@@ -525,6 +533,92 @@ def cmd_pref_add(args):
     return 0
 
 
+# ---------------------------------------------------------------- lessons
+
+def lessons_path(): return user_home() / "lessons.jsonl"
+
+
+def read_lessons(text=None):
+    if text is None:
+        try: text = lessons_path().read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError): return []
+    out = []
+    for line in text.splitlines():
+        try: item = json.loads(line)
+        except ValueError: continue
+        if isinstance(item, dict) and isinstance(item.get("id"), str) and all(isinstance(item.get(k), str) for k in ("mistake", "check")):
+            out.append(item)
+    return out
+
+
+def lesson_line(item):
+    return f"- {item['id']} [{item.get('kind', 'other')}] {short(item['mistake'], 90)} -> check: {short(item['check'], 90)}"
+
+
+def relevant_lessons(lessons, brand, kinds, limit=LESSONS_SHOWN):
+    def number(l):
+        m = re.match(r"^L([1-9][0-9]*)$", l["id"])
+        return int(m.group(1)) if m else 0
+    ranked = sorted(lessons, key=lambda l: (l.get("brand") == brand, l.get("kind") in kinds, str(l.get("time")), number(l)), reverse=True)
+    return ranked[:limit]
+
+
+def lesson_linked(lessons, root, defect_id):
+    project = str(root.resolve())
+    return any(l.get("project") == project and l.get("defect") == defect_id for l in lessons)
+
+
+def cmd_lesson_add(args):
+    mistake, cause, check = text_arg(args.mistake, "--mistake"), text_arg(args.cause, "--cause"), text_arg(args.check, "--check")
+    for label, val in (("--mistake", mistake), ("--cause", cause), ("--check", check)):
+        if EMAIL_RE.search(val): raise UsageError(f"{label} looks like it contains an email address; lessons must not store accounts")
+    record = {"mistake": mistake, "cause": cause, "check": check, "kind": args.kind, "time": now()}
+    store = None
+    try: store = open_store(args.project)
+    except UsageError:
+        if args.defect: raise
+    if store is not None:
+        record["project"] = str(store.root.resolve())
+        record["brand"] = store.state.get("brand")
+    if args.brand is not None: record["brand"] = ident(args.brand, "--brand")
+    if args.defect:
+        defect = next((d for d in store.defects() if d.get("id") == args.defect), None)
+        if defect is None: raise UsageError(f"unknown defect id {args.defect!r}")
+        record["defect"] = args.defect
+        if args.kind is None: record["kind"] = defect.get("kind")
+    record["kind"] = record.get("kind") or "other"
+    path = lessons_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a+", encoding="utf-8") as handle:
+            if fcntl is not None: fcntl.flock(handle, fcntl.LOCK_EX)
+            handle.seek(0)
+            text = handle.read()
+            lessons = read_lessons(text)
+            numbers = [int(l["id"][1:]) for l in lessons if re.match(r"^L[1-9][0-9]*$", l["id"])]
+            record["id"] = f"L{max(numbers, default=0) + 1}"
+            handle.write(("" if not text or text.endswith("\n") else "\n") + json.dumps(record, ensure_ascii=False) + "\n")
+            handle.flush()
+    except (OSError, UnicodeDecodeError) as exc: raise UsageError(f"cannot write lessons at {path}: {exc}") from None
+    print(f"Added lesson {record['id']}")
+    def jobs(items):
+        return {l.get("project") for l in items if l.get("brand") == record.get("brand") and l.get("kind") == record["kind"] and l.get("project")}
+    brand_prefs = read_prefs(pref_paths(record.get("brand"))[0]) if record.get("brand") else []
+    covered = any(check.lower() in rule.lower() for _, rule in brand_prefs)
+    if record["kind"] != "other" and not covered and len(jobs(lessons)) < 2 <= len(jobs(lessons + [record])):
+        brand = f" --brand {record['brand']}" if record.get("brand") else ""
+        print(f"This kind of mistake ({record['kind']}) has now happened in 2 jobs. Ask the user whether to make it a rule:\n"
+              f"{SCRIPT_HINT} pref add{brand} --rule \"...\" --check \"{short(check, 200)}\"   (add --confirmed only after the user agrees)")
+    return 0
+
+
+def cmd_lesson_list(args):
+    lessons = [l for l in read_lessons() if args.brand is None or l.get("brand") == args.brand]
+    if not lessons: print("No lessons recorded."); return 0
+    for item in lessons: print(lesson_line(item) + f" (cause: {short(item.get('cause', ''), 90)})")
+    return 0
+
+
 # ---------------------------------------------------------------- gate validity
 
 def id_gaps(defects):
@@ -552,6 +646,9 @@ def gate_is_valid(store, name, defects):
     mine = [d for d in defects if d.get("deliverable") == name]
     if any(d.get("status") == "open" for d in mine) or any(d.get("status") != "wontfix" and d["id"] not in entries for d in mine):
         return False
+    if any(d.get("needs_lesson") for d in mine):
+        lessons = read_lessons()
+        if any(d.get("needs_lesson") and not lesson_linked(lessons, store.root, d["id"]) for d in mine): return False
     needed = [d for d in mine if d.get("status") != "wontfix"]
     if needed and (verdicts.get("run_id") != checklist.get("run_id") or verdicts.get("nonce") != checklist.get("nonce")):
         return False
@@ -601,7 +698,9 @@ def shared_sections(store, defects):
     brand_file, gen_file = pref_paths(state.get("brand"))
     prefs = read_prefs(brand_file) + read_prefs(gen_file)
     conf = [f"- {rule}" for status, rule in prefs if status == "confirmed"]
-    return delivs, decs, prefs, conf
+    kinds = {d.get("kind") for d in defects if d.get("status") == "open"}
+    lessons = [lesson_line(l) for l in relevant_lessons(read_lessons(), state.get("brand"), kinds)]
+    return delivs, decs, prefs, conf, lessons
 
 
 def build_brief(store, max_lines):
@@ -616,11 +715,11 @@ def build_brief(store, max_lines):
     open_items = [d for d in defects if d.get("status") == "open"]
     head.append(f"Open defects ({len(open_items)}, all listed; gate cannot pass while any is open):" if open_items else "Open defects: none")
     if open_items: head += [f"- {defect_line(d)}" for d in open_items]
-    delivs, decs, prefs, conf = shared_sections(store, defects)
+    delivs, decs, prefs, conf, lessons = shared_sections(store, defects)
     prop = sum(1 for st, _ in prefs if st == "proposed")
     if prop: head.append(f"Preferences: {prop} proposed, ask the user to confirm (pref add ... --confirmed).")
     sections = [("Deliverables:", delivs)]
-    sections += [("Confirmed preferences:", conf), ("Recent decisions:", decs), ("Recently resolved defects (regression checks):", [f"- {defect_line(d)}" for d in [d for d in defects if d.get("status") != "open"][::-1]])]
+    sections += [("Lessons from earlier jobs (check these):", lessons), ("Confirmed preferences:", conf), ("Recent decisions:", decs), ("Recently resolved defects (regression checks):", [f"- {defect_line(d)}" for d in [d for d in defects if d.get("status") != "open"][::-1]])]
     lines = list(head)
     budget = max(0, max_lines - len(lines))
     if sum(len(items) + 1 for _, items in sections if items) > budget: budget -= 1
@@ -647,7 +746,7 @@ def format_session_start_card(store):
     defects = store.defects()
     open_items = [d for d in defects if d.get("status") == "open"]
     resolved_items = [d for d in defects if d.get("status") == "resolved"]
-    delivs, decs, _, conf = shared_sections(store, defects)
+    delivs, decs, _, conf, lessons = shared_sections(store, defects)
 
     for limit in (100, 80, 60, 40, 20, 10, 5, 0):
         lines = [f"image-studio project memory (brand: {state.get('brand')} | store: {store.root}):"]
@@ -655,6 +754,7 @@ def format_session_start_card(store):
         lines.extend(f"- {defect_line(d, limit=limit)}" for d in open_items)
         if delivs: lines.append("Deliverables:"); lines.extend(delivs)
         if decs: lines.append("Recent decisions:"); lines.extend(decs)
+        if lessons: lines.append("Lessons from earlier jobs (check these):"); lines.extend(lessons)
         if conf: lines.append("Confirmed preferences:"); lines.extend(conf)
         if resolved_items: lines.append(f"{len(resolved_items)} resolved - regression-checked by the gate")
         lines.append("Commands: run studio_state.py --help; do not read its source.")
@@ -881,6 +981,11 @@ def cmd_gate(args):
     pending = check_verdicts(run_dir, checklist, defects, report)
     for defect in defects:
         if defect.get("status") == "open": report.fail(f"{defect['id']} is still open: {short(defect.get('note'))}")
+    lessons = read_lessons()
+    for defect in defects:
+        if defect.get("needs_lesson") and not lesson_linked(lessons, store.root, defect["id"]):
+            report.fail(f"{defect['id']} was reported after delivery and has no lesson: run lesson add --defect {defect['id']} "
+                        "--mistake ... --cause ... --check ...")
 
     passed = report.passed()
     print(f"Gate: {name} ({store.relative(path)})")
@@ -1120,10 +1225,13 @@ subcommands:
                                          example: python3 studio_state.py verdict --run 20261018T000000Z-abc --id D1 --status pass --evidence "seam gone at 100%"
   pref add [--brand B] --rule T --check T [--evidence T] [--confirmed]
                                          example: python3 studio_state.py pref add --brand acme --rule "No bevels" --check "inspect edges" --confirmed
+  lesson add --mistake T --cause T --check T [--defect D1] [--kind K] [--brand B]
+                                         example: python3 studio_state.py lesson add --defect D4 --mistake "delivered a soft poster" --cause "upscaled a generated patch" --check "compare at 100% before delivery"
+  lesson list [--brand B]                example: python3 studio_state.py lesson list --brand acme
   hook session-start | hook stop         example: python3 studio_state.py hook session-start < payload.json
 
 approve, defect, brief, gate and verdict find the store by walking up from --project or the current folder.
-init creates it; pref add does not use the project store; hooks use the cwd from the hook input.
+init creates it; pref add does not use the project store; lessons live in ~/.image-studio/lessons.jsonl, shared by every job; hooks use the cwd from the hook input.
 exit codes: 0 ok / gate pass, 1 gate fail, 2 bad input or no store
 """
 
@@ -1178,6 +1286,15 @@ def build_parser():
     p.add_argument("--brand"); p.add_argument("--rule", required=True); p.add_argument("--check", required=True)
     p.add_argument("--evidence"); p.add_argument("--confirmed", action="store_true")
     p.set_defaults(func=cmd_pref_add)
+
+    lesson = sub.add_parser("lesson").add_subparsers(dest="what", metavar="add|list", required=True)
+    p = lesson.add_parser("add", parents=[common])
+    p.add_argument("--mistake", required=True); p.add_argument("--cause", required=True); p.add_argument("--check", required=True)
+    p.add_argument("--defect"); p.add_argument("--kind", choices=KINDS); p.add_argument("--brand")
+    p.set_defaults(func=cmd_lesson_add)
+    p = lesson.add_parser("list")
+    p.add_argument("--brand")
+    p.set_defaults(func=cmd_lesson_list)
 
     p = sub.add_parser("hook")
     p.add_argument("mode", choices=("session-start", "stop"))

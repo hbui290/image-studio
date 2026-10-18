@@ -1363,5 +1363,136 @@ class PointerAndCardTests(StudioBase):
         self.assertIn(f"D{few}", out)
 
 
+class LessonTests(StudioBase):
+    def passed_gate(self):
+        self.init()
+        self.approve_poster(self.poster())
+        self.assertEqual(self.gate().returncode, 0)
+
+    def lessons(self):
+        path = self.home / "lessons.jsonl"
+        return [json.loads(l) for l in path.read_text().splitlines()] if path.is_file() else []
+
+    def test_lesson_needs_mistake_cause_and_check(self):
+        self.init()
+        run = self.run_cli("lesson", "add", "--mistake", "x", "--cause", " ", "--check", "y")
+        self.assertEqual(run.returncode, 2)
+        self.assertEqual(self.lessons(), [])
+
+    def test_defect_after_delivery_needs_a_lesson_before_the_gate_passes(self):
+        self.passed_gate()
+        out = self.ok("defect", "add", "--deliverable", "poster", "--bbox", "10,10,60,60", "--kind", "artifact", "--note", "soft corner").stdout
+        self.assertIn("lesson add --defect D1", out)
+        self.assertTrue(self.defects()[0]["needs_lesson"])
+        self.ok("defect", "close", "--id", "D1", "--status", "wontfix", "--note", "ok", "--quote", "leave it")
+        run = self.gate()
+        self.assertEqual(run.returncode, 1)
+        self.assertIn("D1 was reported after delivery and has no lesson", run.stdout)
+        self.ok("lesson", "add", "--defect", "D1", "--mistake", "missed a soft corner", "--cause", "only checked display size",
+                "--check", "inspect corners at 100%")
+        self.assertEqual(self.lessons()[0]["kind"], "artifact")
+        self.assertEqual(self.gate().returncode, 0)
+
+    def test_defect_before_delivery_needs_no_lesson(self):
+        self.init()
+        self.approve_poster(self.poster())
+        self.defect([10, 10, 60, 60])
+        self.assertNotIn("needs_lesson", self.defects()[0])
+
+    def test_card_and_brief_show_relevant_lessons_capped(self):
+        self.init()
+        self.approve_poster(self.poster())
+        for i in range(7):
+            self.ok("lesson", "add", "--mistake", f"mistake {i}", "--cause", "c", "--check", f"check {i}", "--kind", "seam")
+        self.ok("lesson", "add", "--mistake", "other brand", "--cause", "c", "--check", "x", "--brand", "zeta")
+        card = self.run_cli("hook", "session-start", stdin=json.dumps({"cwd": str(self.project)})).stdout
+        self.assertIn("Lessons from earlier jobs", card)
+        self.assertEqual(card.count("-> check:"), 5)
+        self.assertIn("mistake 6", card)
+        self.assertNotIn("other brand", card)
+        self.assertIn("Lessons from earlier jobs", self.ok("brief").stdout)
+
+    def test_same_mistake_in_two_jobs_proposes_a_rule(self):
+        self.init()
+        out1 = self.ok("lesson", "add", "--mistake", "halo", "--cause", "c", "--check", "dark backdrop", "--kind", "seam").stdout
+        self.assertNotIn("pref add", out1)
+        other = Path(self.tmp.name) / "job2"
+        other.mkdir()
+        self.ok("init", "--project", other, "--brand", "acme")
+        out2 = self.ok("lesson", "add", "--project", other, "--mistake", "halo again", "--cause", "c", "--check", "dark backdrop",
+                       "--kind", "seam").stdout
+        self.assertIn("has now happened in 2 jobs", out2)
+        self.assertIn("pref add --brand acme", out2)
+        self.assertIn("only after the user agrees", out2)
+
+    def test_lesson_list_and_corrupt_lines_are_tolerated(self):
+        self.home.mkdir(parents=True, exist_ok=True)
+        (self.home / "lessons.jsonl").write_text("not json\n" + json.dumps({"id": "L1", "mistake": "m", "check": "c"}) + "\n")
+        out = self.ok("lesson", "list").stdout
+        self.assertIn("L1", out)
+        self.init()
+        self.ok("lesson", "add", "--mistake", "m2", "--cause", "c2", "--check", "k2")
+        self.assertIn("L2", self.ok("lesson", "list").stdout)
+
+
+class LessonEdgeTests(StudioBase):
+    def lessons(self):
+        path = self.home / "lessons.jsonl"
+        return [json.loads(l) for l in path.read_text().splitlines()] if path.is_file() else []
+
+    def test_missing_lesson_makes_the_card_and_stop_hook_treat_the_gate_as_not_passed(self):
+        self.init()
+        self.approve_poster(self.poster())
+        self.assertEqual(self.gate().returncode, 0)
+        self.ok("defect", "add", "--deliverable", "poster", "--bbox", "10,10,60,60", "--kind", "seam", "--note", "seam")
+        self.ok("defect", "close", "--id", "D1", "--status", "wontfix", "--note", "ok", "--quote", "leave it")
+        card = self.run_cli("hook", "session-start", stdin=json.dumps({"cwd": str(self.project)})).stdout
+        self.assertIn("gate not passed", card)
+        stop = self.run_cli("hook", "stop", stdin=json.dumps({"cwd": str(self.project), "session_id": "s", "last_assistant_message": "Done."})).stdout
+        self.assertIn("block", stop)
+
+    def test_agent_sourced_defect_after_delivery_needs_no_lesson(self):
+        self.init()
+        self.approve_poster(self.poster())
+        self.assertEqual(self.gate().returncode, 0)
+        self.ok("defect", "add", "--deliverable", "poster", "--bbox", "10,10,60,60", "--kind", "seam", "--note", "x", "--source", "agent")
+        self.assertNotIn("needs_lesson", self.defects()[0])
+
+    def test_lesson_outside_a_store_and_bad_input(self):
+        run = self.run_cli("lesson", "add", "--mistake", "m", "--cause", "c", "--check", "k", cwd=Path(self.tmp.name))
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertNotIn("project", self.lessons()[0])
+        run = self.run_cli("lesson", "add", "--defect", "D1", "--mistake", "m", "--cause", "c", "--check", "k", cwd=Path(self.tmp.name))
+        self.assertEqual(run.returncode, 2)
+        self.init()
+        self.assertEqual(self.run_cli("lesson", "add", "--defect", "D9", "--mistake", "m", "--cause", "c", "--check", "k").returncode, 2)
+        run = self.run_cli("lesson", "add", "--mistake", "mail a@b.co", "--cause", "c", "--check", "k")
+        self.assertEqual(run.returncode, 2)
+        self.assertEqual(len(self.lessons()), 1)
+
+    def test_rule_proposal_once_and_never_for_other(self):
+        self.init()
+        other = Path(self.tmp.name) / "job2"; other.mkdir()
+        self.ok("init", "--project", other, "--brand", "acme")
+        third = Path(self.tmp.name) / "job3"; third.mkdir()
+        self.ok("init", "--project", third, "--brand", "acme")
+        add = lambda proj, kind: self.ok("lesson", "add", "--project", proj, "--mistake", "m", "--cause", "c", "--check", "dark backdrop", "--kind", kind).stdout
+        self.assertNotIn("pref add", add(self.project, "other"))
+        self.assertNotIn("pref add", add(other, "other"))
+        add(self.project, "seam")
+        self.assertIn("pref add --brand acme", add(other, "seam"))
+        self.assertNotIn("pref add", add(third, "seam"))
+
+    def test_parallel_lesson_adds_keep_every_line(self):
+        self.init()
+        env = dict(os.environ, IMAGE_STUDIO_HOME=str(self.home))
+        procs = [subprocess.Popen([sys.executable, str(SCRIPT), "lesson", "add", "--mistake", f"m{i}", "--cause", "c", "--check", "k"],
+                                  cwd=str(self.project), env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) for i in range(8)]
+        for proc in procs: self.assertEqual(proc.wait(), 0)
+        lessons = self.lessons()
+        self.assertEqual(len(lessons), 8)
+        self.assertEqual(len({l["id"] for l in lessons}), 8)
+
+
 if __name__ == "__main__":
     unittest.main()

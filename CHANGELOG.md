@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.5.0-local.1 (2026-10-18)
+
+Learning from mistakes across jobs, kept small.
+
+- **image-verify:** new `lesson add --mistake --cause --check [--defect D<n>] [--kind] [--brand]` and `lesson list [--brand]`. Lessons live in `~/.image-studio/lessons.jsonl` and are shared by every job.
+- A defect the user reports on a deliverable that had already passed the gate is marked as a miss after delivery; the gate fails until a lesson is linked to it.
+- Until that lesson exists, the deliverable also counts as not passed for the session-start card and the Stop hook. Lessons are appended under a file lock, so parallel agents do not lose one.
+- The session-start card and `brief` show up to 5 lessons, ranked by same brand, then the kinds of the open defects, then newest.
+- When the same kind of mistake has a lesson in 2 or more jobs of a brand, `lesson add` tells the agent once to ask the user whether to make it a preference (not for kind `other`, and not when a brand preference already has that check); it becomes a rule only with `pref add --confirmed` after the user agrees.
+
 ## 2.4.3-local.1 (2026-10-18)
 
 Docs only: large reference files are split so an agent reads only the part it needs. No text was dropped.
