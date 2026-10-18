@@ -4,7 +4,7 @@ Use these gates only for exact logos, packaging text, and transparent exports. T
 
 ## Source and clean plate
 
-1. Keep one approved source file per mark; branch from it, not rejected candidates. If detail degrades, restart from approved source with tighter crops, masks, or references; never search for or paste other artwork unless user supplied it. Fix named regions only.
+1. Keep one approved source file per mark; branch from it, not rejected candidates. If detail degrades, restart from the approved source with tighter crops, masks, or references. Never search the disk for other artwork: existing images come only from files the user sends or the approved references and logo in `brand show`. Fix named regions only.
 2. From a repo checkout, see `examples/image-repair/logo-brief.json` for a per-occurrence brand repair brief.
 3. Inspect clean plate before placing a logo: no old lettering, stars, shadows, outlines, or rules. Reject plates with rectangles, repeated textures, stretched rows, banding, or damaged folds. Never hide an old mark under a larger new one.
 

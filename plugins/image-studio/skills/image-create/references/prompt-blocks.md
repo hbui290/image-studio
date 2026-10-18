@@ -4,7 +4,7 @@ Read by [image-create](../SKILL.md) when writing a generation prompt. A prompt b
 
 ## 1. Style block (same text at the start of every prompt in a job)
 
-Fill it once per brand from the user's taste notes and confirmed preferences, then paste it unchanged:
+Fill it once per brand from `brand show` (palette, fonts, do and don't), the user's taste notes, and confirmed preferences, then paste it unchanged:
 
 ```text
 Style: <medium, e.g. polished 2D hand-painted game art / flat vector / product photo>, <view, e.g. three-quarter top-down>,
@@ -32,7 +32,7 @@ Magenta separates cleanly from dark or navy subjects where black does not. Key i
 
 ## 4. References
 
-Attach the actual files and give each one a role: `Image 1 is the approved style reference: match its line weight, shading, and palette exactly. Image 2 fixes the product shape.` Use only files the user supplied or approved.
+Attach the actual files and give each one a role: `Image 1 is the approved style reference: match its line weight, shading, and palette exactly. Image 2 fixes the product shape.` Use only files the user sent or the approved references in `brand show`.
 
 ## 5. Check after generating (before showing the user)
 

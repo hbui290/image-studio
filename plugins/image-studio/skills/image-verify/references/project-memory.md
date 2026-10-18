@@ -17,9 +17,18 @@ Run it as `python3 <skills>/image-verify/scripts/studio_state.py <command>` (`<s
 
 The goal is a designer that gets closer to the user's taste with every job. Both files are shared by every job, under `${IMAGE_STUDIO_HOME:-~/.image-studio}`, and work with or without a project store.
 
-- **Taste:** when the user approves or praises a result ("đẹp", "giữ cái này", "love this"), record what they liked: `taste add --aspect color|line|composition|detail|lighting|text|style|other --note "what they liked, concretely" --quote "their words"` (add `--deliverable N` in a project). Notes go to `brands/<brand>/taste.jsonl` (the store's brand, or `--brand`), else `taste.jsonl`. The session-start card and `brief` show the 6 newest notes, brand and general merged, under "Your taste"; match them in the first draft.
+- **Taste:** when the user approves or praises a result ("love this", "keep this one", or the same in the user's language, e.g. Vietnamese "đẹp", "giữ cái này"), record what they liked: `taste add --aspect color|line|composition|detail|lighting|text|style|other --note "what they liked, concretely" --quote "their words"` (add `--deliverable N` in a project). Notes go to `brands/<brand>/taste.jsonl` (the store's brand, or `--brand`), else `taste.jsonl`. The session-start card and `brief` show the 6 newest notes, brand and general merged, under "Your taste"; match them in the first draft.
 - **Lessons:** besides a miss after delivery (step 4 above), record a method that failed twice and the one that then worked: `lesson add --mistake "..." --cause "..." --check "..." --worked "..."`.
 - Neither changes a rule or a skill by itself. A repeated pattern becomes a rule only through `pref add --confirmed` after the user agrees.
+
+## Brand kit
+
+Hard facts for a brand, set with the user: `brand set --brand B --color NAME=#RRGGBB[:role] --font ROLE=Family --logo FILE --ref FILE=role --do "..." --dont "..."` (repeat flags as needed; `--remove colors:NAME|fonts:ROLE|refs:FILE|do:TEXT|dont:TEXT|logo`). It lives in `${IMAGE_STUDIO_HOME:-~/.image-studio}/brands/<brand>/brand.json` (4,000 characters at most) and records the hash of the logo and each reference. `brand show` prints it and flags a logo or reference that is missing or changed; the session-start card shows a one-line summary.
+
+- Use the palette, fonts, and do/don't lists in the [style block](../../image-create/references/prompt-blocks.md).
+- The logo is composited from that exact file, never redrawn.
+- Approved references, and files the user sends in the chat, are the only existing images that may be used as style references or pixels. Never search the disk for others.
+- Add an entry only when the user states or approves it; taste notes are for impressions, the brand kit for exact values.
 
 ## The gate
 
@@ -42,7 +51,7 @@ Open the 100% crop of each defect first; open the 200% crop only when the 100% v
 ## Hooks
 
 - **Session start** (and after compaction) prints a short card: open defects, deliverables and gate status, recent decisions, the user's taste (6 newest notes), up to 5 lessons from earlier jobs, confirmed preferences.
-- **Stop** blocks only a completion claim ("done", "fixed", "xong", "hoàn thành"...) while a deliverable has not passed the gate or a defect is open, once per message. The agent then tells the user plainly what is still wrong. Questions, progress updates, negated claims ("chưa xong"), and reports with Checked / Not checked / Still failing headings pass. A session working in a separate git repo below the project folder is not policed.
+- **Stop** blocks only a completion claim ("done", "fixed", "ready", or Vietnamese "xong", "hoàn thành"...) while a deliverable has not passed the gate or a defect is open, once per message. The agent then tells the user plainly what is still wrong. Questions, progress updates, negated claims ("not done", Vietnamese "chưa xong"), and reports with Checked / Not checked / Still failing headings pass. A session working in a separate git repo below the project folder is not policed.
 - Both hooks exit 0 silently when python3, the script, or a store is missing. Codex asks the user to trust each hook once; without hooks, run `brief` and `gate` as the steps say.
 
 Keep the store local; never ship `.image-studio/` inside a deliverable, and do not record personal data in notes.

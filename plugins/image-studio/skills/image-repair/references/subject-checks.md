@@ -1,6 +1,6 @@
 # Subject-specific checks
 
-Read by [image-repair](../SKILL.md) only when the subject is one of these: upscaling, portraits and characters, products, architecture, alpha cutouts, text and logos, marks on tilted surfaces, or web heroes. The general patch and composite steps are in [repair-and-composite.md](repair-and-composite.md).
+Read by [image-repair](../SKILL.md) only when the subject is one of these: upscaling, portraits and characters, products, architecture, alpha cutouts, text and logos, marks on tilted surfaces, or web heroes. The general patch and composite steps are in [repair-and-composite.md](repair-and-composite.md). Never search the disk for other artwork: existing images come only from files the user sends or the approved references and logo in `brand show`.
 
 - **Upscaling:** Test a representative crop with a suited model ([Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN)); compare at 100% and display size. For whole images use [image-enhance](../../image-enhance/SKILL.md). Upscaling cannot establish unknown details.
 - **Portraits and characters:** Use identity references; inspect eyes, hairline, hands, and costume. For face restorers ([CodeFormer](https://github.com/sczhou/CodeFormer)), watch fidelity weights and hair boundaries.

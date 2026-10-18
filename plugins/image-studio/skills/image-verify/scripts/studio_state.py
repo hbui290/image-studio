@@ -44,6 +44,8 @@ CHANGE_LEVEL = 8       # per-channel difference that counts as a changed pixel
 CARD_LIMIT = 2400
 LESSONS_SHOWN = 5      # lessons printed in the session card and brief
 TASTE_SHOWN = 6        # taste notes printed in the session card and brief
+BRAND_CAP = 4000        # characters in one brand.json
+HEX_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 ASPECTS = ("color", "line", "composition", "detail", "lighting", "text", "style", "other")
 MIN_CHANGED = 0.05     # share of changed pixels a resolved defect's box needs
 MAX_MEMBER_BYTES = 256 << 20
@@ -59,6 +61,7 @@ PREF_LINE = re.compile(r"^- \[(confirmed|proposed)\] (.+)$")
 PLUGIN_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT_HINT = "python3 " + shlex.quote(os.path.abspath(__file__))
 
+# Message patterns cover English and Vietnamese (the owner's language); keep both when editing.
 REPORT_HEADINGS = tuple(
     re.compile(r"(?:^|[\n.;|])\s*[\s#*>_|-]*(" + words + r")[*_]*\s*(:|\s*$)", re.I | re.M)
     for words in ("checked|đã kiểm", "not checked|chưa kiểm", "still failing|còn lỗi")
@@ -698,6 +701,119 @@ def cmd_taste_list(args):
     return 0
 
 
+# ---------------------------------------------------------------- brand kit
+
+def brand_path(brand): return user_home() / "brands" / brand / "brand.json"
+
+
+def read_brand(brand):
+    if not brand: return {}
+    try: data = json.loads(brand_path(brand).read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError): return {}
+    if not isinstance(data, dict): return {}
+    # Keep only well-formed entries, so a hand-edited file never breaks brief, the card, or brand set.
+    kit = {}
+    for key in ("colors", "refs"):
+        items = data.get(key)
+        if isinstance(items, dict):
+            kit[key] = {k: v for k, v in items.items() if isinstance(k, str) and isinstance(v, dict)}
+    if isinstance(data.get("fonts"), dict):
+        kit["fonts"] = {k: v for k, v in data["fonts"].items() if isinstance(k, str) and isinstance(v, str)}
+    for key in ("do", "dont"):
+        if isinstance(data.get(key), list): kit[key] = [t for t in data[key] if isinstance(t, str)]
+    if isinstance(data.get("logo"), dict) and isinstance(data["logo"].get("file"), str): kit["logo"] = data["logo"]
+    return kit
+
+
+def pairs(values, label):
+    out = []
+    for raw in values or []:
+        key, sep, val = raw.partition("=")
+        if not sep or not key.strip() or not val.strip(): raise UsageError(f"{label} must look like NAME=VALUE, got {raw!r}")
+        if EMAIL_RE.search(raw): raise UsageError(f"{label} looks like it contains an email address")
+        out.append((key.strip(), val.strip()))
+    return out
+
+
+def cmd_brand_set(args):
+    brand = ident(args.brand, "--brand")
+    kit = read_brand(brand)
+    for name, val in pairs(args.color, "--color"):
+        hexv, _, role = val.partition(":")
+        if not HEX_RE.match(hexv): raise UsageError(f"--color {name}: {hexv!r} is not a #RRGGBB hex color")
+        kit.setdefault("colors", {})[name] = {"hex": hexv.upper(), "role": role.strip()}
+    for role, family in pairs(args.font, "--font"):
+        kit.setdefault("fonts", {})[role] = family
+    for file_arg, role in pairs(args.ref, "--ref"):
+        path = existing_file(file_arg, "--ref")
+        kit.setdefault("refs", {})[str(path.resolve())] = {"role": role, "sha256": sha256_file(path)}
+    if args.logo:
+        path = existing_file(args.logo, "--logo")
+        kit["logo"] = {"file": str(path.resolve()), "sha256": sha256_file(path)}
+    for label, key, values in (("--do", "do", args.do), ("--dont", "dont", args.dont)):
+        for text in values or []:
+            text = text_arg(text, label)
+            if EMAIL_RE.search(text): raise UsageError(f"{label} looks like it contains an email address")
+            if text not in kit.setdefault(key, []): kit[key].append(text)
+    for key in args.remove or []:
+        section, _, name = key.partition(":")
+        if section in ("do", "dont"): kit[section] = [t for t in kit.get(section, []) if t != name]
+        elif section == "logo": kit.pop("logo", None)
+        elif section in ("colors", "fonts", "refs"):
+            target = str(Path(name).expanduser().resolve()) if section == "refs" else name
+            if target not in kit.get(section, {}): raise UsageError(f"--remove {key}: not in the brand kit")
+            del kit[section][target]
+        else: raise UsageError("--remove takes colors:NAME, fonts:ROLE, refs:FILE, do:TEXT, dont:TEXT, or logo")
+    kit = {k: v for k, v in kit.items() if v}
+    text = dump_json(kit)
+    if len(text) > BRAND_CAP: raise UsageError(f"brand kit would be {len(text)} characters (cap {BRAND_CAP}); remove entries first")
+    try:
+        brand_path(brand).parent.mkdir(parents=True, exist_ok=True)
+        atomic_write(brand_path(brand), text)
+    except OSError as exc: raise UsageError(f"cannot write {brand_path(brand)}: {exc}") from None
+    print("\n".join(brand_lines(brand, kit)))
+    return 0
+
+
+def brand_lines(brand, kit):
+    lines = []
+    if kit.get("colors"):
+        lines.append("Colors: " + ", ".join(f"{n} {c.get('hex')}" + (f" ({c['role']})" if c.get("role") else "") for n, c in kit["colors"].items()))
+    if kit.get("fonts"): lines.append("Fonts: " + ", ".join(f"{r}={f}" for r, f in kit["fonts"].items()))
+    if kit.get("logo"):
+        logo = kit["logo"]; ok = Path(logo["file"]).is_file() and sha256_file(Path(logo["file"])) == logo.get("sha256")
+        lines.append(f"Logo: {logo['file']} (composite this exact file; never redraw it)" + ("" if ok else " - MISSING OR CHANGED, ask the user"))
+    if kit.get("do"): lines.append("Do: " + "; ".join(kit["do"]))
+    if kit.get("dont"): lines.append("Don't: " + "; ".join(kit["dont"]))
+    if kit.get("refs"):
+        lines.append(f"Approved references ({len(kit['refs'])}; only these and files the user sends may be used as pixels or style refs):")
+        for f, r in kit["refs"].items():
+            ok = Path(f).is_file() and sha256_file(Path(f)) == r.get("sha256")
+            lines.append(f"- {f} [{r.get('role')}]" + ("" if ok else " - MISSING OR CHANGED, ask the user"))
+    return [f"Brand kit {brand}: (empty)"] if not lines else [f"Brand kit {brand}:"] + lines
+
+
+def cmd_brand_show(args):
+    brand = args.brand
+    if brand is None:
+        try: brand = open_store(args.project).state.get("brand")
+        except UsageError: raise UsageError("pass --brand, or run inside a project store") from None
+    print("\n".join(brand_lines(ident(brand, "--brand"), read_brand(brand))))
+    return 0
+
+
+def brand_card_line(brand):
+    kit = read_brand(brand)
+    if not kit: return []
+    bits = []
+    if kit.get("colors"): bits.append("palette " + " ".join(c.get("hex", "") for c in kit["colors"].values()))
+    if kit.get("fonts"): bits.append("fonts " + ", ".join(f"{r}={f}" for r, f in kit["fonts"].items()))
+    if kit.get("logo"): bits.append("logo file (never redraw)")
+    if kit.get("refs"): bits.append(f"{len(kit['refs'])} approved refs")
+    if kit.get("dont"): bits.append("don't: " + "; ".join(kit["dont"]))
+    return [short("Brand kit: " + " | ".join(bits), 330) + " (brand show for details)"]
+
+
 # ---------------------------------------------------------------- gate validity
 
 def id_gaps(defects):
@@ -779,7 +895,7 @@ def shared_sections(store, defects):
     conf = [f"- {rule}" for status, rule in prefs if status == "confirmed"]
     kinds = {d.get("kind") for d in defects if d.get("status") == "open"}
     lessons = [lesson_line(l) for l in relevant_lessons(read_lessons(), state.get("brand"), kinds)]
-    taste = [taste_line(t) for t in newest_taste(state.get("brand"))]
+    taste = brand_card_line(state.get("brand")) + [taste_line(t) for t in newest_taste(state.get("brand"))]
     return delivs, decs, prefs, conf, lessons, taste
 
 
@@ -1311,8 +1427,11 @@ subcommands:
                                          example: python3 studio_state.py lesson add --defect D4 --mistake "delivered a soft poster" --cause "upscaled a generated patch" --check "compare at 100% before delivery"
   lesson list [--brand B]                example: python3 studio_state.py lesson list --brand acme
   taste add --note T [--aspect color|line|composition|detail|lighting|text|style|other] [--quote T] [--deliverable N] [--brand B]
-                                         example: python3 studio_state.py taste add --aspect color --note "deep blue night palette with warm gold accents" --quote "màu này đẹp"
+                                         example: python3 studio_state.py taste add --aspect color --note "deep blue night palette with warm gold accents" --quote "love this palette"
   taste list [--brand B]                 example: python3 studio_state.py taste list --brand acme
+  brand set --brand B [--color NAME=#RRGGBB[:role]] [--font ROLE=Family] [--logo FILE] [--ref FILE=role] [--do T] [--dont T] [--remove KEY]
+                                         example: python3 studio_state.py brand set --brand acme --color gold=#E1C178:accent --font title=Cinzel --logo logo.png --ref style.png=style --dont "no 3D render look"
+  brand show [--brand B]                 example: python3 studio_state.py brand show --brand acme
   hook session-start | hook stop         example: python3 studio_state.py hook session-start < payload.json
 
 approve, defect, brief, gate and verdict find the store by walking up from --project or the current folder.
@@ -1389,6 +1508,18 @@ def build_parser():
     p = taste.add_parser("list")
     p.add_argument("--brand")
     p.set_defaults(func=cmd_taste_list)
+
+    brand_p = sub.add_parser("brand").add_subparsers(dest="what", metavar="set|show", required=True)
+    p = brand_p.add_parser("set")
+    p.add_argument("--brand", required=True)
+    p.add_argument("--color", action="append", help="NAME=#RRGGBB[:role]"); p.add_argument("--font", action="append", help="ROLE=Family")
+    p.add_argument("--logo"); p.add_argument("--ref", action="append", help="FILE=role")
+    p.add_argument("--do", action="append"); p.add_argument("--dont", action="append")
+    p.add_argument("--remove", action="append", help="colors:NAME, fonts:ROLE, refs:FILE, do:TEXT, dont:TEXT, or logo")
+    p.set_defaults(func=cmd_brand_set)
+    p = brand_p.add_parser("show", parents=[common])
+    p.add_argument("--brand")
+    p.set_defaults(func=cmd_brand_show)
 
     p = sub.add_parser("hook")
     p.add_argument("mode", choices=("session-start", "stop"))

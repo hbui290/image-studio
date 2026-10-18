@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.8.0-local.1 (2026-10-18)
+
+- **image-verify:** new brand kit: `brand set --brand B --color NAME=#RRGGBB[:role] --font ROLE=Family --logo FILE --ref FILE=role --do T --dont T [--remove KEY]` and `brand show`. It keeps exact values in `~/.image-studio/brands/<brand>/brand.json` with the hash of the logo and each approved reference; `brand show` flags a missing or changed file, and the session-start card shows a one-line summary. Approved references and files the user sends are the only existing images an agent may use; the logo is composited from its file, never redrawn. The style block in image-create's `prompt-blocks.md` is filled from it.
+- **Not added:** a pixel defect scanner adapted from the owner's video tool. Measured on the owner's real poster store at the v9 stage (each reported crop D3-D12 against the same box in v9), its blown-highlight, speckle, sharpness (high-frequency detail over contrast), and muddiness numbers did not separate rejected from fixed regions (D4 "whole poster soft": 0.096 vs 0.092; an independent gradient measure gave 0.033 vs 0.031), and an 8x5 low-detail tile map flagged the then-open D12 region together with 3 unrelated dark edge tiles among its 5 lowest. The designer review and the gate cover these defects instead.
+- **Language:** docs, help, and examples are English; Vietnamese stays only where it is functional (message patterns that recognize the owner's Vietnamese completion claims, praise, and negations) and is labelled as such.
+
 ## 2.7.0-local.1 (2026-10-18)
 
 Prompt blocks and a designer review, adapted from the owner's video/banner tool. Docs only.

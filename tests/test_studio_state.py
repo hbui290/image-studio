@@ -1563,5 +1563,51 @@ class TasteOrderTests(StudioBase):
         self.assertIn("D120", card)
 
 
+class BrandKitTests(StudioBase):
+    def test_set_show_and_card_summary(self):
+        self.init()
+        self.approve_poster(self.poster())
+        logo = self.poster("logo.png")
+        ref = self.poster("style.png")
+        out = self.ok("brand", "set", "--brand", "acme", "--color", "gold=#e1c178:accent", "--color", "navy=#0B152C:background",
+                      "--font", "title=Cinzel", "--logo", logo, "--ref", f"{ref}=style", "--dont", "no 3D render look").stdout
+        self.assertIn("gold #E1C178 (accent)", out)
+        kit = json.loads((self.home / "brands" / "acme" / "brand.json").read_text())
+        self.assertEqual(len(kit["refs"]), 1)
+        card = self.run_cli("hook", "session-start", stdin=json.dumps({"cwd": str(self.project)})).stdout
+        self.assertIn("Brand kit: palette #E1C178 #0B152C", card)
+        self.assertIn("1 approved refs", card)
+        shown = self.ok("brand", "show").stdout
+        self.assertIn("never redraw", shown)
+        self.assertIn("[style]", shown)
+
+    def test_changed_reference_is_flagged_and_bad_input_is_refused(self):
+        self.init()
+        ref = self.poster("style.png")
+        self.ok("brand", "set", "--brand", "acme", "--ref", f"{ref}=style")
+        Image.new("RGB", (10, 10), "red").save(ref)
+        self.assertIn("MISSING OR CHANGED", self.ok("brand", "show", "--brand", "acme").stdout)
+        for bad in (["--color", "gold=E1C178"], ["--color", "gold"], ["--ref", "/nope.png=style"], ["--remove", "colors:none"],
+                    ["--do", "mail a@b.co"]):
+            self.assertEqual(self.run_cli("brand", "set", "--brand", "acme", *bad).returncode, 2, bad)
+
+    def test_wrong_shape_brand_file_is_tolerated(self):
+        self.init()
+        (self.home / "brands" / "acme").mkdir(parents=True)
+        (self.home / "brands" / "acme" / "brand.json").write_text(json.dumps({"colors": [1, 2], "fonts": {"title": 3}, "do": "x", "logo": 5}))
+        self.ok("brief")
+        self.ok("brand", "show", "--brand", "acme")
+        self.ok("brand", "set", "--brand", "acme", "--color", "gold=#E1C178")
+        self.assertIn("image-studio project memory", self.run_cli("hook", "session-start", stdin=json.dumps({"cwd": str(self.project)})).stdout)
+
+    def test_remove_entries(self):
+        self.init()
+        self.ok("brand", "set", "--brand", "acme", "--color", "gold=#E1C178", "--dont", "no bevels")
+        self.ok("brand", "set", "--brand", "acme", "--remove", "colors:gold", "--remove", "dont:no bevels")
+        kit = json.loads((self.home / "brands" / "acme" / "brand.json").read_text())
+        self.assertNotIn("colors", kit)
+        self.assertNotIn("dont", kit)
+
+
 if __name__ == "__main__":
     unittest.main()

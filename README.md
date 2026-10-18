@@ -88,7 +88,7 @@ For work that spans several sessions, `studio_state.py init --project PATH --bra
 The plugin ships two hooks in `plugins/image-studio/hooks/hooks.json`, for Claude Code and Codex (Codex asks you to trust each hook once):
 
 - **SessionStart** prints a short card (open defects, deliverables, recent decisions) when the working folder has a store, including after compaction.
-- **Stop** blocks only a completion claim ("done", "fixed", "xong", "hoàn thành", ...) while a deliverable has not passed the gate or a defect is open, once per message; the agent then tells the user plainly what is still wrong. A session working in a separate git repo below the project folder is not policed.
+- **Stop** blocks only a completion claim ("done", "fixed", "ready", or Vietnamese "xong", "hoàn thành", ...) while a deliverable has not passed the gate or a defect is open, once per message; the agent then tells the user plainly what is still wrong. A session working in a separate git repo below the project folder is not policed.
 
 Both do nothing outside a project with a store and exit 0 if `python3` is missing.
 
