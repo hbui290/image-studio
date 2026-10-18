@@ -1,6 +1,6 @@
 # Tool readiness and portable setup
 
-Use this reference before editing on a new or reinstalled machine, or when a new agent inherits the job. The skill is an operating method, not a bundle of executables, model weights, credentials, or source images. Count capabilities first, then use tools already present or set up only what is missing and authorized.
+Use this reference before editing on a new or reinstalled machine, or when a new agent inherits the task. The skill is an operating method, not a bundle of executables, model weights, credentials, or source images. Count capabilities first, then use tools already present or set up only what is missing and authorized.
 
 ## How many tools are needed?
 
@@ -12,7 +12,7 @@ Count **image-editing capabilities**, not app names. A viewer is required for re
 | Crop, mask, retouch, or export without new semantic detail | 1 | Pixel-addressed raster editing and the target-format export | ImageMagick `magick` or a capable desktop editor |
 | Rebuild a missing face, object, or structure, then preserve the rest | 2 | Reference-guided generation or manual drawing **and** controlled compositing | ChatGPT ImageGen + ImageMagick |
 | Automatically propose masks for many or tiny objects | +1, only if needed | Detector/segmenter with inspectable output and stable object IDs | SAM 3 or rembg `sam`; manual object mapping needs no extra tool |
-| Sharpen or upscale a whole soft image | +1, required for that job | AI upscaler plus a before/after at display size | Upscayl or Real-ESRGAN-ncnn-vulkan; see [image-enhance](../../image-enhance/SKILL.md) |
+| Sharpen or upscale a whole soft image | +1, required for that task | AI upscaler plus a before/after at display size | Upscayl or Real-ESRGAN-ncnn-vulkan; see [image-enhance](../../image-enhance/SKILL.md) |
 
 For web delivery, also check the real page in a browser and run the project's build when source or assets changed. These are delivery checks, not extra image-editing capabilities. `cwebp` is optional when the raster editor already exports the required WebP. Face restorers, background removers, and inpainting packages are conditional alternatives, not a default install set.
 
@@ -39,7 +39,7 @@ Other conditional examples named in [repair-and-composite.md](repair-and-composi
 ## What must travel to a new machine or agent?
 
 - The Image Studio skills: install the `image-studio` plugin, or, from a repo checkout, copy all skill folders with `python3 scripts/install.py --to <skills directory>` (the script is in the repository root and is not part of the installed plugin). The skills link to each other's `references/`, so copying one `SKILL.md` or one folder alone breaks its detailed instructions. Start a new session and verify that the skills appear in that agent's available-skill list.
-- The untouched source, approved identity or product references, and any accepted candidate, mask, editable composite, and delivery file needed to continue a specific job. Record their dimensions and which version is authoritative.
+- The untouched source, approved identity or product references, and any accepted candidate, mask, editable composite, and delivery file needed to continue a specific task. Record their dimensions and which version is authoritative.
 - The task brief: permitted changes, protected regions, target dimensions/formats, actual display surface, and current status. Include exact crop coordinates and mask polarity only when they belong to the transferred source version.
 - The chosen tool/model names and versions, how they were accessed, what was actually run, and which outputs passed review. A prompt alone cannot reproduce stochastic generated pixels; preserve accepted candidate files for exact continuation.
 

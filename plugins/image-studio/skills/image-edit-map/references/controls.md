@@ -30,4 +30,4 @@ Picture type: include a primary medium and regional exceptions, e.g. “photogra
 
 Accessibility: numbers and names work without distinguishing badge colors. Provide an accessible text legend. Check small text at intended viewing size, contrast, overcrowded arrows, and whether cropping hides essential content. Do not claim a formal contrast ratio unless measured.
 
-Optional advanced controls: repeatable character/product references; per-property locks; shared style tokens across a batch; safe areas for different crops; localized text expansion; transparent edges; print bleed and color profiles when the job calls for print. Offer these when relevant, not as mandatory onboarding questions.
+Optional advanced controls: repeatable character/product references; per-property locks; shared style tokens across a batch; safe areas for different crops; localized text expansion; transparent edges; print bleed and color profiles when the task calls for print. Offer these when relevant, not as mandatory onboarding questions.

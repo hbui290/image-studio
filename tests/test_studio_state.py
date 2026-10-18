@@ -870,7 +870,7 @@ class Round3StoreTests(StudioBase):
         self.init()
 
     def test_init_refuses_a_store_inside_another_store(self):
-        sub = self.project / "client" / "job"
+        sub = self.project / "client" / "task"
         sub.mkdir(parents=True)
         run = self.run_cli("init", "--project", sub, "--brand", "acme")
         self.assertEqual(run.returncode, 2)
@@ -1351,10 +1351,10 @@ class PointerAndCardTests(StudioBase):
     def test_pointer_written_at_session_start_still_catches_cd_out(self):
         self.init()
         self.approve_poster(self.poster())
-        self.run_cli("hook", "session-start", stdin=json.dumps({"session_id": "job", "cwd": str(self.project)}))
-        data = json.loads((self.home / "sessions" / "job.json").read_text())
+        self.run_cli("hook", "session-start", stdin=json.dumps({"session_id": "task", "cwd": str(self.project)}))
+        data = json.loads((self.home / "sessions" / "task.json").read_text())
         self.assertEqual(Path(data["cwd"]).resolve(), self.project)
-        self.assertIn("block", self.stop("Done.", "/tmp", "job"))
+        self.assertIn("block", self.stop("Done.", "/tmp", "task"))
 
     def test_after_this_round_is_not_a_claim(self):
         self.init()
@@ -1425,11 +1425,11 @@ class LessonTests(StudioBase):
             self.ok("lesson", "add", "--mistake", f"mistake {i}", "--cause", "c", "--check", f"check {i}", "--kind", "seam")
         self.ok("lesson", "add", "--mistake", "other brand", "--cause", "c", "--check", "x", "--brand", "zeta")
         card = self.run_cli("hook", "session-start", stdin=json.dumps({"cwd": str(self.project)})).stdout
-        self.assertIn("Lessons from earlier jobs", card)
+        self.assertIn("Lessons from earlier tasks", card)
         self.assertEqual(card.count("-> check:"), 5)
         self.assertIn("mistake 6", card)
         self.assertNotIn("other brand", card)
-        self.assertIn("Lessons from earlier jobs", self.ok("brief").stdout)
+        self.assertIn("Lessons from earlier tasks", self.ok("brief").stdout)
 
     def test_same_mistake_in_two_jobs_proposes_a_rule(self):
         self.init()
@@ -1440,7 +1440,7 @@ class LessonTests(StudioBase):
         self.ok("init", "--project", other, "--brand", "acme")
         out2 = self.ok("lesson", "add", "--project", other, "--mistake", "halo again", "--cause", "c", "--check", "dark backdrop",
                        "--kind", "seam").stdout
-        self.assertIn("has now happened in 2 jobs", out2)
+        self.assertIn("has now happened in 2 tasks", out2)
         self.assertIn("pref add --brand acme", out2)
         self.assertIn("only after the user agrees", out2)
 
@@ -1792,7 +1792,7 @@ class EditCheckTests(StudioBase):
 
 
 class LongChatTests(StudioBase):
-    """A chat that carried earlier jobs resends their whole history on every step; the card says so."""
+    """A chat that carried earlier tasks resends their whole history on every step; the card says so."""
 
     def card(self, size):
         transcript = self.project / "rollout.jsonl"

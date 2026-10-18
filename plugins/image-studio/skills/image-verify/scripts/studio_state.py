@@ -634,13 +634,13 @@ def cmd_lesson_add(args):
             handle.flush()
     except (OSError, UnicodeDecodeError) as exc: raise UsageError(f"cannot write lessons at {path}: {exc}") from None
     print(f"Added lesson {record['id']}")
-    def jobs(items):
+    def tasks(items):
         return {l.get("project") for l in items if l.get("brand") == record.get("brand") and l.get("kind") == record["kind"] and l.get("project")}
     brand_prefs = read_prefs(pref_paths(record.get("brand"))[0]) if record.get("brand") else []
     covered = any(check.lower() in rule.lower() for _, rule in brand_prefs)
-    if record["kind"] != "other" and not covered and len(jobs(lessons)) < 2 <= len(jobs(lessons + [record])):
+    if record["kind"] != "other" and not covered and len(tasks(lessons)) < 2 <= len(tasks(lessons + [record])):
         brand = f" --brand {record['brand']}" if record.get("brand") else ""
-        print(f"This kind of mistake ({record['kind']}) has now happened in 2 jobs. Ask the user whether to make it a rule:\n"
+        print(f"This kind of mistake ({record['kind']}) has now happened in 2 tasks. Ask the user whether to make it a rule:\n"
               f"{SCRIPT_HINT} pref add{brand} --rule \"...\" --check \"{short(check, 200)}\"   (add --confirmed only after the user agrees)")
     return 0
 
@@ -938,7 +938,7 @@ def build_brief(store, max_lines):
     prop = sum(1 for st, _ in prefs if st == "proposed")
     if prop: head.append(f"Preferences: {prop} proposed, ask the user to confirm (pref add ... --confirmed).")
     sections = [("Deliverables:", delivs)]
-    sections += [("Your taste (match it):", taste), ("Lessons from earlier jobs (check these):", lessons), ("Confirmed preferences:", conf), ("Recent decisions:", decs), ("Closed defects (resolved ones are re-checked by the gate):", [f"- {defect_line(d)}" for d in [d for d in defects if d.get("status") != "open"][::-1]])]
+    sections += [("Your taste (match it):", taste), ("Lessons from earlier tasks (check these):", lessons), ("Confirmed preferences:", conf), ("Recent decisions:", decs), ("Closed defects (resolved ones are re-checked by the gate):", [f"- {defect_line(d)}" for d in [d for d in defects if d.get("status") != "open"][::-1]])]
     lines = list(head)
     budget = max(0, max_lines - len(lines))
     if sum(len(items) + 1 for _, items in sections if items) > budget: budget -= 1
@@ -974,7 +974,7 @@ def format_session_start_card(store):
         if delivs: lines.append("Deliverables:"); lines.extend(delivs)
         if decs: lines.append("Recent decisions:"); lines.extend(decs)
         if taste: lines.append("Your taste (match it):"); lines.extend(taste)
-        if lessons: lines.append("Lessons from earlier jobs (check these):"); lines.extend(lessons)
+        if lessons: lines.append("Lessons from earlier tasks (check these):"); lines.extend(lessons)
         if conf: lines.append("Confirmed preferences:"); lines.extend(conf)
         if resolved_items: lines.append(f"{len(resolved_items)} resolved - regression-checked by the gate")
         lines.append("When the user approves or praises a result, record what they liked: taste add --aspect ... --note ... --quote \"their words\".")
@@ -1399,7 +1399,7 @@ def write_session_pointer(session_id, root, base):
 
 def inside_nested_repo(start, root):
     """True when start sits in a git repo below the store's project folder: a separate project
-    (for example plugin development inside a job folder), which the store must not police."""
+    (for example plugin development inside a task folder), which the store must not police."""
     try: path = Path(start).expanduser().resolve()
     except (OSError, RuntimeError, ValueError): return False
     project = root.parent
@@ -1479,7 +1479,7 @@ def hook_session_start(payload):
     try: size = Path(str(payload.get("transcript_path") or "")).stat().st_size
     except (OSError, ValueError): size = 0
     if size > LONG_CHAT_BYTES:
-        card += (f"\nThis chat is long ({size >> 20} MB of history, resent on every step). For a new image job, "
+        card += (f"\nThis chat is long ({size >> 20} MB of history, resent on every step). For a new image task, "
                  "suggest the user start a new chat: this store, lessons, and taste carry the memory.")
     return card
 
@@ -1651,7 +1651,7 @@ subcommands:
   hook session-start | hook stop         example: python3 studio_state.py hook session-start < payload.json
 
 approve, defect, brief, gate and verdict find the store by walking up from --project or the current folder.
-init creates it; pref add does not use the project store; lessons (lessons.jsonl) and taste notes (brands/<brand>/taste.jsonl, taste.jsonl) live in ${IMAGE_STUDIO_HOME:-~/.image-studio}, shared by every job; hooks use the cwd from the hook input.
+init creates it; pref add does not use the project store; lessons (lessons.jsonl) and taste notes (brands/<brand>/taste.jsonl, taste.jsonl) live in ${IMAGE_STUDIO_HOME:-~/.image-studio}, shared by every task; hooks use the cwd from the hook input.
 exit codes: 0 ok / gate pass, 1 gate fail or edit-check found changes outside the box, 2 bad input or no store
 """
 

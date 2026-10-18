@@ -42,7 +42,7 @@ After the first comparison, identify the largest concrete failure: missing objec
 
 A successful repair answers whether that intervention helped that candidate. It does not erase the original condition's failure. If you repair only one condition, report the unequal call budget. For a fair technique comparison, either give both the same repair allowance or present initial performance and repair cost separately.
 
-Stop when the hard requirements are met and further calls address no stated need, when the agreed budget is reached, or when the same hard failure recurs without a new control strategy. Deliver unresolved failures candidly. Recommend another method when the job needs exact typography, measured geometry, editable vectors or preserved pixels. Report small experiments as case studies; a single attractive image is not evidence of universal superiority or a measured success rate.
+Stop when the hard requirements are met and further calls address no stated need, when the agreed budget is reached, or when the same hard failure recurs without a new control strategy. Deliver unresolved failures candidly. Recommend another method when the task needs exact typography, measured geometry, editable vectors or preserved pixels. Report small experiments as case studies; a single attractive image is not evidence of universal superiority or a measured success rate.
 
 ## Reusable worker briefs
 

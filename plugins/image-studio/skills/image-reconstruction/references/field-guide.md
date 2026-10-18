@@ -89,7 +89,7 @@ Text has a separate `certainty`: `exact` or `uncertain`. An exact transcript mus
 
 ## Reference choice and edits
 
-`selected_for_use` means the person chose this image as an input for the current job. `allowed_roles` limits the information to borrow. These fields do not establish ownership, a legal license, model access or upload authorization beyond the actual request. A palette-only reference must not silently supply its logo, subject or text.
+`selected_for_use` means the person chose this image as an input for the current task. `allowed_roles` limits the information to borrow. These fields do not establish ownership, a legal license, model access or upload authorization beyond the actual request. A palette-only reference must not silently supply its logo, subject or text.
 
 Example: A is the clean target with content/layout roles; B supplies material; C supplies palette. The prompt should say what B and C contribute, which source wins if they conflict, and which properties of A stay fixed. Attach those exact files in the declared order. Do not give the tool a manifest full of filenames and claim the image inputs were supplied.
 

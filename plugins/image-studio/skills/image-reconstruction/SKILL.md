@@ -121,7 +121,7 @@ Compare both the intended change and the protected regions. Inspect identity, ge
 
 Repair the largest diagnosed failure from the best accepted clean version. Isolate an uncertain change; combine compatible clear changes when their effects can be judged together. Allow physically necessary consequences. Every generation can introduce drift, so recheck preservation after each repair.
 
-Use deterministic typography, charting, compositing, or vector tools when the job requires exact geometry, editable artwork, or preserved pixels. Do not promise arbitrary images or pixel-identical reconstructions from a prompt.
+Use deterministic typography, charting, compositing, or vector tools when the task requires exact geometry, editable artwork, or preserved pixels. Do not promise arbitrary images or pixel-identical reconstructions from a prompt.
 
 For authorized parallel variants or comparisons, read [the experiment loop](references/experiment-loop.md). Keep the target and checks common, vary declared inputs, and record every attempt. Agents broaden the search; their use alone does not establish better image quality.
 

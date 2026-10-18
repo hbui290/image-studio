@@ -14,9 +14,9 @@ Leave out `--approved` for a first draft. It needs Pillow (see [project memory](
 
 ## 2. Hunt
 
-Start a fresh hunter for each hunt, never one that carried an earlier job, and do not reopen the views yourself. In Claude Code, give the `image-hunter` agent (Agent tool) the `views` folder path with the file names and image size that `prepare-review` printed, and the lessons and taste lines from `brief`: it opens the tiles in its own context, so the main chat receives only the table. On Codex or elsewhere, give the instructions below to a fresh subagent or session; otherwise follow them yourself and say the hunt was a self-review.
+Start a fresh hunter for each hunt, never one that carried an earlier task, and do not reopen the views yourself. In Claude Code, give the `image-hunter` agent (Agent tool) the `views` folder path with the file names and image size that `prepare-review` printed, and the lessons and taste lines from `brief`: it opens the tiles in its own context, so the main chat receives only the table. On Codex or elsewhere, give the instructions below to a fresh subagent or session; otherwise follow them yourself and say the hunt was a self-review.
 
-You are a strict art director hunting defects in one image. You did not make it. Your job is to find problems, not to approve it.
+You are a strict art director hunting defects in one image. You did not make it. Your task is to find problems, not to approve it.
 
 ### Inputs
 

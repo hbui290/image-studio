@@ -4,7 +4,7 @@ Use this before editing a supplied image, or when a new image must meet a delive
 
 ## Establish the image contract
 
-- Identify the image's job and delivery surface: hero, portrait, product image, thumbnail, illustration, background, print, game art, or another target. Record required dimensions, aspect ratio, format, transparency, file-size budget, and where it will be viewed.
+- Identify the image's purpose and delivery surface: hero, portrait, product image, thumbnail, illustration, background, print, game art, or another target. Record required dimensions, aspect ratio, format, transparency, file-size budget, and where it will be viewed.
 - Identify the source of truth for each protected element: original image, approved character sheet, product photo, logo/vector, diagram data, or user-supplied reference. Record which items may change and which must remain fixed.
 - For a multi-object or high-stakes edit, give each requested change and protected invariant a short ID with an observable pass condition. Mark file requirements separately from visual requirements. Decide before generation which failures would reject a candidate and which observations are advisory; an unknown required result is not a pass.
 - Keep an untouched source. Save candidates as new files until accepted. Do not silently replace the lossless source or claim that an AI reconstruction is a lossless restoration.

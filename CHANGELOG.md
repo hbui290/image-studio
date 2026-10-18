@@ -6,6 +6,7 @@ Fewer model calls. In the Jadebound session 70% of the 148 minutes was model tim
 
 - **`studio_state.py prepare-review`:** writes every designer-review view (overlapping tiles named by their corner, edges, gray, thumbnail, lineup) in one call and prints the image size and file list the hunter needs; 0.24 s on the 1672x941 poster. The agent had rebuilt these views by hand about 7 times.
 - **`studio_state.py verdict --from verdicts.json`:** records every verdict of a gate run in one call; one bad entry writes nothing.
+- **Wording:** the docs, the session card, and script messages say "task" instead of "job" for a unit of the user's work.
 
 ## 2.12.0-local.1 (2026-10-19)
 

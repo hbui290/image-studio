@@ -2,7 +2,7 @@
 
 Read by [image-create](../SKILL.md) when writing a generation prompt. A prompt built from fixed blocks gives stable results across images and turns, so the user's style does not drift from one asset to the next.
 
-## 1. Style block (same text at the start of every prompt in a job)
+## 1. Style block (same text at the start of every prompt in a task)
 
 Fill it once per brand from `brand show` (palette, fonts, do and don't), the user's taste notes, and confirmed preferences, then paste it unchanged:
 

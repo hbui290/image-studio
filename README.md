@@ -61,9 +61,9 @@ Start a new session afterwards. Invoke a skill by describing the task, or by nam
 
 ## Tools
 
-Install only what the job needs:
+Install only what the task needs:
 
-| Job | Needs |
+| Task | Needs |
 | --- | --- |
 | Inspect or plan | Nothing extra; validating an `image-edit-map` or `image-reverse-engineer` spec needs Python with Pillow and jsonschema |
 | Crop, mask, composite, export | [ImageMagick](https://imagemagick.org/download/) 7 |
@@ -87,7 +87,7 @@ Tested recipes, model choice by image type, and measured results are in [enhance
 
 ## Project memory and hooks
 
-For work that spans several sessions, `studio_state.py init --project PATH --brand ID` creates a local `.image-studio/` folder that remembers approved deliverables (by hash and spec), every defect the user reported (stable IDs `D1`, `D2`, ...), and decisions. `gate` refuses to call a deliverable done until the file matches the approved hash and spec, no defect is open, and every defect ever recorded has a fresh crop and a `pass` verdict (a resolved defect also needs at least 5% of its box changed). Accepting a defect as `wontfix` needs the user's words. When the user reports a problem with a deliverable that already passed the gate, the agent must record a lesson (mistake, cause, check) before the gate passes again; lessons are shared across jobs (`~/.image-studio/lessons.jsonl`, or `$IMAGE_STUDIO_HOME`), the 5 most relevant are shown at session start, and a mistake repeated in 2 or more jobs is proposed to the user as a preference. When the user approves or praises a result, the agent records what they liked (`taste add`), and the newest taste notes for the brand are shown at session start so the first draft matches. Brand and general preferences live in `~/.image-studio/`. Details: [project memory](plugins/image-studio/skills/image-verify/references/project-memory.md).
+For work that spans several sessions, `studio_state.py init --project PATH --brand ID` creates a local `.image-studio/` folder that remembers approved deliverables (by hash and spec), every defect the user reported (stable IDs `D1`, `D2`, ...), and decisions. `gate` refuses to call a deliverable done until the file matches the approved hash and spec, no defect is open, and every defect ever recorded has a fresh crop and a `pass` verdict (a resolved defect also needs at least 5% of its box changed). Accepting a defect as `wontfix` needs the user's words. When the user reports a problem with a deliverable that already passed the gate, the agent must record a lesson (mistake, cause, check) before the gate passes again; lessons are shared across tasks (`~/.image-studio/lessons.jsonl`, or `$IMAGE_STUDIO_HOME`), the 5 most relevant are shown at session start, and a mistake repeated in 2 or more tasks is proposed to the user as a preference. When the user approves or praises a result, the agent records what they liked (`taste add`), and the newest taste notes for the brand are shown at session start so the first draft matches. Brand and general preferences live in `~/.image-studio/`. Details: [project memory](plugins/image-studio/skills/image-verify/references/project-memory.md).
 
 The plugin ships two hooks in `plugins/image-studio/hooks/hooks.json`, for Claude Code and Codex (Codex asks you to trust each hook once):
 
