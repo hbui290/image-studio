@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.11.0-local.1 (2026-10-19)
+
+From the Jadebound "5000+ followers" banner session in Codex: 2 h 28 min, 21 user messages, 13 whole-image generations, 76 image views, and about 42 million tokens, because the chat had carried every job since Oct 11 (about 227,000 tokens resent per step) and every text or logo change regenerated the whole image.
+
+- **Layers:** `image-create/scripts/compose_layers.py` places the subject cutout, the logo file, and each line of text on the generated background from a `layout.json`. Changing a word, the logo position, or the subject's size is an edit and one run, not a new generation. image-create generates art without text or logos, and image-repair sends such changes to the layout.
+- **Style first:** image-create settles the rendering (for example 2D or 2.5D, not a 3D render) from taste notes and approved references before the first full image, or shows two or three small drafts and records the pick.
+- **Long chats:** the session card suggests a new chat for a new job when the transcript is over 25 MB; image-create says the same when the chat already handled another job. The skills that load project memory (create, edit-map, enhance, loop, repair, verify) read their files once per chat and open each new result once.
+
 ## 2.10.0-local.1 (2026-10-18)
 
 Finding and fixing problems in fewer rounds. In the poster job the user found 11 of 13 defects, 3 of them left by an earlier repair, over 11 versions.

@@ -46,6 +46,7 @@ CARD_LIMIT = 2400
 LESSONS_SHOWN = 5      # lessons printed in the session card and brief
 TASTE_SHOWN = 6        # taste notes printed in the session card and brief
 BRAND_CAP = 4000        # characters in one brand.json
+LONG_CHAT_BYTES = 25 << 20  # a transcript this large resends a long history on every step
 HEX_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 ASPECTS = ("color", "line", "composition", "detail", "lighting", "text", "style", "other")
 MIN_CHANGED = 0.05     # share of changed pixels a resolved defect's box needs
@@ -1453,8 +1454,14 @@ def hook_session_start(payload):
     if root is None: return ""
     session_id = payload.get("session_id") if isinstance(payload, dict) else None
     write_session_pointer(session_id, root, base)
-    try: return format_session_start_card(Store(root))
+    try: card = format_session_start_card(Store(root))
     except UsageError as exc: return f"image-studio: project store is corrupt: {exc}"
+    try: size = Path(str(payload.get("transcript_path") or "")).stat().st_size
+    except (OSError, ValueError): size = 0
+    if size > LONG_CHAT_BYTES:
+        card += (f"\nThis chat is long ({size >> 20} MB of history, resent on every step). For a new image job, "
+                 "suggest the user start a new chat: this store, lessons, and taste carry the memory.")
+    return card
 
 
 def run_hook(argv):

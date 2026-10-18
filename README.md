@@ -23,6 +23,8 @@ The `image-reviewer` agent (Claude Code plugin) grades a candidate independently
 
 The `image-hunter` agent hunts a whole image for problems at intake and before delivery (AI slop, broken contours, leftovers of removed objects, seams, the user's past complaints) and returns one table; `studio_state.py map` draws them on one image so the user confirms everything in one round, and `studio_state.py edit-check` checks each repair's region without re-reading the whole image. Other hosts get the hunt instructions in `image-verify/references/designer-review.md`.
 
+Text, numbers, and logos are never generated into the art: `image-create/scripts/compose_layers.py` places the subject cutout, the logo, and each line of text from a `layout.json`, so changing a word or moving the logo takes one run instead of a new generation.
+
 | Before (1672×941, wrong pets) | After (repainted, upscaled, repaired) |
 | --- | --- |
 | ![Before](examples/image-repair/tavern-hero/before.webp) | ![After](examples/image-repair/tavern-hero/after.webp) |

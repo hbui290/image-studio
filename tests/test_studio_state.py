@@ -1791,5 +1791,21 @@ class EditCheckTests(StudioBase):
         self.assertEqual(run.returncode, 2); self.assertIn("size", run.stderr)
 
 
+class LongChatTests(StudioBase):
+    """A chat that carried earlier jobs resends their whole history on every step; the card says so."""
+
+    def card(self, size):
+        transcript = self.project / "rollout.jsonl"
+        with open(transcript, "wb") as fh: fh.truncate(size)  # sparse file, no disk use
+        run = self.run_cli("hook", "session-start", stdin=json.dumps({"cwd": str(self.project), "transcript_path": str(transcript)}))
+        return run.stdout
+
+    def test_long_chat_gets_a_new_chat_hint(self):
+        self.init()
+        mod = load_module()
+        self.assertIn("start a new chat", self.card(mod.LONG_CHAT_BYTES + 1))
+        self.assertNotIn("start a new chat", self.card(1000))
+
+
 if __name__ == "__main__":
     unittest.main()

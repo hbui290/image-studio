@@ -36,7 +36,7 @@ Read [board format and combination planning](references/board.md). Save the comp
 
 Show a compact ingredient table and a combination table. Every combination has an ID and one chosen trait per active axis: e.g. `C001 = R1 lighting + R2 typography + R3 composition`. Fixed traits stay fixed. Exclude incompatible pairs. Do not enumerate or generate the entire Cartesian product. Start with up to four distinct directions; the helper samples a bounded pool and spreads choices across axes. Similar-looking descriptions still need an agent check for visual diversity and coherence.
 
-For each combination, save a prompt with: result and audience → original subject/content → composition → chosen visual traits and reference roles → exact text → protected details → output checks. Use only the selected properties from each reference. Borrowing its typography does not authorize copying its layout, brand, or subject. Resolve conflicts with the brief first, then fixed traits, then selected traits. Never manufacture a protected requirement from a suggestion.
+For each combination, save a prompt with: result and audience → original subject/content → composition → chosen visual traits and reference roles → exact text (placed afterwards with [compose_layers.py](../image-create/SKILL.md), not generated) → protected details → output checks. Use only the selected properties from each reference. Borrowing its typography does not authorize copying its layout, brand, or subject. Resolve conflicts with the brief first, then fixed traits, then selected traits. Never manufacture a protected requirement from a suggestion.
 
 ## Generate and judge
 

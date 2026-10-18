@@ -52,6 +52,7 @@ Open the 100% crop of each defect first; open the 200% crop only when the 100% v
 ## Hooks
 
 - **Session start** (and after compaction) prints a short card: open defects, deliverables and gate status, recent decisions, the user's taste (6 newest notes), up to 5 lessons from earlier jobs, confirmed preferences.
+  When the chat's transcript is over 25 MB, the card adds a line suggesting a new chat for a new job, since every step resends the whole history.
 - **Stop** blocks only a completion claim ("done", "fixed", "ready", or Vietnamese "xong", "hoàn thành"...) while a deliverable has not passed the gate or a defect is open, once per message. The agent then tells the user plainly what is still wrong. Questions, progress updates, and negated claims ("not done", Vietnamese "chưa xong") pass; a claim followed by a question ("Done. Anything else?") still counts. A Checked / Not checked / Still failing report passes only when it names something not checked or still failing. A session working in a separate git repo below the project folder is not policed.
 - Both hooks exit 0 silently when python3, the script, or a store is missing. Codex asks the user to trust each hook once; without hooks, run `brief` and `gate` as the steps say.
 

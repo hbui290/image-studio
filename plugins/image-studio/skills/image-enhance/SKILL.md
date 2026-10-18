@@ -15,7 +15,7 @@ Run scripts; do not read their source - use `--help` for usage.
 
 ## Operational checklist
 
-0. **Memory:** If not in context, run `python3 <skills>/image-verify/scripts/studio_state.py brief` (no store: `taste list` and `lesson list` instead) (see [using the store in a skill](../image-verify/references/project-memory.md#using-the-store-in-a-skill)).
+0. **Memory:** If not in context, run `python3 <skills>/image-verify/scripts/studio_state.py brief` (no store: `taste list` and `lesson list` instead) (see [using the store in a skill](../image-verify/references/project-memory.md#using-the-store-in-a-skill)). Read this file and each reference once per chat, and open each new result once.
 1. **Diagnose:** Check web images with [image-inspect](../image-inspect/SKILL.md) for CSS scaling or compression first.
 2. **Find tools:** Detect [ImageMagick](https://imagemagick.org) `magick` and an upscaler ([Upscayl](https://github.com/upscayl/upscayl) `upscayl-bin`, [Real-ESRGAN-ncnn-vulkan](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan) `realesrgan-ncnn-vulkan`):
    ```bash
