@@ -1286,17 +1286,36 @@ def next_steps(name, path, digest, item, defects, run_id, stale, pending):
     return steps
 
 
+def verdict_record(run_id, run_dir, checklist, defect_id, status, evidence, scale, reviewer):
+    entry = next((e for e in checklist.get("defects", []) if isinstance(e, dict) and e.get("id") == defect_id), None)
+    if entry is None: raise UsageError(f"defect {defect_id!r} is not in run {run_id}")
+    if status not in ("pass", "fail", "uncertain"): raise UsageError(f"{defect_id}: status must be pass, fail, or uncertain")
+    crop = (entry.get("crops") or {}).get(scale)
+    if not crop: raise UsageError(f"run {run_id} has no {scale}% crop for {defect_id}")
+    crop_path = run_dir / crop["file"]
+    if not crop_path.is_file() or sha256_file(crop_path) != crop["sha256"]: raise UsageError(f"{crop_path} is missing or changed since the run; start a new gate run")
+    evidence = text_arg(evidence, f"{defect_id} evidence")
+    if len(evidence) < MIN_EVIDENCE: raise UsageError(f"{defect_id}: evidence must describe what you saw in the crop (>= {MIN_EVIDENCE} characters)")
+    return {"status": status, "crop_sha256": crop["sha256"], "evidence": evidence, "reviewer": reviewer, "time": now()}
+
+
 def cmd_verdict(args):
     store = open_store(args.project)
     run_dir, checklist = load_run(store, args.run)
-    entry = next((e for e in checklist.get("defects", []) if isinstance(e, dict) and e.get("id") == args.id), None)
-    if entry is None: raise UsageError(f"defect {args.id!r} is not in run {args.run}")
-    crop = (entry.get("crops") or {}).get(args.crop)
-    if not crop: raise UsageError(f"run {args.run} has no {args.crop}% crop for {args.id}")
-    crop_path = run_dir / crop["file"]
-    if not crop_path.is_file() or sha256_file(crop_path) != crop["sha256"]: raise UsageError(f"{crop_path} is missing or changed since the run; start a new gate run")
-    evidence = text_arg(args.evidence, "--evidence")
-    if len(evidence) < MIN_EVIDENCE: raise UsageError(f"--evidence must describe what you saw in the crop (>= {MIN_EVIDENCE} characters)")
+    if args.from_file:
+        if args.id or args.status or args.evidence: raise UsageError("use either --from or --id/--status/--evidence, not both")
+        try: entries = json.loads(Path(args.from_file).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc: raise UsageError(f"cannot read --from {args.from_file}: {exc}") from None
+        if not isinstance(entries, list) or not entries or not all(isinstance(e, dict) for e in entries):
+            raise UsageError('--from must hold a non-empty list of {"id", "status", "evidence"} objects')
+    elif args.id and args.status and args.evidence:
+        entries = [{"id": args.id, "status": args.status, "evidence": args.evidence, "crop": args.crop}]
+    else: raise UsageError("give --id, --status and --evidence, or --from FILE")
+    records = {}
+    for e in entries:  # validate every entry before writing any
+        defect_id = str(e.get("id"))
+        records[defect_id] = verdict_record(args.run, run_dir, checklist, defect_id, e.get("status"), e.get("evidence"),
+                                            str(e.get("crop", args.crop)), args.reviewer)
     path = run_dir / "verdicts.json"
     data = {}
     if path.is_file():
@@ -1304,9 +1323,10 @@ def cmd_verdict(args):
         except UsageError: data = {}
     if data.get("run_id") != checklist["run_id"] or data.get("nonce") != checklist["nonce"]: data = {}
     data.update({"run_id": checklist["run_id"], "nonce": checklist["nonce"], "deliverable": checklist.get("deliverable")})
-    data.setdefault("verdicts", {})[args.id] = {"status": args.status, "crop_sha256": crop["sha256"], "evidence": evidence, "reviewer": args.reviewer, "time": now()}
+    data.setdefault("verdicts", {}).update(records)
     atomic_write(path, dump_json(data))
-    print(f"{args.id} {args.status} recorded in {path}")
+    if len(records) == 1 and not args.from_file: print(f"{args.id} {args.status} recorded in {path}")
+    else: print(f"{len(records)} verdicts recorded in {path}: " + ", ".join(f"{k} {v['status']}" for k, v in records.items()))
     return 0
 
 
@@ -1525,6 +1545,44 @@ def cmd_map(args):
     return 0
 
 
+def cmd_prepare_review(args):
+    P = pil()
+    path = existing_file(args.image, "--image")
+    image = open_image(path).convert("RGB")
+    out = Path(args.out)
+    if out.exists() and (not out.is_dir() or any(out.iterdir())): raise UsageError(f"{out} exists and is not empty; choose a new folder")
+    out.mkdir(parents=True, exist_ok=True)
+    W, H = image.size
+    cols, rows = (4, 4) if max(W, H) > 3000 else (3, 2)
+    ov = max(0, args.overlap)
+    tw, th = -(-(W + (cols - 1) * ov) // cols), -(-(H + (rows - 1) * ov) // rows)
+    names = []
+    def save(img, name):
+        img.save(out / name, "PNG", compress_level=1); names.append(name)
+    tw, th = min(tw, W), min(th, H)  # a side shorter than a tile is one tile
+    corners = []
+    for r in range(rows):
+        for c in range(cols):
+            corner = (max(0, min(c * (tw - ov), W - tw)), max(0, min(r * (th - ov), H - th)))
+            if corner not in corners: corners.append(corner)
+    for x, y in corners:
+        save(image.crop((x, y, x + tw, y + th)), f"tile-{x}_{y}.png")
+    e = min(90, W, H)
+    save(image.crop((0, 0, W, e)), "edge-top.png"); save(image.crop((0, H - e, W, H)), "edge-bottom.png")
+    save(image.crop((0, 0, e, H)), "edge-left.png"); save(image.crop((W - e, 0, W, H)), "edge-right.png")
+    save(image.convert("L"), "gray.png")
+    thumb = image.copy(); thumb.thumbnail((120, 120)); save(thumb, "thumb.png")
+    if args.approved:
+        approved = open_image(existing_file(args.approved, "--approved")).convert("RGB")
+        scale = lambda im: im.resize((max(1, round(im.size[0] * 600 / im.size[1])), 600), P.BILINEAR)
+        a, b = scale(approved), scale(image)
+        sheet = P.Image.new("RGB", (a.size[0] + b.size[0], 600)); sheet.paste(a, (0, 0)); sheet.paste(b, (a.size[0], 0))
+        save(sheet, "lineup.png")
+    print(f"Image {W}x{H}; {len(names)} views in {out} (tiles are 100% crops named by their top-left corner, {ov} px overlap):")
+    print(" ".join(names))
+    return 0
+
+
 def cmd_edit_check(args):
     before_path, after_path = existing_file(args.before, "--before"), existing_file(args.after, "--after")
     before, after = open_image(before_path), open_image(after_path)
@@ -1569,7 +1627,7 @@ subcommands:
   brief [--max-lines 40]                 example: python3 studio_state.py brief
   gate --deliverable N [--file F] [--run RUN]
                                          example: python3 studio_state.py gate --deliverable poster
-  verdict --run RUN --id D1 --status pass|fail|uncertain --evidence T [--reviewer self|independent] [--crop 100|200]
+  verdict --run RUN (--id D1 --status pass|fail|uncertain --evidence T | --from verdicts.json) [--reviewer self|independent] [--crop 100|200]
                                          example: python3 studio_state.py verdict --run 20261018T000000Z-abc --id D1 --status pass --evidence "seam gone at 100%"
   pref add [--brand B] --rule T --check T [--evidence T] [--confirmed]
                                          example: python3 studio_state.py pref add --brand acme --rule "No bevels" --check "inspect edges" --confirmed
@@ -1584,6 +1642,9 @@ subcommands:
   brand show [--brand B]                 example: python3 studio_state.py brand show --brand acme
   map --deliverable N [--file F] --out F  draw every open defect on one image for the user to confirm at once
                                          example: python3 studio_state.py map --deliverable poster --out defect-map.png
+  prepare-review --image F --out DIR [--approved A]
+                                         every designer-review view in one call: overlapping tiles named tile-X_Y.png, edges, gray, thumb, lineup
+                                         example: python3 studio_state.py prepare-review --image poster.png --approved v6.png --out views
   edit-check --before A --after B --bbox x0,y0,x1,y1 [--ring 24] [--out F]
                                          changed pixels outside the edit box (exit 1 if any) and one before|after|changes view
                                          example: python3 studio_state.py edit-check --before v7.png --after v8.png --bbox 280,320,370,410
@@ -1634,15 +1695,21 @@ def build_parser():
     p.set_defaults(func=cmd_gate)
 
     p = sub.add_parser("verdict", parents=[common])
-    p.add_argument("--run", required=True); p.add_argument("--id", required=True)
-    p.add_argument("--status", required=True, choices=("pass", "fail", "uncertain"))
-    p.add_argument("--evidence", required=True); p.add_argument("--reviewer", choices=("self", "independent"), default="self")
+    p.add_argument("--run", required=True); p.add_argument("--id")
+    p.add_argument("--status", choices=("pass", "fail", "uncertain"))
+    p.add_argument("--evidence"); p.add_argument("--reviewer", choices=("self", "independent"), default="self")
+    p.add_argument("--from", dest="from_file", help='JSON list of {"id", "status", "evidence"[, "crop"]}: every verdict of the run in one call')
     p.add_argument("--crop", choices=("100", "200"), default="100")
     p.set_defaults(func=cmd_verdict)
 
     p = sub.add_parser("map", parents=[common])
     p.add_argument("--deliverable", required=True); p.add_argument("--file"); p.add_argument("--out", required=True)
     p.set_defaults(func=cmd_map)
+
+    p = sub.add_parser("prepare-review")
+    p.add_argument("--image", required=True); p.add_argument("--out", required=True)
+    p.add_argument("--approved"); p.add_argument("--overlap", type=int, default=40)
+    p.set_defaults(func=cmd_prepare_review)
 
     p = sub.add_parser("edit-check")
     p.add_argument("--before", required=True); p.add_argument("--after", required=True)

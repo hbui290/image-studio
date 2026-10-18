@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.13.0-local.1 (2026-10-19)
+
+Fewer model calls. In the Jadebound session 70% of the 148 minutes was model time, about 32 seconds per call over 194 calls, so each step folded into one command saves a call.
+
+- **`studio_state.py prepare-review`:** writes every designer-review view (overlapping tiles named by their corner, edges, gray, thumbnail, lineup) in one call and prints the image size and file list the hunter needs; 0.24 s on the 1672x941 poster. The agent had rebuilt these views by hand about 7 times.
+- **`studio_state.py verdict --from verdicts.json`:** records every verdict of a gate run in one call; one bad entry writes nothing.
+
 ## 2.12.0-local.1 (2026-10-19)
 
 From a full read of the same Jadebound session, subagents included (about 50 million tokens, 148 minutes, 70% of it model time on a 100,000-380,000 token context).

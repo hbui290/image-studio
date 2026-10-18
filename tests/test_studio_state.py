@@ -1807,5 +1807,85 @@ class LongChatTests(StudioBase):
         self.assertNotIn("start a new chat", self.card(1000))
 
 
+class BatchVerdictTests(StudioBase):
+    """verdict --from records every defect of a gate run in one call; one bad entry writes nothing."""
+
+    def setUp(self):
+        super().setUp()
+        self.init(); self.approve_poster(self.poster(dots=True))
+        for box in DOTS: self.defect(box, kind="artifact")
+        self.approve_poster(self.poster())
+        for i in (1, 2, 3): self.ok("defect", "close", "--id", f"D{i}", "--status", "resolved", "--note", "fixed earlier")
+
+    def write(self, entries):
+        path = self.project / "verdicts-in.json"; path.write_text(json.dumps(entries)); return path
+
+    def test_one_call_records_all_and_gate_passes(self):
+        run_id = self.run_id(self.gate())
+        entries = [{"id": f"D{i}", "status": "pass", "evidence": f"D{i} region clean at 100%"} for i in (1, 2, 3)]
+        run = self.ok("verdict", "--run", run_id, "--from", self.write(entries), "--reviewer", "independent")
+        self.assertIn("3 verdicts recorded", run.stdout)
+        self.assertEqual(self.gate("--run", run_id).returncode, 0)
+
+    def test_bad_entry_writes_nothing(self):
+        run_id = self.run_id(self.gate())
+        entries = [{"id": "D1", "status": "pass", "evidence": "D1 region clean at 100%"},
+                   {"id": "D9", "status": "pass", "evidence": "no such defect here"}]
+        run = self.run_cli("verdict", "--run", run_id, "--from", self.write(entries))
+        self.assertEqual(run.returncode, 2); self.assertIn("D9", run.stderr)
+        self.assertFalse((self.run_dir(run_id) / "verdicts.json").exists())
+
+    def test_from_and_id_are_exclusive(self):
+        run_id = self.run_id(self.gate())
+        run = self.run_cli("verdict", "--run", run_id, "--from", self.write([]), "--id", "D1")
+        self.assertEqual(run.returncode, 2)
+
+
+class PrepareReviewTests(StudioBase):
+    """prepare-review writes every hunt view in one call, tiles named by their corner."""
+
+    def test_views_and_tile_offsets(self):
+        img = Image.new("RGB", (300, 200))
+        for x in range(300):
+            for y in range(0, 200, 50): img.putpixel((x, y), (x % 256, y, 0))
+        img.save(self.project / "in.png")
+        Image.new("RGB", (150, 100), (9, 9, 9)).save(self.project / "approved.png")
+        run = self.ok("prepare-review", "--image", "in.png", "--approved", "approved.png", "--out", "views")
+        views = self.project / "views"
+        names = sorted(p.name for p in views.iterdir())
+        for name in ("edge-top.png", "edge-bottom.png", "edge-left.png", "edge-right.png", "gray.png", "thumb.png", "lineup.png"):
+            self.assertIn(name, names)
+        tiles = [n for n in names if n.startswith("tile-")]
+        self.assertEqual(len(tiles), 6)
+        for name in tiles:  # each tile equals the image crop at the corner in its name
+            x, y = map(int, name[5:-4].split("_"))
+            with Image.open(views / name) as tile:
+                tile = tile.convert("RGB")
+                self.assertEqual(tile.tobytes(), img.crop((x, y, x + tile.size[0], y + tile.size[1])).tobytes())
+        self.assertIn("300x200", run.stdout)
+        self.assertIn("tile-0_0.png", run.stdout)
+
+    def test_small_and_thin_images_get_true_unique_tiles(self):
+        for i, size in enumerate([(50, 30), (1, 1), (100, 7), (3001, 40)]):
+            img = Image.new("RGB", size)
+            for x in range(size[0]): img.putpixel((x, 0), (x % 256, 7, 9))
+            img.save(self.project / "s.png")
+            run = self.ok("prepare-review", "--image", "s.png", "--out", f"v{i}")
+            tiles = [n for n in run.stdout.split() if n.startswith("tile-")]
+            self.assertEqual(len(tiles), len(set(tiles)), (size, tiles))
+            for name in tiles:
+                x, y = map(int, name[5:-4].split("_"))
+                self.assertGreaterEqual(min(x, y), 0, (size, name))
+                with Image.open(self.project / f"v{i}" / name) as tile:
+                    tile = tile.convert("RGB")
+                    self.assertEqual(tile.tobytes(), img.crop((x, y, x + tile.size[0], y + tile.size[1])).tobytes())
+
+    def test_existing_output_folder_with_files_is_refused(self):
+        Image.new("RGB", (50, 50)).save(self.project / "in.png")
+        (self.project / "views").mkdir(); (self.project / "views" / "old.png").write_text("x")
+        run = self.run_cli("prepare-review", "--image", "in.png", "--out", "views")
+        self.assertEqual(run.returncode, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

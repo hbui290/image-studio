@@ -38,10 +38,11 @@ python3 <skills>/image-verify/scripts/studio_state.py approve deliverable --name
 python3 <skills>/image-verify/scripts/studio_state.py defect close --id D<n> --status resolved --note "what changed"
 python3 <skills>/image-verify/scripts/studio_state.py gate --deliverable N            # prints Run: <id> and Next: steps
 python3 <skills>/image-verify/scripts/studio_state.py verdict --run <id> --id D<n> --status pass --evidence "what the crop shows" [--reviewer independent]
+python3 <skills>/image-verify/scripts/studio_state.py verdict --run <id> --from verdicts.json   # or every verdict at once: [{"id": "D1", "status": "pass", "evidence": "..."}]
 python3 <skills>/image-verify/scripts/studio_state.py gate --deliverable N --run <id>
 ```
 
-Open the 100% crop of each defect first; open the 200% crop only when the 100% view is unclear. Write verdicts one at a time (parallel writes overwrite each other), and only after opening the crop; use `fail` or `uncertain` when it is not clearly fixed.
+Open the 100% crop of each defect first; open the 200% crop only when the 100% view is unclear. Write verdicts one call at a time (one `--from` file holds them all; parallel calls overwrite each other), and only after opening the crop; use `fail` or `uncertain` when it is not clearly fixed.
 
 `gate` passes only when: the file's hash equals the approved one and matches the spec; every defect ever recorded on the deliverable (open and resolved, so fixed defects are re-checked) has crops in this run and no IDs are missing; no defect is open; each resolved defect has a `pass` verdict tied to this run's crop and at least 5% of its box changed since it was reported (0.5% for `scope` requests that carry the user's words); each `wontfix` carries the user's words; each defect reported after delivery (other than a `scope` request with the user's words) has a lesson. A resolved defect whose pixels are identical to an earlier passing run keeps that verdict automatically ("unchanged since run ..."), so each gate only needs verdicts for regions that changed. A ZIP deliverable's spec is checked by hash and size only; a defect needs a single-image ZIP and is cropped from that image. Self-verified passes are labelled as such.
 

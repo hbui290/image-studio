@@ -4,24 +4,17 @@ Read by [image-verify](../SKILL.md) at intake (the first look at an image the us
 
 ## 1. Make the review views
 
-With [ImageMagick](https://imagemagick.org) 7, into a `views` folder:
+One command writes every view (6 overlapping 100% tiles named `tile-X_Y.png` by their top-left corner, 4x4 tiles over 3000 px a side, 4 edge strips where cut objects hide, `gray.png` for value structure and focal point, `thumb.png` at 120 px, and `lineup.png` next to the last approved version) and prints the image size and the file list for the hunter:
 
 ```bash
-mkdir -p views
-magick in.png -crop 3x2+40+40@ -set filename:t '%[fx:page.x]_%[fx:page.y]' +repage \
-  -define png:compression-level=1 'views/tile-%[filename:t].png'   # 6 overlapping 100% tiles named by their corner (over 3000 px a side: 4x4+40+40@)
-magick in.png -gravity North -crop x90+0+0 +repage views/edge-top.png    # 4 edge strips: cut objects hide here
-magick in.png -gravity South -crop x90+0+0 +repage views/edge-bottom.png
-magick in.png -gravity West -crop 90x+0+0 +repage views/edge-left.png
-magick in.png -gravity East -crop 90x+0+0 +repage views/edge-right.png
-magick in.png -colorspace Gray views/gray.png                           # value structure and focal point
-magick in.png -resize 120x120 views/thumb.png                           # does it still read when small?
-magick approved.png in.png -resize x600 +append +repage views/lineup.png  # next to the last approved version; skip for a first draft
+python3 <skills>/image-verify/scripts/studio_state.py prepare-review --image in.png --approved approved.png --out views
 ```
+
+Leave out `--approved` for a first draft. It needs Pillow (see [project memory](project-memory.md)).
 
 ## 2. Hunt
 
-Start a fresh hunter for each hunt, never one that carried an earlier job, and do not reopen the views yourself. In Claude Code, give the `image-hunter` agent (Agent tool) the `views` folder path with its file names (`ls views`), the image size, and the lessons and taste lines from `brief`: it opens the tiles in its own context, so the main chat receives only the table. On Codex or elsewhere, give the instructions below to a fresh subagent or session; otherwise follow them yourself and say the hunt was a self-review.
+Start a fresh hunter for each hunt, never one that carried an earlier job, and do not reopen the views yourself. In Claude Code, give the `image-hunter` agent (Agent tool) the `views` folder path with the file names and image size that `prepare-review` printed, and the lessons and taste lines from `brief`: it opens the tiles in its own context, so the main chat receives only the table. On Codex or elsewhere, give the instructions below to a fresh subagent or session; otherwise follow them yourself and say the hunt was a self-review.
 
 You are a strict art director hunting defects in one image. You did not make it. Your job is to find problems, not to approve it.
 
