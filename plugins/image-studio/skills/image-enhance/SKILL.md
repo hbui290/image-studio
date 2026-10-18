@@ -23,7 +23,7 @@ Run scripts; do not read their source - use `--help` for usage.
    ls /Applications/Upscayl.app/Contents/Resources/bin/ 2>/dev/null
    ```
    Stop if no upscaler installed; do not use sharpen filter. Read [recipes.md](references/recipes.md#getting-an-upscaler) only when installing upscaler.
-3. **Pick recipe:** Read [recipes.md](references/recipes.md#pick-by-image-type) only when choosing a model recipe (`remacri-4x` at 4x or `realesr-animevideov3-x2` at 2x). Never AI-upscale small text or UI; read [recipes.md](references/recipes.md#keep-small-text-from-the-source) only when locking text. Rebuild flat logos as SVG; read [recipes.md](references/recipes.md#logo-to-vector) only when vectorizing.
+3. **Pick recipe:** Read [recipes.md](references/recipes.md#pick-by-image-type) only when choosing a model recipe (`remacri-4x` at 4x or `realesr-animevideov3-x2` at 2x). Never AI-upscale small text or UI; read [recipes.md](references/recipes.md#keep-small-text-from-the-source) only when locking text. Rebuild flat logos as SVG; read [recipes.md](references/logo-vector.md) only when vectorizing.
 4. **Trial & upscale:** Test on a crop of the softest area, then run winner on whole image:
    ```bash
    BIN=upscayl-bin; MODELS=/path/to/models; model=remacri-4x
@@ -38,8 +38,8 @@ Run scripts; do not read their source - use `--help` for usage.
    python3 <skills>/image-enhance/scripts/compare_display.py --source src.png --candidate enhanced.png \
      --out compare-1 --width 1920 --crop 1200,300,400,300
    ```
-   Run: `uv run --with pillow python3 <skills>/image-enhance/scripts/compare_display.py ...` ([uv](https://docs.astral.sh/uv/)) (fallback: `python3 -m pip install pillow`). Stop if `visible_improvement` is false; show `before-after.png`. Outputs: `--out/metrics.json` (`visible_improvement`, `failures`, `metrics`, `limits`), `before-after.png`, `before-after-light.png` (transparent images only), `crop-N.png`. Exit codes: 0 (ran), 2 on bad input (`--width` 1..16384, float/aspect/crop error). Read [recipes.md](references/recipes.md#proving-the-gain) only when evaluating metrics, including the transparent-image edge and alpha metrics. Read [recipes.md](references/recipes.md#background-removal) only when checking backdrops.
-6. **Cutout edges:** For transparent PNG with halos, read [recipes.md](references/recipes.md#cutout-edges) only when fixing cutout edges. Stop if shrinking leaves noise or drops `alpha_iou` below 0.97; regenerate edge via [image-repair](../image-repair/SKILL.md).
+   Run: `uv run --with pillow python3 <skills>/image-enhance/scripts/compare_display.py ...` ([uv](https://docs.astral.sh/uv/)) (fallback: `python3 -m pip install pillow`). Stop if `visible_improvement` is false; show `before-after.png`. Outputs: `--out/metrics.json` (`visible_improvement`, `failures`, `metrics`, `limits`), `before-after.png`, `before-after-light.png` (transparent images only), `crop-N.png`. Exit codes: 0 (ran), 2 on bad input (`--width` 1..16384, float/aspect/crop error). Read [recipes.md](references/recipes.md#proving-the-gain) only when evaluating metrics, including the transparent-image edge and alpha metrics. Read [recipes.md](references/cutouts.md#background-removal) only when checking backdrops.
+6. **Cutout edges:** For transparent PNG with halos, read [recipes.md](references/cutouts.md#cutout-edges) only when fixing cutout edges. Stop if shrinking leaves noise or drops `alpha_iou` below 0.97; regenerate edge via [image-repair](../image-repair/SKILL.md).
 7. **Handoff:** If soft from missing detail, hand regions to [image-repair](../image-repair/SKILL.md).
-8. **Export:** Read [recipes.md](references/recipes.md#web-export) only when exporting for web.
+8. **Export:** Read [recipes.md](references/web-export.md) only when exporting for web.
 9. **Gate before claiming done:** In a project with a store, run `gate --deliverable` once before claiming done; follow [using the store in a skill](../image-verify/references/project-memory.md#using-the-store-in-a-skill).

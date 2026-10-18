@@ -1,13 +1,5 @@
 # Tool readiness and portable setup
 
-## Quick preflight
-
-1. Source & refs: verify clean source, approved references, and target dimensions.
-2. Raster editor: verify ImageMagick (`magick -version`, `magick identify input.png`) or desktop editor for crops, masks, and compositing.
-3. Generator: Codex `image_gen.imagegen` takes `prompt`, `referenced_image_paths` (crop + references) or `num_last_images_to_include`, and `transparent_background`; it has no size argument, so resize the result with `magick`. Claude Code has no built-in image generator: use an image tool the user configured (MCP), or stop and hand back the prompt.
-4. Viewing: Codex `view_image` with `detail: "original"` shows native pixels (100%); Claude Code uses Read. Also check the delivered format on the actual target surface.
-5. Missing tools: use existing equivalents or report limits; never substitute whole-image generation for controlled repair.
-
 Use this reference before editing on a new or reinstalled machine, or when a new agent inherits the job. The skill is an operating method, not a bundle of executables, model weights, credentials, or source images. Count capabilities first, then use tools already present or set up only what is missing and authorized.
 
 ## How many tools are needed?
@@ -37,7 +29,7 @@ Use the official project or maintainer source when setup is needed. A repository
 | Real-ESRGAN | Super-resolution when recognizable detail needs more pixels | [GitHub](https://github.com/xinntao/Real-ESRGAN) |
 | Upscayl (optional) | Desktop upscaler that ships the `upscayl-bin` command and models; the default whole-image upscaler in [image-enhance](../../image-enhance/SKILL.md) | [GitHub](https://github.com/upscayl/upscayl) |
 | Real-ESRGAN-ncnn-vulkan (optional) | `realesrgan-ncnn-vulkan` command and models; runs on the GPU without Python | [GitHub](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan) |
-| rembg (optional) | Background removal (`rembg i`); commands in [image-enhance recipes](../../image-enhance/references/recipes.md#background-removal) | [rembg repo](https://github.com/danielgatis/rembg) |
+| rembg (optional) | Background removal (`rembg i`); commands in [image-enhance recipes](../../image-enhance/references/cutouts.md#background-removal) | [rembg repo](https://github.com/danielgatis/rembg) |
 | SAM 3 (optional) | Mask proposals from a text prompt ("mug") or a point, for crowded scenes; runs on a Mac through Hugging Face Transformers | [SAM 3 repo](https://github.com/facebookresearch/sam3) · [Transformers SAM 3 docs](https://huggingface.co/docs/transformers/model_doc/sam3) |
 | rembg `sam` model (optional) | Point-prompted mask when rembg is already installed | [rembg repo](https://github.com/danielgatis/rembg) |
 | `cwebp` / libwebp | WebP encoding when the editor cannot export it | [GitHub](https://github.com/webmproject/libwebp) |

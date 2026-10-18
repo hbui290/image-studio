@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.4.3-local.1 (2026-10-18)
+
+Docs only: large reference files are split so an agent reads only the part it needs. No text was dropped.
+
+- **image-enhance:** `recipes.md` (19.6 KB) keeps the upscaling recipes and measurements (8 KB); background removal and cutout edges moved to `cutouts.md`, logo to vector to `logo-vector.md`, web export to `web-export.md`.
+- **image-repair:** the quick preflight is `references/preflight.md` (1 KB), read before the first repair on a machine or in a new chat; `tool-readiness.md` keeps full setup. Subject-specific checks (portraits, products, logos, surfaces, web heroes) moved from `repair-and-composite.md` to `subject-checks.md`.
+
 ## 2.4.2-local.1 (2026-10-18)
 
 Docs only, from a full markdown audit (43 files: 0 broken links or anchors).
