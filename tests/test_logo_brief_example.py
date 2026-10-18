@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import unittest
 
-from jsonschema import Draft202012Validator
+from deps import needs_jsonschema
 
 ROOT = Path(__file__).resolve().parents[1]
 BRIEF_PATH = ROOT / "examples/image-repair/logo-brief.json"
@@ -17,7 +17,9 @@ class LogoBriefExampleTest(unittest.TestCase):
         self.brief = json.loads(BRIEF_PATH.read_text(encoding="utf-8"))
         self.schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
 
+    @needs_jsonschema
     def test_example_validates_against_brief_schema(self):
+        from jsonschema import Draft202012Validator
         validator = Draft202012Validator(self.schema)
         errors = list(validator.iter_errors(self.brief))
         self.assertEqual(errors, [])
