@@ -24,7 +24,7 @@ An image-spec file from image-edit-map or image-reverse-engineer uses different 
 2. **Map** every meaningful element with a stable ID and normalized bounds, and show the map to the user ([show the visual map](#show-the-visual-map)). Skip the detailed map for an obvious local edit.
 3. **Write the reconstruction JSON**: source observations stay as observed; requested changes go in `selections` ([store observations and choices separately](#store-observations-and-choices-separately)).
 4. **Validate and compile** with `reconstruct.py` ([compile and generate](#compile-and-generate)). Use `--mode edit` only when the JSON has a requested change and a clean target.
-5. **Generate** with the host image tool, sending the compiled `rendering_prompt` and the actual attachments. Save the exact prompt, inputs, and output.
+5. **Generate** with the host image tool (Codex: `image_gen.imagegen`; Claude Code has none built in: use a configured image tool or hand back the prompt), sending the compiled `rendering_prompt` and the actual attachments. Save the exact prompt, inputs, and output.
 6. **Check** each hard requirement and the protected regions as pass, fail, uncertain, or not evaluated, then repair the largest failure ([check and repair](#check-and-repair)). Stop at the [stop conditions](#stop-conditions).
 
 Use this workflow for the user's requested scope. A simple image comment can supply enough information for a local edit. A detailed map and JSON are useful for reconstruction, multiple selectable elements, reference combinations, or a handoff. Do not require another approval for a clear, already authorized edit.

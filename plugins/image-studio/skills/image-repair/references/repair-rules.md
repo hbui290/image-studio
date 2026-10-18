@@ -13,7 +13,7 @@ Use these gates only for exact logos, packaging text, and transparent exports. T
 1. Inventory occurrences by source coordinates, using the same approved source file. Disclose raster reconstruction uncertainty.
 2. Extract mark with real alpha; test over light/dark backdrops. Ensure saturation did not leak into mask and interior symbols remain. Never paste rectangular backgrounds.
 3. Measure placement; apply perspective once. Preserve silhouette, seam geometry, lighting, occlusion, letter proportions, and pixels outside accepted masks.
-4. Inspect occurrences at native size, 200% for diagnosis, and delivery size. Reject doubled strokes, residual ink, missing symbols, unreadable marks, matte boxes, or bright fringes.
+4. Inspect occurrences at native size and delivery size, and at 200% when the native view is unclear. Reject doubled strokes, residual ink, missing symbols, unreadable marks, matte boxes, or bright fringes.
 
 ## Alpha and composite safeguards
 

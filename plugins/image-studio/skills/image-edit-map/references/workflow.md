@@ -21,7 +21,7 @@ Example: “Make the title blue” is a local color change. “Give the photo co
 
 ## Conversational commands
 
-These are instructions recognized **inside this skill**, not automatically installed host slash commands. If the host treats a leading slash as its own command, invoke this skill (`/image-edit-map` in Claude Code or `$image-edit-map` in Codex) and give the command in plain language, such as "map" or "lock A:#3".
+These are instructions recognized **inside this skill**, not automatically installed host slash commands. If the host treats a leading slash as its own command, invoke this skill (`/image-edit-map` in Claude Code, shown with the plugin's prefix in a plugin install, or `$image-edit-map` in Codex) and give the command in plain language, such as "map" or "lock A:#3".
 
 | Command | Behavior |
 | --- | --- |

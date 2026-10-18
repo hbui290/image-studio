@@ -13,7 +13,7 @@ Run scripts; do not read their source - use `--help` for usage.
 
 ## Operational checklist
 
-0. **Memory:** If not in context, run `studio_state.py brief` (see [using the store in a skill](references/project-memory.md#using-the-store-in-a-skill)).
+0. **Memory:** If not in context, run `python3 <skills>/image-verify/scripts/studio_state.py brief` (see [using the store in a skill](references/project-memory.md#using-the-store-in-a-skill)).
 1. **Reviewer:** Use independent review. Read [independent-review.md](references/independent-review.md) only when setting up reviewer instructions.
 2. **Review checks:** Give each check one `pass`, `fail`, or `uncertain` with visible evidence. Read [acceptance.md](references/acceptance.md) only when evaluating craft checks. Read [repair-rules.md](../image-repair/references/repair-rules.md) only when checking logos, packaging text, or transparent exports.
 3. **Candidate audit:** When exact pixel preservation outside a mask is required:
@@ -22,7 +22,7 @@ Run scripts; do not read their source - use `--help` for usage.
      --contract contract.json --source source.png --candidate candidate.png \
      --mask final-acceptance-mask.png --review review.json --out round-0
    ```
-   `audit_candidate.py` needs Python 3.9+ with Pillow: run as `uv run --with pillow python3 <skills>/image-verify/scripts/audit_candidate.py ...` or install Pillow via `python3 -m pip install pillow`. Read [candidate-audit.md](references/candidate-audit.md) only when configuring audit options.
-4. **Decide:** Follow decisions (`accepted_by_checks`, `repair`, `hold_for_inspection`, `stop_repeated_failure`). Read [decisions.md](references/decisions.md) only when deciding next actions or stop rules.
+   `audit_candidate.py` needs Python 3.9+ with Pillow: run as `uv run --with pillow python3 <skills>/image-verify/scripts/audit_candidate.py ...` ([uv](https://docs.astral.sh/uv/)) or install Pillow via `python3 -m pip install pillow`. Read [candidate-audit.md](references/candidate-audit.md) only when configuring audit options.
+4. **Decide:** Follow `decision.json` (`accepted_by_checks`, `repair`, `hold_for_inspection`, `reject_technical`, `stop_budget`, `stop_repeated_failure`). Read [decisions.md](references/decisions.md) only when deciding next actions or stop rules.
 5. **Gate before claiming done:** In a project with a store, run `gate --deliverable` once before claiming done; follow [using the store in a skill](references/project-memory.md#using-the-store-in-a-skill).
 6. **Report:** Say if the review was independent or by the editor. When the gate has not passed, tell the user in plain words what is still wrong (defect IDs only in parentheses).

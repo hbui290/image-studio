@@ -17,7 +17,7 @@ Collect references → name their ingredients → combine selected traits → ge
 
 ## Invoke
 
-Claude Code: `/image-inspiration` `[brief] --mode batch|loop --judge human|llm|hybrid --count 4 --rounds 3 --max-images 12`.
+Claude Code (a plugin install shows it with the plugin's prefix): `/image-inspiration` `[brief] --mode batch|loop --judge human|llm|hybrid --count 4 --rounds 3 --max-images 12`.
 Codex: `$image-inspiration` with the same instructions. These are arguments interpreted by the host agent, not a standalone slash-command executable. Default: `batch`, `human`, four images. Use one to eight candidates per batch; larger requests need separate bounded batches. `--loop` means `--mode loop`; `--no-loop` means `--mode batch`. Conflicting options require clarification. In loop mode, three rounds includes the first batch; twelve images includes every generation, edit, repair, and failed generation attempt. Before every batch, reduce its size to the remaining image slots; at zero, stop. Never exceed either cap. Smaller user limits take precedence.
 
 `human` asks the person to choose. `llm` uses an available independent vision model. `hybrid` shows that model's ranking and waits for the person's selection. Do not silently switch judges. A model must actually see the candidate images. Read [judging and iteration](references/judging.md) for the loop and decision helper.
@@ -40,7 +40,7 @@ For each combination, save a prompt with: result and audience → original subje
 
 ## Generate and judge
 
-Use the host image-generation/edit tool under its own instructions. Attach the selected clean references when supported and declare each reference's role. If references cannot be passed, disclose that generation uses descriptions only. Save clean outputs, prompts, combination IDs, actual tool/model identifiers when exposed, and a call ledger. Generate actual images during the task when authorized and available; prompts alone are not a completed batch.
+Use the host image-generation/edit tool under its own instructions (Codex: `image_gen.imagegen`; Claude Code has none built in: use a configured image tool or hand back the prompt). Attach the selected clean references when supported and declare each reference's role. If references cannot be passed, disclose that generation uses descriptions only. Save clean outputs, prompts, combination IDs, actual tool/model identifiers when exposed, and a call ledger. Generate actual images during the task when authorized and available; prompts alone are not a completed batch.
 
 Use the [image-loop](../image-loop/SKILL.md) brief and reviewer to check every candidate's requirements and output files, with its repair budget set to **zero** during batch screening (set `max_repairs: 0` in the brief; see [judging](references/judging.md)). Record pass, fail, or uncertain. A failure is not repaired automatically in batch mode. Separate eligibility from taste: rank only candidates passing all hard checks. Keep the failed candidates and reasons visible. If the independent reviewer is unavailable, disclose it and ask the human to perform checks; never label a self-check as independent.
 

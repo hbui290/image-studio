@@ -31,4 +31,5 @@ Routing: For whole-image softness/upscaling use [image-enhance](../image-enhance
    magick source.png -fill none -stroke red -strokewidth 4 -draw 'rectangle 430,330 570,470' \
      -font "$FONT" -fill red -stroke none -pointsize 40 -annotate +430+320 '#7' review-map.png
    ```
-7. **Report:** Output source facts, display facts, findings, object map, references, unknowns, and next step. Read [scene-contract.md](references/scene-contract.md) only when writing an edit contract for complex or multi-reference scenes.
+7. **Stop** and ask for the file when no image is available, the original is missing for a display-only copy, or a finding depends on hidden layers or an exact font that pixels cannot show; report it as unknown instead of guessing.
+8. **Report:** Output source facts, display facts, findings, object map, references, unknowns, and next step. Read [scene-contract.md](references/scene-contract.md) only when writing an edit contract for complex or multi-reference scenes.

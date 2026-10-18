@@ -24,7 +24,7 @@ python3 <skills>/image-verify/scripts/studio_state.py gate --deliverable N --run
 
 Open the 100% crop of each defect first; open the 200% crop only when the 100% view is unclear. Write verdicts one at a time (parallel writes overwrite each other), and only after opening the crop; use `fail` or `uncertain` when it is not clearly fixed.
 
-`gate` passes only when: the file's hash equals the approved one and matches the spec; every defect ever recorded on the deliverable (open and resolved, so fixed defects are re-checked) has crops in this run and no IDs are missing; no defect is open; each resolved defect has a `pass` verdict tied to this run's crop and at least 5% of its box changed since it was reported; each `wontfix` carries the user's words. A ZIP deliverable is checked by hash and size only. Self-verified passes are labelled as such.
+`gate` passes only when: the file's hash equals the approved one and matches the spec; every defect ever recorded on the deliverable (open and resolved, so fixed defects are re-checked) has crops in this run and no IDs are missing; no defect is open; each resolved defect has a `pass` verdict tied to this run's crop and at least 5% of its box changed since it was reported; each `wontfix` carries the user's words. A ZIP deliverable's spec is checked by hash and size only; a defect needs a single-image ZIP and is cropped from that image. Self-verified passes are labelled as such.
 
 ## Preferences
 
@@ -33,7 +33,7 @@ Open the 100% crop of each defect first; open the 200% crop only when the 100% v
 ## Hooks
 
 - **Session start** (and after compaction) prints a short card: open defects, deliverables and gate status, recent decisions, confirmed preferences.
-- **Stop** blocks only a completion claim ("done", "fixed", "xong", "hoàn thành"...) while a deliverable has not passed the gate or a defect is open, once per message. The agent then tells the user plainly what is still wrong. Questions, progress updates, and negated claims ("chưa xong") pass. A session working in a separate git repo below the project folder is not policed.
+- **Stop** blocks only a completion claim ("done", "fixed", "xong", "hoàn thành"...) while a deliverable has not passed the gate or a defect is open, once per message. The agent then tells the user plainly what is still wrong. Questions, progress updates, negated claims ("chưa xong"), and reports with Checked / Not checked / Still failing headings pass. A session working in a separate git repo below the project folder is not policed.
 - Both hooks exit 0 silently when python3, the script, or a store is missing. Codex asks the user to trust each hook once; without hooks, run `brief` and `gate` as the steps say.
 
 Keep the store local; never ship `.image-studio/` inside a deliverable, and do not record personal data in notes.

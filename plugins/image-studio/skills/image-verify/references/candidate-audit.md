@@ -4,7 +4,7 @@ This helper audits a candidate against the scene contract without creating image
 
 The contract links stable object IDs to source-pixel boxes and labels each check as `change` or `keep`. The helper decodes images, measures changed pixels per object, verifies dimensions and format, and rejects changed pixels outside the final acceptance mask. It rejects a claimed pass for `change` when no pixel changed in its box, and holds a passed `keep` check if changed pixels exceed acknowledged limits.
 
-Run with Python 3.9+ and [Pillow](https://pillow.readthedocs.io/en/stable/installation/basic-installation.html):
+Run with Python 3.9+ and [Pillow](https://pillow.readthedocs.io/en/stable/installation/basic-installation.html), using [uv](https://docs.astral.sh/uv/) or pip:
 ```bash
 uv run --with pillow python3 <skills>/image-verify/scripts/audit_candidate.py ...
 # Fallback: python3 -m pip install pillow
@@ -72,10 +72,10 @@ python3 <skills>/image-verify/scripts/audit_candidate.py \
   --mask final-acceptance-mask.png --review review.json --out round-0
 ```
 
-- **Flags**: `--contract`, `--source`, `--candidate`, `--mask` (omit if no pixel lock), `--review`, `--out`, `--previous round-0` (checks same contract/source hashes, decided `repair`, counts repairs), `--repairs-used` (optional cross-check). Exit codes: 0 on normal run, 2 on bad arguments or unreadable files.
+- **Flags**: `--contract`, `--source`, `--candidate`, `--mask` (omit if no pixel lock), `--review`, `--out`, `--previous round-0` (checks same contract/source hashes, decided `repair`, counts repairs), `--repairs-used` (optional cross-check). Exit codes: 0 on normal run, 2 on bad arguments, unreadable files, or an invalid review (nothing written).
 - **Outputs**:
   - `evidence.json`: file hashes, decoded dimensions, `changed_by_target`, pixels changed outside mask, `repairs_used`.
-  - `decision.json`: action from [decisions.md](decisions.md) (`accepted_by_checks`, `repair`, `hold_for_inspection`, `stop_repeated_failure`, `reject_technical`), `ids`, `protected_failed`, and `changed_keep_pixels` when a passed keep target changed. `accepted_by_checks` means the specified checks passed; it is not user approval. A `repair` decision needs another complete review; repair from the last accepted clean source or candidate, never an annotated copy or a chain of rejected outputs.
+  - `decision.json`: action from [decisions.md](decisions.md) (`accepted_by_checks`, `repair`, `hold_for_inspection`, `stop_budget`, `stop_repeated_failure`, `reject_technical`), `ids`, `protected_failed`, and `changed_keep_pixels` when a passed keep target changed. `accepted_by_checks` means the specified checks passed; it is not user approval. A `repair` decision needs another complete review; repair from the last accepted clean source or candidate, never an annotated copy or a chain of rejected outputs.
   - `repair-prompt.txt`: written for `repair`, naming failed and protected targets by source-pixel box.
 - **Pixel rules**: Decoded pixels after EXIF orientation (not raw bytes). 8-bit images compared as RGBA; 16-bit and float grayscale at full precision. Bit-depth change fails. Pillow decodes 16-bit color PNGs as 8-bit, so audit refuses them with `reject_technical` (audit 8-bit or 16-bit grayscale copies). Fully transparent pixels in both images count as unchanged even if hidden RGB values differ. Grayscale with tRNS transparency counts as changed if transparent in only one image. The audit does not certify color-profile appearance or hidden layers, and script output alone cannot establish anatomy, object identity, perspective, text accuracy, or artistic quality: a person or image-capable tool must inspect the images before writing the review.
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.4.2-local.1 (2026-10-18)
+
+Docs only, from a full markdown audit (43 files: 0 broken links or anchors).
+
+- **image-repair:** the logo exception no longer reads as permission to look for logo art on disk: existing pixels come only from a file the user supplied. 200% crops only when 100% is unclear; "three repairs after the first candidate" matches the controller.
+- **All skills:** the memory step uses the full `python3 <skills>/image-verify/scripts/studio_state.py brief` command; exit codes and decision lists match `review.py` and `audit_candidate.py` (`stop_invalid_review`, `stop_provider`, `stop_budget`); image-inspect and image-edit-map have stop conditions; image-loop, image-inspiration, and image-reconstruction say Claude Code has no built-in image generator; official tool links added (ImageMagick, Upscayl, Real-ESRGAN-ncnn-vulkan, uv).
+- **project-memory.md:** ZIP defects need a single-image ZIP; the Stop hook also passes Checked / Not checked / Still failing reports.
+
 ## 2.4.1-local.1 (2026-10-18)
 
 - **image-enhance, image-loop, image-edit-map:** each SKILL.md is a checklist of about 4 KB; image-edit-map's controls, commands, preservation rules, and tool notes moved to `references/workflow.md`. image-loop's invocation syntax and prompt pattern moved to `references/prompts-and-invoke.md`; the transparent-image metrics of `compare_display.py` are explained in image-enhance's `recipes.md`. The descriptions of the six advanced skills are shorter, so less text is always loaded. `candidate-audit.md` is 6 KB instead of 9 KB.
