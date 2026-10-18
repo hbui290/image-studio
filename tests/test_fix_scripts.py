@@ -1,5 +1,4 @@
 """Regression tests for reconstruct.py, combine.py, advance.py and validate_spec.py fixes."""
-import copy
 import importlib.util
 import json
 import subprocess

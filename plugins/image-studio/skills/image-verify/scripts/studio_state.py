@@ -39,6 +39,7 @@ NOTE_LIMIT = 120
 MIN_BOX = 16           # smallest defect box side (px) without a user quote
 MIN_BOX_SHARE = 0.001  # smallest defect box area (share of the image) without a user quote
 CHANGE_LEVEL = 8       # per-channel difference that counts as a changed pixel
+CARD_LIMIT = 2400
 MIN_CHANGED = 0.05     # share of changed pixels a resolved defect's box needs
 MAX_MEMBER_BYTES = 256 << 20
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -59,7 +60,8 @@ REPORT_HEADINGS = tuple(
 )
 
 NEGATION_PAT = re.compile(
-    r"(?:\b(?:not|never|no|nothing|isnt|isn't|arent|aren't|havent|haven't|hasnt|hasn't|wasnt|wasn't|cannot)\b|n't\b|\b(?:chưa|không)\b)(?:\s+\w+){0,3}",
+    r"(?:\b(?:not|never|no|nothing|isnt|isn't|arent|aren't|havent|haven't|hasnt|hasn't|wasnt|wasn't|cannot)\b|n't\b|\b(?:chưa|không)\b)(?:\s+\w+){0,3}"
+    r"|\bxong\s+(?:đợt|bước|phần|lượt|vòng)\s+này\b|\bdone\s+with\s+this\s+(?:step|round|part)\b",
     re.I,
 )
 
@@ -657,8 +659,15 @@ def format_session_start_card(store):
         if resolved_items: lines.append(f"{len(resolved_items)} resolved - regression-checked by the gate")
         lines.append("Commands: run studio_state.py --help; do not read its source.")
         card = "\n".join(lines)
-        if len(card) <= 2400: return card
-    return card
+        if len(card) <= CARD_LIMIT: return card
+    # Too many open defects for notes: list every open ID (never dropped) and cut the rest.
+    head = [lines[0], f"Open defects ({len(open_items)}; run brief for details): " + ", ".join(str(d.get("id")) for d in open_items)]
+    tail = ["Commands: run studio_state.py --help; do not read its source."]
+    body = []
+    for line in lines[2 + len(open_items):-1]:
+        if len("\n".join(head + body + [line] + tail)) > CARD_LIMIT: break
+        body.append(line)
+    return "\n".join(head + body + tail)
 
 
 # ---------------------------------------------------------------- gate
@@ -989,13 +998,13 @@ def prune_session_pointers(sessions_dir, max_age_seconds=7 * 86400):
     except (OSError, ValueError, TypeError): pass
 
 
-def write_session_pointer(session_id, root):
+def write_session_pointer(session_id, root, base):
     if not valid_session_id(session_id): return
     sessions_dir = user_home() / "sessions"
     try:
         sessions_dir.mkdir(parents=True, exist_ok=True)
         prune_session_pointers(sessions_dir)
-        atomic_write(sessions_dir / f"{session_id}.json", dump_json({"store": str(root.resolve()), "time": now()}))
+        atomic_write(sessions_dir / f"{session_id}.json", dump_json({"store": str(root.resolve()), "cwd": str(base), "time": now()}))
     except (OSError, ValueError, TypeError): pass
 
 
@@ -1012,14 +1021,15 @@ def inside_nested_repo(start, root):
 
 
 def discover_hook_store(payload):
+    """Return (store root, the folder it was found from), or (None, None)."""
     cwd = payload.get("cwd") if isinstance(payload, dict) and isinstance(payload.get("cwd"), str) else os.getcwd()
     root = find_store(cwd)
-    if root is not None: return None if inside_nested_repo(cwd, root) else root
+    if root is not None: return (None, None) if inside_nested_repo(cwd, root) else (root, cwd)
     proj_dir = os.environ.get("CLAUDE_PROJECT_DIR")
     if proj_dir:
         try:
             cand = find_store(proj_dir)
-            if cand is not None: return None if inside_nested_repo(proj_dir, cand) else cand
+            if cand is not None: return (None, None) if inside_nested_repo(proj_dir, cand) else (cand, proj_dir)
         except (OSError, RuntimeError): pass
     session_id = payload.get("session_id") if isinstance(payload, dict) else None
     if valid_session_id(session_id):
@@ -1028,17 +1038,20 @@ def discover_hook_store(payload):
             if ptr_file.is_file():
                 data = json.loads(ptr_file.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
-                    store_val = data.get("store")
-                    if isinstance(store_val, str) and store_val:
+                    store_val, base = data.get("store"), data.get("cwd")
+                    # Pointers written before 2.4.1 have no "cwd" and may come from a plugin-development
+                    # session; ignore them (the next session start writes a new one).
+                    if isinstance(store_val, str) and store_val and isinstance(base, str) and base:
                         cand = Path(store_val)
-                        if cand.name == STORE_DIR and (cand / "state.json").is_file(): return cand
+                        if (cand.name == STORE_DIR and (cand / "state.json").is_file()
+                                and not inside_nested_repo(base, cand)): return cand, base
         except (OSError, ValueError, TypeError): pass
-    return None
+    return None, None
 
 
 def hook_stop(payload):
     if not isinstance(payload, dict) or payload.get("stop_hook_active") is True: return ""
-    root = discover_hook_store(payload)
+    root, _ = discover_hook_store(payload)
     if root is None: return ""
     message = payload.get("last_assistant_message")
     if not isinstance(message, str):
@@ -1068,10 +1081,10 @@ def hook_stop(payload):
 
 
 def hook_session_start(payload):
-    root = discover_hook_store(payload) if isinstance(payload, dict) else None
+    root, base = discover_hook_store(payload) if isinstance(payload, dict) else (None, None)
     if root is None: return ""
     session_id = payload.get("session_id") if isinstance(payload, dict) else None
-    write_session_pointer(session_id, root)
+    write_session_pointer(session_id, root, base)
     try: return format_session_start_card(Store(root))
     except UsageError as exc: return f"image-studio: project store is corrupt: {exc}"
 

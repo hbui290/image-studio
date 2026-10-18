@@ -1,6 +1,6 @@
 ---
 name: image-inspiration
-description: Turn multiple inspiration images, links, and notes into named visual ingredients, diverse combinations, and generated images. Use for moodboards, reference mixing, or creative exploration with one batch or a bounded human- or vision-judged iteration loop. Not for one new image from a brief (image-create), rebuilding or remixing a single reference from a full part inventory (image-reconstruction), planning an edit of an existing image (image-edit-map), or a read-only breakdown (image-reverse-engineer).
+description: "Moodboard, reference mixing, inspiration board, visual ingredients, style blend: turn multiple reference images, links, and notes into named ingredients, trait combinations, and generated variants with a judged iteration loop. Not for single-image creation from brief alone (image-create)."
 ---
 
 # Image inspiration

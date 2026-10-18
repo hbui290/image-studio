@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.4.1-local.1 (2026-10-18)
+
+- **image-enhance, image-loop, image-edit-map:** each SKILL.md is a checklist of about 4 KB; image-edit-map's controls, commands, preservation rules, and tool notes moved to `references/workflow.md`. image-loop's invocation syntax and prompt pattern moved to `references/prompts-and-invoke.md`; the transparent-image metrics of `compare_display.py` are explained in image-enhance's `recipes.md`. The descriptions of the six advanced skills are shorter, so less text is always loaded. `candidate-audit.md` is 6 KB instead of 9 KB.
+- **Tools:** the docs give the real Codex image tool arguments (`image_gen.imagegen` with `prompt`, `referenced_image_paths`, `transparent_background`; no size argument, so resize with `magick`), `view_image` with `detail: "original"` for 100% pixels, and say that Claude Code has no built-in image generator (use a configured image tool or hand back the prompt).
+- **hooks:** the session-start card has a hard 2,400-character cap that still lists every open defect ID; session pointers record the folder the session started from, and pointers from before this version or from a plugin-development repo below the project are ignored; "xong đợt này ..." / "done with this step" no longer count as completion claims.
+- **Cleanup:** unused imports and an unused variable removed.
+
 ## 2.4.0-local.1 (2026-10-18)
 
 Lighter and faster, closer to the owner's image-processing plugin. Measured on a real 414-minute Codex poster job: each repair pass loaded 18-26k tokens of docs and re-read them after every compaction, the gate ran about 20 times, and the Stop hook made the agent list defect IDs in every message.

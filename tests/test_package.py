@@ -94,7 +94,7 @@ class DocsTest(unittest.TestCase):
                 yield doc, doc.relative_to(SKILLS).parts[0], doc.read_text(encoding="utf-8")
 
     def test_skill_commands_use_paths_that_exist_in_every_install(self):
-        for doc, skill, text in self.skill_docs():
+        for doc, _skill, text in self.skill_docs():
             self.assertNotIn("plugins/image-studio", text, doc)
             self.assertNotIn("<skill-dir>", text, doc)
             for ref in SCRIPT_REF.findall(text):

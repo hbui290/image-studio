@@ -14,14 +14,12 @@ import subprocess
 import sys
 import tempfile
 import time
-import unicodedata
 import unittest
-import warnings
 import zipfile
 from pathlib import Path
 
 try:
-    from PIL import Image, ImageDraw, ImageFilter
+    from PIL import Image, ImageDraw
 except ImportError:  # pragma: no cover
     raise unittest.SkipTest("Pillow is not installed")
 
@@ -1061,7 +1059,7 @@ class Round4Tests(StudioBase):
         old_env = os.environ.get("IMAGE_STUDIO_HOME")
         try:
             os.environ["IMAGE_STUDIO_HOME"] = str(self.home)
-            self.assertIsNone(module.discover_hook_store(pl))
+            self.assertEqual(module.discover_hook_store(pl), (None, None))
         finally:
             if old_env is None:
                 os.environ.pop("IMAGE_STUDIO_HOME", None)
@@ -1303,6 +1301,66 @@ class LiteScopeTests(StudioBase):
         out = json.loads(self.stop("Xong rồi.", self.project))
         self.assertIn("dragon card still visible (%s)" % did, out["reason"])
         self.assertNotIn("Checked / Not checked / Still failing", out["reason"])
+
+
+class PointerAndCardTests(StudioBase):
+    def stop(self, message, cwd, session):
+        run = self.run_cli("hook", "stop", stdin=json.dumps({"session_id": session, "cwd": str(cwd),
+                                                             "last_assistant_message": message}))
+        self.assertEqual((run.returncode, run.stderr), (0, ""))
+        return run.stdout
+
+    def write_pointer(self, session, data):
+        sessions = self.home / "sessions"
+        sessions.mkdir(parents=True, exist_ok=True)
+        (sessions / f"{session}.json").write_text(json.dumps(data))
+
+    def test_legacy_pointer_without_cwd_is_ignored(self):
+        self.init()
+        self.approve_poster(self.poster())
+        self.write_pointer("legacy", {"store": str(self.store), "time": "2026-10-17T18:30:21Z"})
+        self.assertEqual(self.stop("Done.", "/tmp", "legacy"), "")
+
+    def test_pointer_from_a_nested_dev_repo_is_ignored(self):
+        self.init()
+        self.approve_poster(self.poster())
+        repo = self.project / "work" / "plugin-repo"
+        (repo / ".git").mkdir(parents=True)
+        self.write_pointer("dev", {"store": str(self.store), "cwd": str(repo)})
+        self.assertEqual(self.stop("Done.", "/tmp", "dev"), "")
+
+    def test_pointer_written_at_session_start_still_catches_cd_out(self):
+        self.init()
+        self.approve_poster(self.poster())
+        self.run_cli("hook", "session-start", stdin=json.dumps({"session_id": "job", "cwd": str(self.project)}))
+        data = json.loads((self.home / "sessions" / "job.json").read_text())
+        self.assertEqual(Path(data["cwd"]).resolve(), self.project)
+        self.assertIn("block", self.stop("Done.", "/tmp", "job"))
+
+    def test_after_this_round_is_not_a_claim(self):
+        self.init()
+        self.approve_poster(self.poster())
+        for i, text in enumerate(("Xong đợt này tôi gộp mục 1, 2, 4 vào một lần.",
+                                  "Done with this step, starting the logo now")):
+            self.assertEqual(self.stop(text, self.project, f"r{i}"), "", text)
+        for i, text in enumerate(("Xong rồi.", "Done with the poster.", "Done with the logo and the poster is final.", "Xong việc.")):
+            self.assertIn("block", self.stop(text, self.project, f"b{i}"), text)
+
+    def test_card_has_a_hard_cap_and_keeps_every_open_id(self):
+        self.init()
+        self.approve_poster(self.poster())
+        lines = [json.dumps({"id": f"D{i}", "deliverable": "poster", "bbox": [1, 1, 40, 40], "kind": "seam",
+                             "status": "open", "note": "long note " * 10, "source": "user"}) for i in range(1, 301)]
+        (self.store / "defects.jsonl").write_text("\n".join(lines) + "\n")
+        out = self.run_cli("hook", "session-start", stdin=json.dumps({"cwd": str(self.project)})).stdout
+        for i in (1, 150, 300):
+            self.assertIn(f"D{i}", out)
+        self.assertLessEqual(len(out.rstrip("\n")), 2400 + 300 * 6)  # IDs are never dropped
+        few = 40
+        (self.store / "defects.jsonl").write_text("\n".join(lines[:few]) + "\n")
+        out = self.run_cli("hook", "session-start", stdin=json.dumps({"cwd": str(self.project)})).stdout
+        self.assertLessEqual(len(out.rstrip("\n")), 2400)
+        self.assertIn(f"D{few}", out)
 
 
 if __name__ == "__main__":

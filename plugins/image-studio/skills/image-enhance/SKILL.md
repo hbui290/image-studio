@@ -1,76 +1,45 @@
 ---
 name: image-enhance
-description: Make a whole image look sharper, cleaner, or larger - blurry, soft, pixelated, low resolution, "upscale", "make it 4K", "enhance", "smoother" - with an AI upscaler plus ImageMagick, then prove the result is visibly better at display size. Also jagged, speckled, or haloed edges on a transparent PNG, a raster logo rebuilt as vector SVG, background removal, and web export. Not for fixing one wrong object (image-repair).
+description: "Upscale, sharpen, blurry, soft, pixelated, low resolution, 4K, enhance, clean edges, SVG logo, remove background: improve whole image, prove visible gain with compare_display.py. Not for local fixes (image-repair)."
 ---
 
 # Whole-image enhancement
 
-The upscaler and `magick` do the work; this skill picks the recipe and proves the gain. A bigger file is not a better image: accept only what `compare_display.py` and a look at `before-after.png` confirm.
+Improve a whole image and prove visible gain at display size without altering source pixels.
 
-A worked case that combines a repaint, an upscale, and masked repairs is the [tavern hero example](https://github.com/hbui290/image-studio/blob/main/examples/image-repair/tavern-hero-case.md) in the repository; a skills install does not include it.
+Routing: For single-region fixes use [image-repair](../image-repair/SKILL.md); to diagnose blur use [image-inspect](../image-inspect/SKILL.md); for iterative generation use [image-loop](../image-loop/SKILL.md).
 
-## When to use a sibling skill
+Worked case (repo checkout only): [tavern hero example](https://github.com/hbui290/image-studio/blob/main/examples/image-repair/tavern-hero-case.md).
 
-- One wrong object, a bad face, or a local defect: [image-repair](../image-repair/SKILL.md). Upscalers sharpen what is there; they do not invent correct detail.
-- The image looks soft only on a web page, or you do not yet know why it looks bad: [image-inspect](../image-inspect/SKILL.md) first.
-- A new image or a generate-and-review cycle: [image-loop](../image-loop/SKILL.md).
+Run scripts; do not read their source - use `--help` for usage.
 
-## Tools
+## Operational checklist
 
-- Required: [ImageMagick](https://imagemagick.org) (`magick`), and one upscaler: [Upscayl](https://github.com/upscayl/upscayl) (`upscayl-bin`) or [Real-ESRGAN-ncnn-vulkan](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan/releases) (`realesrgan-ncnn-vulkan`), with its model files.
-- Optional: [rembg](https://github.com/danielgatis/rembg) for [background removal](references/recipes.md#background-removal); [Potrace](https://potrace.sourceforge.net) for [logo to vector](references/recipes.md#logo-to-vector).
-- Python 3.9+ with Pillow for `compare_display.py`: `uv run --with pillow python3 ...` ([uv](https://docs.astral.sh/uv/)) works without installing; otherwise `python3 -m pip install pillow`. `<skills>` is the folder that holds the skill folders.
-
-## Steps
-
-0. **Load project memory.** If not already in context, run `studio_state.py brief`; see [using the store in a skill](../image-verify/references/project-memory.md#using-the-store-in-a-skill) to load memory or create a store.
-1. **Diagnose first** with [image-inspect](../image-inspect/SKILL.md) when the image sits on a page: CSS scaling, dark overlays, and heavy compression can make a good file look soft. If the served file is soft but the master is sharp, re-export from the user's original file instead.
-2. **Find the tools** (never assume, never skip one that is present):
+0. **Memory:** If not in context, run `studio_state.py brief` (see [using the store in a skill](../image-verify/references/project-memory.md#using-the-store-in-a-skill)).
+1. **Diagnose:** Check web images with [image-inspect](../image-inspect/SKILL.md) for CSS scaling or compression first.
+2. **Find tools:** Detect `magick` and upscaler (`upscayl-bin`, `realesrgan-ncnn-vulkan`):
    ```bash
    command -v magick upscayl-bin realesrgan-ncnn-vulkan
-   ls /Applications/Upscayl.app/Contents/Resources/bin/ 2>/dev/null   # macOS app; elsewhere look in the Upscayl install folder
+   ls /Applications/Upscayl.app/Contents/Resources/bin/ 2>/dev/null
    ```
-   Paths under `/Applications` here and in [recipes.md](references/recipes.md) are macOS examples; on Windows and Linux, look in the folder where Upscayl or Real-ESRGAN-ncnn-vulkan was installed. If no upscaler exists, say so and offer [setup](references/recipes.md#getting-an-upscaler); do not pass off a sharpen filter as enhancement.
-3. **Pick the recipe by image type** from [recipes.md](references/recipes.md). Default for anime/2D art under about 2000 px wide: `remacri-4x` at 4x, or `realesr-animevideov3-x2` at 2x when speed matters. Never AI-upscale an image that is mostly small text or UI (keep a line of text in a larger image with the text-lock recipe); rebuild a flat logo as SVG with the [logo to vector](references/recipes.md#logo-to-vector) recipe instead; never repeat a pass on an already enhanced image.
-4. **Trial on a crop** of the softest area (faces, small props) with two or three models, then run the winner on the whole image and resize to the delivery size:
+   Stop if no upscaler installed; do not use sharpen filter. Read [recipes.md](references/recipes.md#getting-an-upscaler) only when installing upscaler.
+3. **Pick recipe:** Read [recipes.md](references/recipes.md#pick-by-image-type) only when choosing a model recipe (`remacri-4x` at 4x or `realesr-animevideov3-x2` at 2x). Never AI-upscale small text or UI; read [recipes.md](references/recipes.md#keep-small-text-from-the-source) only when locking text. Rebuild flat logos as SVG; read [recipes.md](references/recipes.md#logo-to-vector) only when vectorizing.
+4. **Trial & upscale:** Test on a crop of the softest area, then run winner on whole image:
    ```bash
-   BIN=upscayl-bin              # the binary found in step 2 (full path for the macOS app), or realesrgan-ncnn-vulkan
-   MODELS=/path/to/models       # one folder holding every model's .param and .bin; see "Model folders" in recipes.md
-   model=remacri-4x             # or realesr-animevideov3-x2 with -s 2
+   BIN=upscayl-bin; MODELS=/path/to/models; model=remacri-4x
    test -f "$MODELS/$model.param" || echo "missing $model in $MODELS"
    "$BIN" -i src.png -o up.png -s 4 -m "$MODELS" -n "$model"
-   magick up.png -format '%[fx:maxima]' info:     # must print a number above 0; 0 means an all-black image
+   magick up.png -format '%[fx:maxima]' info:
    magick up.png -filter Lanczos -resize 3840x2160 -depth 8 enhanced.png
    ```
-   If the image carries small text, [keep the text from the source](references/recipes.md#keep-small-text-from-the-source). A missing model does not stop the upscaler: it prints `fopen ... failed`, writes an all-black image, and still exits 0. The Upscayl app's own models folder holds only the seven Upscayl models; the `realesr-*` and `realesrgan-*` models must be copied in from the Real-ESRGAN-ncnn-vulkan release ([model folders](references/recipes.md#model-folders)). The fast `realesr-animevideov3-x2` recipe adds `-unsharp 0x0.55+0.5+0.015` after the resize. `-depth 8` keeps a 16-bit PNG from being produced.
-5. **Prove it** at the real display size, with 100% crops of the areas the user cares about:
+   Stop if model missing or `%[fx:maxima]` is 0; retry with `-t 32`. Fast anime: `-unsharp 0x0.55+0.5+0.015`. `-depth 8` avoids 16-bit PNG. Read [recipes.md](references/recipes.md#model-folders) only when configuring model folders.
+5. **Prove improvement:** Compare at display width with 100% crops:
    ```bash
    python3 <skills>/image-enhance/scripts/compare_display.py --source src.png --candidate enhanced.png \
      --out compare-1 --width 1920 --crop 1200,300,400,300
    ```
-   `--width` is the display width in pixels (CSS width × device pixel ratio), 1 to 16384. Transparent images are compared on a dark backdrop, with a light-backdrop copy for viewing, and their cutout edges are checked too (see Outputs). A cutout made from an opaque image is a new shape, not an enhancement: inspect it with the [background removal](references/recipes.md#background-removal) backdrops instead.
-   `visible_improvement: false` means stop and report what failed (invisible, not sharper, color shifted, or content moved). Show `before-after.png` and the crops to the user either way. Record rejected models in one line each.
-6. **Transparent PNG with jagged or outlined edges**: the halo is in the edge pixels, so upscaling only enlarges it. Follow the [cutout edges](references/recipes.md#cutout-edges) order: check that the transparency is real, upscale, shrink the edge, make the body solid, redraw a simple outline as a vector path, and regenerate the edge through image-repair only when that is not enough. Prove the upscale, shrink, and solid steps with step 5; a redrawn or regenerated edge is new pixels, so verify it with image-verify as the recipe says.
-7. **If still soft where it matters** (faces, props with no real detail), the pixels do not exist: hand those regions to [image-repair](../image-repair/SKILL.md) with references.
-8. **Export** with the [export](references/recipes.md#web-export) and [cutout](references/recipes.md#background-removal) recipes. A brightness or color grade is a separate, requested change, not part of sharpening.
-9. **Gate before claiming done.** In a project with a store, run `gate --deliverable` once before telling the user the deliverable is done; follow [using the store in a skill](../image-verify/references/project-memory.md#using-the-store-in-a-skill).
-
-## Outputs
-
-`compare_display.py` creates the `--out` folder and writes:
-
-- `metrics.json`: `visible_improvement`, `failures`, `metrics`, and `limits`. The same JSON is printed to stdout. For transparent images, `metrics` adds `edge_width` (the width the edges are judged at: `--width`, or the source width when the display is wider, since the source has no real edge pixels beyond its own size), `edge_noise_source` and `edge_noise_candidate` (noise along the cutout edge over the noise inside the object, the worse of the dark and light backdrops; a sharper upscale raises both, a halo raises only the edge), `edge_ratio` (candidate over source; at most 0.8 with `sharpness_gain` at least 0.9 counts as a visible improvement; the candidate fails when its edge noise is above 1.35 times the source's plus 0.1, the 0.1 ignoring tiny values), `alpha_iou` (overlap of the two cutout shapes, each taken where alpha is at least half the image's highest alpha; below 0.97 fails), and `body_alpha_source` and `body_alpha` (mean alpha inside the object; a candidate below 254 that is also more see-through than the source fails, so a model trial on an already see-through crop is not failed for it). A see-through source made solid counts as a visible improvement; then `color_shift` and `fidelity_psnr` are measured with the source's opacity and the edges against the source with its body made solid, because a solid body is meant to look brighter or darker on the backdrop.
-- `before-after.png`: source left, candidate right, both resized to `--width`. Transparent images are shown on a dark backdrop.
-- `before-after-light.png`: the same on a light backdrop, written only when either image has transparent pixels.
-- `crop-N.png`: one 100% crop pair per `--crop`, numbered from 1.
-
-Exit codes: 0 whenever the comparison ran, including when `visible_improvement` is false, so read the verdict, not the exit code. 2 for bad input: a missing or unreadable file, a floating-point (32-bit float) image, an existing `--out` folder, a `--width` outside 1 to 16384 or one that would make a display image over Pillow's pixel limit, different aspect ratios (beyond rounding one side by 1 pixel), or a crop outside the source.
-
-## Stop conditions
-
-- No upscaler is installed: say so and offer setup; do not substitute a sharpen filter.
-- A model file is missing from `$MODELS`, or the output is all black (`%[fx:maxima]` prints 0): do not use that output. Fix the models folder, or retry with `-t 32` or another model.
-- `visible_improvement` is false for every model tried: stop and report the failures with `before-after.png`.
-- The image is small text, UI, or a logo: do not use an AI upscaler; rebuild a flat logo as SVG instead.
-- Remaining softness is missing detail, not blur: hand those regions to image-repair.
-- Every edge shrink either leaves the edges noisy or drops `alpha_iou` below 0.97: stop shrinking and show both before-after images; regenerate the edge through image-repair as the cutout edges recipe describes.
+   Run: `uv run --with pillow python3 <skills>/image-enhance/scripts/compare_display.py ...` (fallback: `python3 -m pip install pillow`). Stop if `visible_improvement` is false; show `before-after.png`. Outputs: `--out/metrics.json` (`visible_improvement`, `failures`, `metrics`, `limits`), `before-after.png`, `before-after-light.png`, `crop-N.png`. Exit codes: 0 (ran), 2 on bad input (`--width` 1..16384, float/aspect/crop error). Read [recipes.md](references/recipes.md#proving-the-gain) only when evaluating metrics, including the transparent-image edge and alpha metrics. Read [recipes.md](references/recipes.md#background-removal) only when checking backdrops.
+6. **Cutout edges:** For transparent PNG with halos, read [recipes.md](references/recipes.md#cutout-edges) only when fixing cutout edges. Stop if shrinking leaves noise or drops `alpha_iou` below 0.97; regenerate edge via [image-repair](../image-repair/SKILL.md).
+7. **Handoff:** If soft from missing detail, hand regions to [image-repair](../image-repair/SKILL.md).
+8. **Export:** Read [recipes.md](references/recipes.md#web-export) only when exporting for web.
+9. **Gate before claiming done:** In a project with a store, run `gate --deliverable` once before claiming done; follow [using the store in a skill](../image-verify/references/project-memory.md#using-the-store-in-a-skill).

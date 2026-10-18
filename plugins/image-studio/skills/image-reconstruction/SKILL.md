@@ -1,6 +1,6 @@
 ---
 name: image-reconstruction
-description: Split a reference into named parts and reconstruction JSON, then compile prompts that recreate it, remix it, or change selected parts while keeping the rest. Use when the user wants a new image built from a reference's decisions. Not for a read-only breakdown (image-reverse-engineer), planning an in-place edit with a numbered map (image-edit-map), combining several references into variants (image-inspiration), a new image from a brief alone (image-create), or fixing a defect in an existing image (image-repair).
+description: "Reconstruct reference, remix image, part inventory, recreate decisions, compile prompt: decompose a reference into named parts and reconstruction JSON, then compile prompts to recreate, remix, or modify selected parts. Not for read-only spec extraction without generation (image-reverse-engineer)."
 ---
 
 # Image reconstruction

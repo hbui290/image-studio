@@ -1,74 +1,29 @@
 ---
 name: image-loop
-description: Generate a new image, or regenerate a whole image, with a bounded create-review-repair loop, an independent vision reviewer, explicit preservation checks, and saved evidence. Use for image work that needs iterative checking, or invoke image-loop with a brief or reference image. Not for sharpening or upscaling (image-enhance) or fixing one region of an accepted image (image-repair).
+description: "Iterative generation, review loop, multi-round repair, image loop, brief to image: run a bounded create-review-repair loop with independent vision review, explicit preservation checks, and saved evidence. Not for upscaling (image-enhance) or single-region fixes (image-repair)."
 ---
 
 # Image loop
 
-Convert an image brief into checkable requirements, generate a candidate, review it independently, and repair only failed requirements. Keep useful outputs and an honest record of what passed, failed, or could not be verified.
+Run a bounded create-review-repair loop with independent review and saved evidence.
 
-## Invoke
+Routing: For single-pass generation use [image-create](../image-create/SKILL.md); for reference mixing use [image-inspiration](../image-inspiration/SKILL.md); for local fixes use [image-repair](../image-repair/SKILL.md); for whole-image enhancement use [image-enhance](../image-enhance/SKILL.md); for read-only breakdown use [image-reverse-engineer](../image-reverse-engineer/SKILL.md); to inspect defects use [image-inspect](../image-inspect/SKILL.md).
 
-- Claude Code: `/image-loop [brief]` (a plugin install shows it with the plugin's prefix), or describe the task and let the skill load.
-- Codex: `$image-loop [brief]` or select through `/skills` where supported. Do not claim a custom `/image-loop` command is registered on every host.
+Run scripts; do not read their source - use `--help` for usage.
 
-## When to use this skill or a sibling
+## Operational checklist
 
-- This skill: generate a new image or regenerate a whole image, then review it independently and repair failed checks up to the repair limit.
-- One generation pass with a declared role for each reference, and no repair rounds: use [image-create](../image-create/SKILL.md).
-- Many inspirations mixed into directions, or a combination search: use [image-inspiration](../image-inspiration/SKILL.md). It supports one batch or a bounded human- or vision-judged loop and reuses this skill's hard checks.
-- Fixing one region of an accepted image while every other pixel must stay: use [image-repair](../image-repair/SKILL.md) with the [image-verify](../image-verify/SKILL.md) audit.
-- Sharpening, upscaling, cleanup, cutouts, and web export: use [image-enhance](../image-enhance/SKILL.md).
-- Analysis only: a JSON breakdown of an image belongs to [image-reverse-engineer](../image-reverse-engineer/SKILL.md); defect diagnosis belongs to [image-inspect](../image-inspect/SKILL.md).
-
-## Establish the brief
-
-Run step 0 of the loop below first: approved deliverables and open defects in the project store belong in the brief.
-
-For an image edit whose targets are unclear, use the [image-edit-map](../image-edit-map/SKILL.md) workflow to ask unanswered questions, map sections, and name numbered elements; when the user already named the target, skip the map. Respect explicit instructions to skip mapping or edit directly. For new generation, ask only for information essential to the result; do not require a reference image.
-
-Separate subject/content, composition, typography, local color, layer order, grading, medium, lighting, and output requirements. Every reference has a declared role. Record exact text and line breaks. Distinguish protected content from changeable properties. A review must not invent aesthetic requirements absent from the brief.
-
-Write `brief.json` following [the brief contract](references/brief.schema.json). Give every requirement a stable ID and an observable pass condition. Classify it as `requested` or `protected`. File requirements such as dimensions and alpha belong under `file_checks`; visual requirements go under `criteria`. Use visual similarity unless the user explicitly requires exact pixels and the execution path can verify them.
-
-## Execute the loop
-
-0. **Load project memory.** If not already in context, run `studio_state.py brief`; see [using the store in a skill](../image-verify/references/project-memory.md#using-the-store-in-a-skill) to load memory or create a store.
-1. **Capability check.** Identify an available image generation/editing tool and an independent image-input reviewer. Use host tools under their actual instructions. Never silently substitute an image provider or bypass a tool restriction. A cheaper text model without image input is not a vision reviewer.
-2. **Generate.** Save the exact prompt, selected references, tool/model identifiers if exposed, and actual clean output. Do not invent an underlying model name for a tool that hides it. Keep source images untouched. Use a source or last accepted clean candidate, never an annotated map, as the editing input.
-3. **Review.** Give an independent reviewer the original clean source when editing, the candidate, and the acceptance criteria. Do not tell it that the image is good, what another reviewer concluded, or what result is expected. Use a configured smaller vision model when it is adequate. A same-agent self-check must be labeled as such if independence is unavailable.
-4. **Validate.** Run file checks and enforce complete criterion coverage. Unknown, omitted, malformed, or contradictory results cannot count as passes. Exact font identification, pixel identity, and hidden layer recovery cannot be proven by a vision model alone.
-5. **Decide.** If all visual and file checks pass, mark `accepted_by_checks` and deliver for the person's judgment. If any check is uncertain, stop for stronger inspection or a user decision. If there is a concrete failure, emit a narrowly targeted repair prompt and execute it. Re-review the repaired image against the complete original brief, including all protected properties.
-6. **Bound retries.** Default to at most three repairs after the initial candidate; the user can lower the limit. If two consecutive reviews fail for the same checks, follow the [`stop_repeated_failure`](../image-verify/references/decisions.md) rule. Also stop on a provider failure or when the agreed budget is exhausted. Never silently retry a failed external call. Preserve the best candidate that passes protected criteria; if none does, retain the source as the safe fallback. Do not overwrite accepted work with an unverified repair.
-7. **Gate before claiming done.** In a project with a store, run `gate --deliverable` once before telling the user the deliverable is done; follow [using the store in a skill](../image-verify/references/project-memory.md#using-the-store-in-a-skill).
-8. **Deliver.** Show the clean image, changes, check results, remaining uncertainty, and a before/after comparison when useful. Acceptance by a model is not human approval or a measured success rate. Save the candidate, report, file checks, decision, and repair prompt for each round.
-
-For work that spans multiple repair rounds or turns, keep a task-level [repair history](../image-repair/references/repair-rules.md) beside the round folders. Read it before each new attempt and append the observed result, rejected method, and next method; round folders alone do not preserve context across separate chats.
-
-Continue through generation and repair during the active task; do not stop at writing a proposed repair when execution is authorized and available. This is an agent-orchestrated loop: the scripts review and decide; the host agent invokes its image tool between rounds.
-
-## Included reviewer adapter
-
-Read [reviewer setup](references/reviewer.md) before running it; it also lists every `review.py` flag. `scripts/review.py` uses an authenticated [Codex CLI](https://github.com/openai/codex) with an explicitly selected vision model and attached local images. It saves structured review results, file checks, and a decision. No OpenAI API key is required for an existing ChatGPT-authenticated CLI. Calls consume the user's account usage.
-
-```bash
-python3 <skills>/image-loop/scripts/review.py \
-  --brief brief.json --candidate candidate.png --source source.png \
-  --out review-round-0 --model <vision-model>
-```
-
-For generation-only briefs, omit `--source`. For repairs, pass `--previous <previous round folder>`; the script counts repairs from the round history and refuses to continue a round that did not decide `repair`. Read `decision.json`; if it says `repair`, execute `repair-prompt.txt` with the appropriate clean image and repeat the review. Stop conditions also apply to manual/alternate reviewer paths. Action names are shared with the audit; see [decisions](../image-verify/references/decisions.md).
-
-Without Codex, ask the `image-reviewer` agent (Claude Code plugin only), a fresh session given [the independent review instructions](../image-verify/references/independent-review.md), or a person to write a report in the same [review contract](references/review.schema.json), then run `python3 <skills>/image-loop/scripts/review.py ... --report report.json` instead of `--model`; file checks, coverage, stop rules, and the repair prompt work the same way. For an edit that must keep pixels outside a region exactly, also run the [candidate audit](../image-verify/references/candidate-audit.md) on the same report.
-
-If no adapter fits, use an authorized independent vision tool or reviewer with the same [review contract](references/review.schema.json). Record the actual reviewer and explain the fallback. Do not claim a cheaper-model test occurred unless that model received the images and returned a valid review. Do not claim cost savings without comparable usage/pricing evidence.
-
-## Prompt pattern
-
-Use result → subject/action → composition → medium/style → visible details → constraints for generation. For edits, use source → target/property → requested delta → protected details → success checks. Specify roles for multiple references. Keep prompts as short as the job permits; syntax and length are not quality guarantees.
-
-The public prompt library and example results are in the repository's `prompts/` and `examples/` folders (not included in a plain skills install). General prompting principles were informed by the [OpenAI image prompting guide](https://developers.openai.com/api/docs/guides/image-prompting); the numbered controls, review contract, and bounded controller are this package's implementation.
-
-## Running the scripts
-
-In commands, `<skills>` means the folder that holds the Image Studio skill folders, which is this skill's parent folder (the host shows the skill's path when it loads); run commands from your working folder. They need Python 3 with Pillow and jsonschema: `python3 -m pip install pillow jsonschema`, or prefix the command with `uv run --with pillow --with jsonschema` ([uv](https://docs.astral.sh/uv/)).
+0. **Memory:** If not in context, run `studio_state.py brief` (see [using the store in a skill](../image-verify/references/project-memory.md#using-the-store-in-a-skill)).
+1. **Brief:** Write `brief.json` with stable IDs, observable criteria (`requested` vs `protected`), and `file_checks` (dimensions, format, alpha). Read [brief.schema.json](references/brief.schema.json) only when writing the structured brief. Use [image-edit-map](../image-edit-map/SKILL.md) if edit targets are unclear.
+2. **Generate:** Run host image generator under its instructions; never silently substitute a provider or retry a failed external call. A text-only model is not a vision reviewer. Read [prompts-and-invoke.md](references/prompts-and-invoke.md) only when writing a prompt or invoking from another host. Keep clean source untouched; edit from clean source or accepted candidate, never annotated review maps.
+3. **Review:** Independent review with attached images, brief, and clean source; label a same-agent self-check as such. Use `--model` for Codex or `--report` for existing report (`image-reviewer` agent or person):
+   ```bash
+   python3 <skills>/image-loop/scripts/review.py \
+     --brief brief.json --candidate candidate.png --source source.png \
+     --out review-round-0 --model <vision-model>
+   ```
+   Run: `uv run --with pillow --with jsonschema python3 <skills>/image-loop/scripts/review.py ...` (fallback: `python3 -m pip install pillow jsonschema`). Read [reviewer.md](references/reviewer.md) only when configuring flags (`--timeout`, `--source`) or models. Read [review.schema.json](references/review.schema.json) only when formatting review reports. Read [independent-review.md](../image-verify/references/independent-review.md) only when setting up independent review. Read [candidate-audit.md](../image-verify/references/candidate-audit.md) only when exact pixel preservation is required.
+4. **Decide:** Follow deterministic controller decision in `decision.json`. Actions: `accepted_by_checks`, `repair`, `hold_for_inspection` (uncertainty), `stop_budget` (budget reached), `stop_repeated_failure` (2 consecutive identical failure sets), `stop_provider` (timeout/failure), `stop_invalid_review` (missing/duplicate/extra IDs), `reject_technical` (file check failure). Read [decisions.md](../image-verify/references/decisions.md) only when interpreting actions or stop rules.
+5. **Repair:** Default at most 3 repairs (`--max-repairs`). Keep the best candidate that passes protected criteria (else the source); never overwrite accepted work with an unverified repair. If `decision.json` says `repair`, execute `repair-prompt.txt` on clean image. For next round pass `--previous <round folder>` (counts repairs; optional cross-check `--repairs-used`). Read [repair-rules.md](../image-repair/references/repair-rules.md) only when logging multi-round task history.
+6. **Gate before claiming done:** In a project with a store, run `gate --deliverable` once before claiming done; follow [using the store in a skill](../image-verify/references/project-memory.md#using-the-store-in-a-skill).
+7. **Deliver:** Present clean image, changes, check results, and evidence. Outputs in round folder: `report.json`, `file-checks.json`, `decision.json`, `repair-prompt.txt`, `reviewer-prompt.txt`, `run.json`, `.private/`. Exit codes: 0 on completion; 2 on bad arguments, unreadable/animated images, or count mismatch.

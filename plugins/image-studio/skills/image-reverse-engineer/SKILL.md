@@ -1,6 +1,6 @@
 ---
 name: image-reverse-engineer
-description: Extract a supplied image into a structured image-spec JSON file (typography, palette, grading, composition, numbered elements, inferred layers, lighting) with an evidence basis and confidence for each value, without editing anything. Use when asked to "reverse engineer this image", "break this image down", "extract the design as JSON", or "describe this image's style". Not for planning an edit of the image (image-edit-map), rebuilding or remixing it (image-reconstruction), or mixing several references (image-inspiration).
+description: "Reverse engineer image, extract design JSON, break down image, describe style: extract an image into structured image-spec JSON (palette, typography, layout, lighting) with evidence and confidence without altering pixels. Not for planning edits (image-edit-map) or remixing (image-reconstruction)."
 ---
 
 # Image reverse engineering

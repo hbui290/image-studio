@@ -11,7 +11,7 @@ Routing: For multi-round generation/repairs use [image-loop](../image-loop/SKILL
 
 ## Operational checklist
 
-1. **Requirements:** Use the host image generation tool under its own instructions; never substitute another provider without stating so.
+1. **Requirements:** Use the host image generation tool under its own instructions (Codex: `image_gen.imagegen`; Claude Code has none built in, so use a configured image tool or hand back the prompt); never substitute another provider without stating so.
 2. **Brief:** Define image job, canvas size, medium, subject, composition, copy space, output format, and required checks. If no source image exists, treat the brief as intent, not reconstructed fact.
 3. **Reference roles:** Assign each attached reference one role (identity, product truth, layout, material, light, style). Resolve conflicts: style cannot override an approved logo or product shape.
 4. **Prompt:** Specify result, subject/action, composition, medium/style, visible details, and constraints. State reference roles explicitly.

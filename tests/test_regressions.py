@@ -1,6 +1,5 @@
 """Regression tests for the QA audit findings (16-bit, RGBA masks, shared decisions, history, inputs)."""
 
-import copy
 import importlib.util
 import json
 import os

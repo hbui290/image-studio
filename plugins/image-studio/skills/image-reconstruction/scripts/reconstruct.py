@@ -671,7 +671,7 @@ def self_check():
     moved = copy.deepcopy(sample)
     moved["selections"] = []
     group = moved["groups"][0]
-    child = next(e for e in moved["elements"] if e["parent_id"] == group["id"])
+    next(e for e in moved["elements"] if e["parent_id"] == group["id"])
     moved["selections"] = [{"target_id": group["id"], "action": "move", "properties": ["bbox"], "instruction": "Move the group together", "destination_bbox": [0, 0.1, 0.47, 0.415], "reference_ids": [], "preserve": ["internal arrangement"], "allow": []}]
     shifted = compile_spec(moved)["rendering_prompt"]
     assert "ribbed glass dome (A-01): count 1; approximate normalized box [0.000, 0.100, 0.470, 0.300]" in shifted, "Group move did not transform child geometry"
