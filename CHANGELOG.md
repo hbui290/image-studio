@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.6.0-local.1 (2026-10-18)
+
+Learning the user's taste, not only their complaints.
+
+- **image-verify:** new `taste add --note --aspect [--quote] [--deliverable] [--brand]` and `taste list [--brand]`. When the user approves or praises a result, the agent records what they liked; notes are kept per brand in `~/.image-studio/brands/<brand>/taste.jsonl` (general ones in `taste.jsonl`). The session-start card and `brief` show the 6 newest notes (brand and general merged, newest first, exact repeats shown once) under "Your taste"; the card also reminds the agent to record praise.
+- **lessons:** `lesson add --worked` records the method that worked after one failed twice; the card shows it.
+- **image-create, image-repair, image-verify, image-loop:** one line each on when to record taste or a working method. Nothing becomes a rule without `pref add --confirmed` after the user agrees.
+- Measured on a copy of a real store: with 6 taste notes and 5 lessons the session card grows from about 250 to about 600 tokens, once per session; each `taste add` takes about 0.04 s.
+
 ## 2.5.0-local.1 (2026-10-18)
 
 Learning from mistakes across jobs, kept small.

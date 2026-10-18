@@ -13,6 +13,14 @@ Run it as `python3 <skills>/image-verify/scripts/studio_state.py <command>` (`<s
 5. **Gate once per delivery attempt**, before telling the user it is done; not after every repair round. Re-run only after a further fix. Deliver only after it exits 0.
 6. **Talk to the user in plain words.** Defect IDs are internal; mention them only in parentheses. When the gate has not passed, say what is still wrong and ask what to do.
 
+## Taste and lessons
+
+The goal is a designer that gets closer to the user's taste with every job. Both files are shared by every job, under `${IMAGE_STUDIO_HOME:-~/.image-studio}`, and work with or without a project store.
+
+- **Taste:** when the user approves or praises a result ("đẹp", "giữ cái này", "love this"), record what they liked: `taste add --aspect color|line|composition|detail|lighting|text|style|other --note "what they liked, concretely" --quote "their words"` (add `--deliverable N` in a project). Notes go to `brands/<brand>/taste.jsonl` (the store's brand, or `--brand`), else `taste.jsonl`. The session-start card and `brief` show the 6 newest notes, brand and general merged, under "Your taste"; match them in the first draft.
+- **Lessons:** besides a miss after delivery (step 4 above), record a method that failed twice and the one that then worked: `lesson add --mistake "..." --cause "..." --check "..." --worked "..."`.
+- Neither changes a rule or a skill by itself. A repeated pattern becomes a rule only through `pref add --confirmed` after the user agrees.
+
 ## The gate
 
 ```bash
@@ -33,7 +41,7 @@ Open the 100% crop of each defect first; open the 200% crop only when the 100% v
 
 ## Hooks
 
-- **Session start** (and after compaction) prints a short card: open defects, deliverables and gate status, recent decisions, up to 5 lessons from earlier jobs, confirmed preferences.
+- **Session start** (and after compaction) prints a short card: open defects, deliverables and gate status, recent decisions, the user's taste (6 newest notes), up to 5 lessons from earlier jobs, confirmed preferences.
 - **Stop** blocks only a completion claim ("done", "fixed", "xong", "hoàn thành"...) while a deliverable has not passed the gate or a defect is open, once per message. The agent then tells the user plainly what is still wrong. Questions, progress updates, negated claims ("chưa xong"), and reports with Checked / Not checked / Still failing headings pass. A session working in a separate git repo below the project folder is not policed.
 - Both hooks exit 0 silently when python3, the script, or a store is missing. Codex asks the user to trust each hook once; without hooks, run `brief` and `gate` as the steps say.
 

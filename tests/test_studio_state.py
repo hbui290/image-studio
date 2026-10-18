@@ -1494,5 +1494,74 @@ class LessonEdgeTests(StudioBase):
         self.assertEqual(len({l["id"] for l in lessons}), 8)
 
 
+class TasteTests(StudioBase):
+    def card(self):
+        return self.run_cli("hook", "session-start", stdin=json.dumps({"cwd": str(self.project)})).stdout
+
+    def test_taste_is_recorded_per_brand_and_shown_newest_first(self):
+        self.init()
+        self.approve_poster(self.poster())
+        for i in range(8):
+            self.ok("taste", "add", "--aspect", "color", "--note", f"liked palette {i}", "--quote", "đẹp", "--deliverable", "poster")
+        self.ok("taste", "add", "--brand", "zeta", "--note", "other brand taste")
+        path = self.home / "brands" / "acme" / "taste.jsonl"
+        items = [json.loads(l) for l in path.read_text().splitlines()]
+        self.assertEqual(items[0]["deliverable"], "poster")
+        card = self.card()
+        self.assertIn("Your taste (match it):", card)
+        self.assertIn("liked palette 7", card)
+        self.assertNotIn("liked palette 1", card)
+        self.assertNotIn("other brand taste", card)
+        self.assertIn("taste add", card)
+        self.assertLessEqual(len(card.rstrip("\n")), 2400)
+        self.assertIn("Your taste", self.ok("brief").stdout)
+        self.assertIn("other brand taste", self.ok("taste", "list", "--brand", "zeta").stdout)
+
+    def test_general_taste_without_a_store_and_bad_input(self):
+        run = self.run_cli("taste", "add", "--note", "clean flat icons", "--aspect", "style", cwd=Path(self.tmp.name))
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertTrue((self.home / "taste.jsonl").is_file())
+        self.assertEqual(self.run_cli("taste", "add", "--note", " ").returncode, 2)
+        self.assertEqual(self.run_cli("taste", "add", "--note", "x", "--aspect", "smell").returncode, 2)
+        self.assertEqual(self.run_cli("taste", "add", "--note", "write a@b.co").returncode, 2)
+
+    def test_lesson_records_what_worked(self):
+        self.init()
+        self.approve_poster(self.poster())
+        self.ok("lesson", "add", "--mistake", "regenerated the whole hat twice", "--cause", "prompt too broad",
+                "--check", "crop to the brim", "--worked", "masked brim-only patch", "--kind", "artifact")
+        self.assertIn("worked: masked brim-only patch", self.card())
+
+
+class TasteOrderTests(StudioBase):
+    def test_brand_and_general_notes_are_merged_newest_first_and_deduplicated(self):
+        self.init()
+        self.approve_poster(self.poster())
+        self.home.mkdir(parents=True, exist_ok=True)
+        (self.home / "brands" / "acme").mkdir(parents=True)
+        gen = [{"note": f"general {i}", "time": f"2026-10-0{i}T00:00:00Z"} for i in range(1, 5)]
+        brand = [{"note": f"brand {i}", "time": f"2026-10-1{i}T00:00:00Z"} for i in range(1, 6)]
+        brand.append({"note": "Brand 5", "time": "2026-10-19T00:00:00Z"})
+        (self.home / "taste.jsonl").write_text("".join(json.dumps(x) + "\n" for x in gen))
+        (self.home / "brands" / "acme" / "taste.jsonl").write_text("".join(json.dumps(x) + "\n" for x in brand))
+        card = self.run_cli("hook", "session-start", stdin=json.dumps({"cwd": str(self.project)})).stdout
+        shown = [l for l in card.splitlines() if l.startswith("- [other]")]
+        self.assertEqual(len(shown), 6)
+        self.assertIn("Brand 5", shown[0])
+        self.assertEqual(sum("rand 5" in l for l in shown), 1)
+        self.assertIn("general 4", "\n".join(shown))
+        self.assertNotIn("general 1", card)
+
+    def test_reminder_survives_the_hard_cap(self):
+        self.init()
+        self.approve_poster(self.poster())
+        lines = [json.dumps({"id": f"D{i}", "deliverable": "poster", "bbox": [1, 1, 40, 40], "kind": "seam", "status": "open",
+                             "note": "long " * 30, "source": "user"}) for i in range(1, 121)]
+        (self.store / "defects.jsonl").write_text("\n".join(lines) + "\n")
+        card = self.run_cli("hook", "session-start", stdin=json.dumps({"cwd": str(self.project)})).stdout
+        self.assertIn("taste add", card)
+        self.assertIn("D120", card)
+
+
 if __name__ == "__main__":
     unittest.main()

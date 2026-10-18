@@ -43,6 +43,8 @@ MIN_BOX_SHARE = 0.001  # smallest defect box area (share of the image) without a
 CHANGE_LEVEL = 8       # per-channel difference that counts as a changed pixel
 CARD_LIMIT = 2400
 LESSONS_SHOWN = 5      # lessons printed in the session card and brief
+TASTE_SHOWN = 6        # taste notes printed in the session card and brief
+ASPECTS = ("color", "line", "composition", "detail", "lighting", "text", "style", "other")
 MIN_CHANGED = 0.05     # share of changed pixels a resolved defect's box needs
 MAX_MEMBER_BYTES = 256 << 20
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -552,7 +554,8 @@ def read_lessons(text=None):
 
 
 def lesson_line(item):
-    return f"- {item['id']} [{item.get('kind', 'other')}] {short(item['mistake'], 90)} -> check: {short(item['check'], 90)}"
+    worked = f"; worked: {short(item['worked'], 70)}" if isinstance(item.get("worked"), str) else ""
+    return f"- {item['id']} [{item.get('kind', 'other')}] {short(item['mistake'], 90)} -> check: {short(item['check'], 90)}{worked}"
 
 
 def relevant_lessons(lessons, brand, kinds, limit=LESSONS_SHOWN):
@@ -573,6 +576,10 @@ def cmd_lesson_add(args):
     for label, val in (("--mistake", mistake), ("--cause", cause), ("--check", check)):
         if EMAIL_RE.search(val): raise UsageError(f"{label} looks like it contains an email address; lessons must not store accounts")
     record = {"mistake": mistake, "cause": cause, "check": check, "kind": args.kind, "time": now()}
+    worked = text_arg(args.worked, "--worked", False)
+    if worked:
+        if EMAIL_RE.search(worked): raise UsageError("--worked looks like it contains an email address; lessons must not store accounts")
+        record["worked"] = worked
     store = None
     try: store = open_store(args.project)
     except UsageError:
@@ -616,6 +623,78 @@ def cmd_lesson_list(args):
     lessons = [l for l in read_lessons() if args.brand is None or l.get("brand") == args.brand]
     if not lessons: print("No lessons recorded."); return 0
     for item in lessons: print(lesson_line(item) + f" (cause: {short(item.get('cause', ''), 90)})")
+    return 0
+
+
+# ---------------------------------------------------------------- taste
+
+def taste_path(brand):
+    home = user_home()
+    return home / "brands" / brand / "taste.jsonl" if brand else home / "taste.jsonl"
+
+
+def read_taste(brand):
+    try: text = taste_path(brand).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError): return []
+    out = []
+    for line in text.splitlines():
+        try: item = json.loads(line)
+        except ValueError: continue
+        if isinstance(item, dict) and isinstance(item.get("note"), str): out.append(item)
+    return out
+
+
+def newest_taste(brand, limit=TASTE_SHOWN):
+    """Brand and general notes merged newest first; a note repeated word for word is shown once."""
+    merged = read_taste(brand) + (read_taste(None) if brand else [])
+    # Same-second notes keep file order: a later line in a file is newer.
+    items = [t for _, t in sorted(enumerate(merged), key=lambda it: (str(it[1].get("time", "")), it[0]), reverse=True)]
+    seen, out = set(), []
+    for item in items:
+        key = " ".join(item["note"].lower().split())
+        if key in seen: continue
+        seen.add(key); out.append(item)
+        if len(out) == limit: break
+    return out
+
+
+def taste_line(item):
+    said = f' (user: "{short(item["quote"], 60)}")' if isinstance(item.get("quote"), str) else ""
+    return f"- [{item.get('aspect', 'other')}] {short(item['note'], 110)}{said}"
+
+
+def cmd_taste_add(args):
+    note = text_arg(args.note, "--note")
+    quote = text_arg(args.quote, "--quote", False)
+    for label, val in (("--note", note), ("--quote", quote)):
+        if EMAIL_RE.search(val): raise UsageError(f"{label} looks like it contains an email address; taste notes must not store accounts")
+    brand = ident(args.brand, "--brand") if args.brand is not None else None
+    record = {"note": note, "aspect": args.aspect, "time": now()}
+    if quote: record["quote"] = quote
+    if brand is None:
+        try: store = open_store(args.project)
+        except UsageError: store = None
+        if store is not None:
+            brand = store.state.get("brand")
+            record["project"] = str(store.root.resolve())
+            if args.deliverable:
+                item = store.deliverable(args.deliverable)
+                record["deliverable"], record["sha256"] = args.deliverable, item.get("current_sha256")
+    path = taste_path(brand)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as handle:
+            if fcntl is not None: fcntl.flock(handle, fcntl.LOCK_EX)
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError as exc: raise UsageError(f"cannot write taste notes at {path}: {exc}") from None
+    print(f"Recorded taste for {brand or 'all work'}: {taste_line(record)[2:]}")
+    return 0
+
+
+def cmd_taste_list(args):
+    items = read_taste(args.brand)
+    if not items: print("No taste notes recorded."); return 0
+    for item in items: print(taste_line(item) + f" {item.get('time', '')}")
     return 0
 
 
@@ -700,7 +779,8 @@ def shared_sections(store, defects):
     conf = [f"- {rule}" for status, rule in prefs if status == "confirmed"]
     kinds = {d.get("kind") for d in defects if d.get("status") == "open"}
     lessons = [lesson_line(l) for l in relevant_lessons(read_lessons(), state.get("brand"), kinds)]
-    return delivs, decs, prefs, conf, lessons
+    taste = [taste_line(t) for t in newest_taste(state.get("brand"))]
+    return delivs, decs, prefs, conf, lessons, taste
 
 
 def build_brief(store, max_lines):
@@ -715,11 +795,11 @@ def build_brief(store, max_lines):
     open_items = [d for d in defects if d.get("status") == "open"]
     head.append(f"Open defects ({len(open_items)}, all listed; gate cannot pass while any is open):" if open_items else "Open defects: none")
     if open_items: head += [f"- {defect_line(d)}" for d in open_items]
-    delivs, decs, prefs, conf, lessons = shared_sections(store, defects)
+    delivs, decs, prefs, conf, lessons, taste = shared_sections(store, defects)
     prop = sum(1 for st, _ in prefs if st == "proposed")
     if prop: head.append(f"Preferences: {prop} proposed, ask the user to confirm (pref add ... --confirmed).")
     sections = [("Deliverables:", delivs)]
-    sections += [("Lessons from earlier jobs (check these):", lessons), ("Confirmed preferences:", conf), ("Recent decisions:", decs), ("Recently resolved defects (regression checks):", [f"- {defect_line(d)}" for d in [d for d in defects if d.get("status") != "open"][::-1]])]
+    sections += [("Your taste (match it):", taste), ("Lessons from earlier jobs (check these):", lessons), ("Confirmed preferences:", conf), ("Recent decisions:", decs), ("Recently resolved defects (regression checks):", [f"- {defect_line(d)}" for d in [d for d in defects if d.get("status") != "open"][::-1]])]
     lines = list(head)
     budget = max(0, max_lines - len(lines))
     if sum(len(items) + 1 for _, items in sections if items) > budget: budget -= 1
@@ -746,7 +826,7 @@ def format_session_start_card(store):
     defects = store.defects()
     open_items = [d for d in defects if d.get("status") == "open"]
     resolved_items = [d for d in defects if d.get("status") == "resolved"]
-    delivs, decs, _, conf, lessons = shared_sections(store, defects)
+    delivs, decs, _, conf, lessons, taste = shared_sections(store, defects)
 
     for limit in (100, 80, 60, 40, 20, 10, 5, 0):
         lines = [f"image-studio project memory (brand: {state.get('brand')} | store: {store.root}):"]
@@ -754,17 +834,19 @@ def format_session_start_card(store):
         lines.extend(f"- {defect_line(d, limit=limit)}" for d in open_items)
         if delivs: lines.append("Deliverables:"); lines.extend(delivs)
         if decs: lines.append("Recent decisions:"); lines.extend(decs)
+        if taste: lines.append("Your taste (match it):"); lines.extend(taste)
         if lessons: lines.append("Lessons from earlier jobs (check these):"); lines.extend(lessons)
         if conf: lines.append("Confirmed preferences:"); lines.extend(conf)
         if resolved_items: lines.append(f"{len(resolved_items)} resolved - regression-checked by the gate")
+        lines.append("When the user approves or praises a result, record what they liked: taste add --aspect ... --note ... --quote \"their words\".")
         lines.append("Commands: run studio_state.py --help; do not read its source.")
         card = "\n".join(lines)
         if len(card) <= CARD_LIMIT: return card
     # Too many open defects for notes: list every open ID (never dropped) and cut the rest.
     head = [lines[0], f"Open defects ({len(open_items)}; run brief for details): " + ", ".join(str(d.get("id")) for d in open_items)]
-    tail = ["Commands: run studio_state.py --help; do not read its source."]
+    tail = lines[-2:]  # the taste reminder and the commands line always stay
     body = []
-    for line in lines[2 + len(open_items):-1]:
+    for line in lines[2 + len(open_items):-2]:
         if len("\n".join(head + body + [line] + tail)) > CARD_LIMIT: break
         body.append(line)
     return "\n".join(head + body + tail)
@@ -1225,13 +1307,16 @@ subcommands:
                                          example: python3 studio_state.py verdict --run 20261018T000000Z-abc --id D1 --status pass --evidence "seam gone at 100%"
   pref add [--brand B] --rule T --check T [--evidence T] [--confirmed]
                                          example: python3 studio_state.py pref add --brand acme --rule "No bevels" --check "inspect edges" --confirmed
-  lesson add --mistake T --cause T --check T [--defect D1] [--kind K] [--brand B]
+  lesson add --mistake T --cause T --check T [--worked T] [--defect D1] [--kind K] [--brand B]
                                          example: python3 studio_state.py lesson add --defect D4 --mistake "delivered a soft poster" --cause "upscaled a generated patch" --check "compare at 100% before delivery"
   lesson list [--brand B]                example: python3 studio_state.py lesson list --brand acme
+  taste add --note T [--aspect color|line|composition|detail|lighting|text|style|other] [--quote T] [--deliverable N] [--brand B]
+                                         example: python3 studio_state.py taste add --aspect color --note "deep blue night palette with warm gold accents" --quote "màu này đẹp"
+  taste list [--brand B]                 example: python3 studio_state.py taste list --brand acme
   hook session-start | hook stop         example: python3 studio_state.py hook session-start < payload.json
 
 approve, defect, brief, gate and verdict find the store by walking up from --project or the current folder.
-init creates it; pref add does not use the project store; lessons live in ~/.image-studio/lessons.jsonl, shared by every job; hooks use the cwd from the hook input.
+init creates it; pref add does not use the project store; lessons (lessons.jsonl) and taste notes (brands/<brand>/taste.jsonl, taste.jsonl) live in ${IMAGE_STUDIO_HOME:-~/.image-studio}, shared by every job; hooks use the cwd from the hook input.
 exit codes: 0 ok / gate pass, 1 gate fail, 2 bad input or no store
 """
 
@@ -1290,11 +1375,20 @@ def build_parser():
     lesson = sub.add_parser("lesson").add_subparsers(dest="what", metavar="add|list", required=True)
     p = lesson.add_parser("add", parents=[common])
     p.add_argument("--mistake", required=True); p.add_argument("--cause", required=True); p.add_argument("--check", required=True)
-    p.add_argument("--defect"); p.add_argument("--kind", choices=KINDS); p.add_argument("--brand")
+    p.add_argument("--defect"); p.add_argument("--kind", choices=KINDS); p.add_argument("--brand"); p.add_argument("--worked")
     p.set_defaults(func=cmd_lesson_add)
     p = lesson.add_parser("list")
     p.add_argument("--brand")
     p.set_defaults(func=cmd_lesson_list)
+
+    taste = sub.add_parser("taste").add_subparsers(dest="what", metavar="add|list", required=True)
+    p = taste.add_parser("add", parents=[common])
+    p.add_argument("--note", required=True); p.add_argument("--aspect", choices=ASPECTS, default="other")
+    p.add_argument("--quote"); p.add_argument("--deliverable"); p.add_argument("--brand")
+    p.set_defaults(func=cmd_taste_add)
+    p = taste.add_parser("list")
+    p.add_argument("--brand")
+    p.set_defaults(func=cmd_taste_list)
 
     p = sub.add_parser("hook")
     p.add_argument("mode", choices=("session-start", "stop"))
