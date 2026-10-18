@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.7.0-local.1 (2026-10-18)
+
+Prompt blocks and a designer review, adapted from the owner's video/banner tool. Docs only.
+
+- **image-create:** new `references/prompt-blocks.md`: one style block with measured values (palette hex, light direction, view) pasted at the start of every prompt in a job, one item per image with empty space for text or a logo added later, a background rule by asset type (flat magenta #FF00FF for cutouts, black for glow effects), reference roles, and a check after generating.
+- **image-repair:** `repair-and-composite.md` adds the numbered region-edit prompt ("keep everything, change only these N things", subjects described by position), a one-region-per-turn fallback, and a reminder that generators often redraw the whole image.
+- **image-verify:** new `references/designer-review.md`, used before showing a new or regenerated image and before delivery: 6 tiles at 100%, 4 edge strips, a grayscale view, a 120 px thumbnail, a lineup next to the approved version (all `magick` commands tested), checks for two drawing styles in one image, soft or damaged areas, anatomy, edges, color and light; problems first in a severity table, no praise. image-loop's self-check uses it.
+
 ## 2.6.0-local.1 (2026-10-18)
 
 Learning the user's taste, not only their complaints.

@@ -41,6 +41,18 @@ Match [medium, line quality or grain, perspective, light direction, palette].
 Do not add [objects or content that would violate the brief].
 ```
 
+For several defects in one image, number them and describe each subject by position, so the editor changes only those:
+
+```text
+Edit this image. Keep the composition, characters, costumes, colors, lighting and background exactly as they are.
+Change only these N things:
+1. <region by position, e.g. "the hand of the woman on the left">: <what is wrong> -> <the correct result>.
+2. ...
+Do not change the faces, <other protected details>, or the color palette. Same aspect ratio, highest resolution available.
+```
+
+If the editor changes too much, fix one region per turn: `Edit only <region by position>. <correct result>. Change nothing else - not the face, the hair, or the background.` Generators often redraw the whole image instead of the region, so always composite through the acceptance mask and compare faces and colors with the source before accepting.
+
 For removal, describe what should appear behind the removed object (texture fill for periodic patterns, reference-guided generation for new content; see [LaMa](https://github.com/advimman/lama) for inpainting). For outpainting, identify edges to extend and objects not to duplicate. For face repair, canonical character references control identity. Avoid vague requests such as "make it 4K".
 
 ## Masked composite

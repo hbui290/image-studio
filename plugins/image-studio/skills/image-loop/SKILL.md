@@ -16,7 +16,7 @@ Run scripts; do not read their source - use `--help` for usage.
 0. **Memory:** If not in context, run `python3 <skills>/image-verify/scripts/studio_state.py brief` (see [using the store in a skill](../image-verify/references/project-memory.md#using-the-store-in-a-skill)).
 1. **Brief:** Write `brief.json` with stable IDs, observable criteria (`requested` vs `protected`), and `file_checks` (dimensions, format, alpha). Read [brief.schema.json](references/brief.schema.json) only when writing the structured brief. Use [image-edit-map](../image-edit-map/SKILL.md) if edit targets are unclear.
 2. **Generate:** Run host image generator under its instructions (Codex: `image_gen.imagegen`; Claude Code has none built in: use a configured image tool or hand back the prompt); never silently substitute a provider or retry a failed external call. A text-only model is not a vision reviewer. Read [prompts-and-invoke.md](references/prompts-and-invoke.md) only when writing a prompt or invoking from another host. Keep clean source untouched; edit from clean source or accepted candidate, never annotated review maps.
-3. **Review:** Independent review with attached images, brief, and clean source; label a same-agent self-check as such. Use `--model` for Codex or `--report` for existing report (`image-reviewer` agent or person):
+3. **Review:** Independent review with attached images, brief, and clean source; label a same-agent self-check as such and run it as a [designer review](../image-verify/references/designer-review.md). Use `--model` for Codex or `--report` for existing report (`image-reviewer` agent or person):
    ```bash
    python3 <skills>/image-loop/scripts/review.py \
      --brief brief.json --candidate candidate.png --source source.png \
