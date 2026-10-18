@@ -1609,5 +1609,89 @@ class BrandKitTests(StudioBase):
         self.assertNotIn("dont", kit)
 
 
+class CarryOverTests(StudioBase):
+    """A resolved defect whose pixels did not change keeps its earlier pass; only changed regions need a new verdict."""
+
+    def two_fixed_defects(self):
+        self.init()
+        self.approve_poster(self.poster(card=True, dots=True))
+        d1 = self.defect(list(DOTS[0]))
+        d2 = self.defect(list(CARD))
+        self.approve_poster(self.poster(card=False, dots=False))
+        for did in (d1, d2):
+            self.ok("defect", "close", "--id", did, "--status", "resolved", "--note", "removed")
+        run = self.run_id(self.gate())
+        for did in (d1, d2):
+            self.ok("verdict", "--run", run, "--id", did, "--status", "pass", "--evidence", "region is clean at 100%")
+        self.assertEqual(self.gate("--run", run).returncode, 0)
+        return d1, d2
+
+    def test_unchanged_regions_carry_their_pass(self):
+        d1, d2 = self.two_fixed_defects()
+        first = self.gate()
+        self.assertIn("Carried 2 verdict(s)", first.stdout)
+        self.assertEqual(first.returncode, 0, first.stdout)
+        self.assertIn("unchanged since run", first.stdout)
+
+    def test_a_changed_region_needs_a_new_verdict(self):
+        d1, d2 = self.two_fixed_defects()
+        img = Image.open(self.project / "poster.png").convert("RGB")
+        ImageDraw.Draw(img).rectangle((125, 45, 140, 60), fill=(0, 0, 255))
+        img.save(self.project / "poster.png")
+        self.approve_poster(self.project / "poster.png")
+        run = self.gate()
+        self.assertIn("Carried 1 verdict(s)", run.stdout)
+        self.assertEqual(run.returncode, 1)
+        self.assertIn(f"{d2}: no verdict yet", run.stdout)
+        self.assertNotIn(f"{d1}: no verdict yet", run.stdout)
+
+    def test_a_forged_earlier_verdict_is_not_carried(self):
+        d1, d2 = self.two_fixed_defects()
+        for vfile in (self.store / "gate").glob("*/verdicts.json"):
+            data = json.loads(vfile.read_text())
+            data["verdicts"][d1]["crop_sha256"] = "0" * 64
+            vfile.write_text(json.dumps(data))
+        run = self.gate()
+        self.assertIn("Carried 1 verdict(s)", run.stdout)
+        self.assertIn(f"{d1}: no verdict yet", run.stdout)
+
+
+class ScopeRequestTests(StudioBase):
+    """A change the user asks for (kind scope), like a new date, is not a miss: no lesson, and a small edit is enough."""
+
+    def small_edit(self, kind, quote=None):
+        self.init()
+        self.approve_poster(self.poster(card=False))
+        self.assertEqual(self.gate().returncode, 0)
+        extra = ["--quote", quote] if quote else []
+        did = self.ok("defect", "add", "--deliverable", "poster", "--bbox", "20,20,180,120", "--kind", kind,
+                      "--note", "change the date", *extra).stdout.split()[2]
+        img = Image.open(self.project / "poster.png").convert("RGB")
+        ImageDraw.Draw(img).rectangle((60, 60, 64, 64), fill=(0, 0, 0))  # 25 px in a 16,000 px box: about 0.2-1%
+        ImageDraw.Draw(img).rectangle((70, 60, 74, 72), fill=(0, 0, 0))
+        img.save(self.project / "poster.png")
+        self.approve_poster(self.project / "poster.png")
+        self.ok("defect", "close", "--id", did, "--status", "resolved", "--note", "date updated")
+        run = self.gate()
+        return did, run
+
+    def test_scope_request_needs_no_lesson_and_passes_with_a_small_edit(self):
+        did, run = self.small_edit("scope", quote="change the deadline to the 25th")
+        self.assertNotIn("needs_lesson", self.defects()[0])
+        self.assertNotIn("almost nothing changed", run.stdout)
+        self.assertNotIn("has no lesson", run.stdout)
+
+    def test_scope_without_the_users_words_gets_no_discount(self):
+        did, run = self.small_edit("scope")
+        self.assertTrue(self.defects()[0]["needs_lesson"])
+        self.assertIn("almost nothing changed", run.stdout)
+
+    def test_a_real_defect_still_needs_a_lesson_and_a_visible_fix(self):
+        did, run = self.small_edit("artifact")
+        self.assertTrue(self.defects()[0]["needs_lesson"])
+        self.assertIn("almost nothing changed", run.stdout)
+        self.assertIn("has no lesson", run.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

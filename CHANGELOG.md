@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.9.0-local.1 (2026-10-18)
+
+Fixes found by reading the real poster job (13 defects, 16 gate runs).
+
+- **gate:** a resolved defect whose pixels are identical to an earlier passing run keeps that verdict ("unchanged since run ..."). The old 100% crop is decoded and its pixels hashed, and the earlier verdict must be valid for its own run, so a pass cannot be carried to changed pixels or from a forged verdict. Before, every gate run needed a fresh verdict for every defect ever recorded (12 per run at the end of the job, about 170 in total); now only regions that changed need one. On a copy of the real store all 13 defects carried over.
+- **Requested changes:** `defect add --kind scope --quote "the user's words"` is for a change the user asks for that is not a mistake (in the poster job, "change the deadline to the 25th" was recorded as D13). It no longer requires a lesson, and the gate accepts a visible change of 0.5% of its box instead of 5%, so a small text edit is not failed as "almost nothing changed". Without `--quote` a scope defect is treated like any other, so an agent cannot relabel its own mistake to skip the lesson. An adversarial check (1-pixel changes, other deliverables, mismatched runs, forged or edited old verdicts and crops) found no way to carry a pass to changed pixels.
+
 ## 2.8.0-local.1 (2026-10-18)
 
 - **image-verify:** new brand kit: `brand set --brand B --color NAME=#RRGGBB[:role] --font ROLE=Family --logo FILE --ref FILE=role --do T --dont T [--remove KEY]` and `brand show`. It keeps exact values in `~/.image-studio/brands/<brand>/brand.json` with the hash of the logo and each approved reference; `brand show` flags a missing or changed file, and the session-start card shows a one-line summary. Approved references and files the user sends are the only existing images an agent may use; the logo is composited from its file, never redrawn. The style block in image-create's `prompt-blocks.md` is filled from it.

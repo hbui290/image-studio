@@ -48,6 +48,7 @@ BRAND_CAP = 4000        # characters in one brand.json
 HEX_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 ASPECTS = ("color", "line", "composition", "detail", "lighting", "text", "style", "other")
 MIN_CHANGED = 0.05     # share of changed pixels a resolved defect's box needs
+MIN_CHANGED_REQUEST = 0.005  # a requested change (kind scope), e.g. a new date in a text line, changes few pixels
 MAX_MEMBER_BYTES = 256 << 20
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 DEFECT_ID_RE = re.compile(r"^D([1-9][0-9]*)$")
@@ -457,7 +458,9 @@ def cmd_defect_add(args):
                          f">= {MIN_BOX_SHARE:.1%} of the image); draw a larger box or pass --quote with the user's words")
     if quote: record["quote"] = quote
     defects = store.defects()
-    after_delivery = args.source == "user" and gate_is_valid(store, args.deliverable, defects)
+    # A requested change (kind scope with the user's words: new text, a removed element) is not a miss, so it needs no lesson.
+    request = args.kind == "scope" and bool(quote)
+    after_delivery = args.source == "user" and not request and gate_is_valid(store, args.deliverable, defects)
     if after_delivery: record["needs_lesson"] = True
     numbers = [int(m.group(1)) for m in (DEFECT_ID_RE.match(d["id"]) for d in defects) if m]
     record["id"] = f"D{max(numbers, default=0) + 1}"
@@ -1021,12 +1024,45 @@ def crop_box_for(image, bbox):
     return [max(0, x0 - CROP_MARGIN), max(0, y0 - CROP_MARGIN), min(w, x1 + CROP_MARGIN), min(h, y1 + CROP_MARGIN)]
 
 
+def earlier_pass(store, name, defect_id, crop_box, pixels, limit=20):
+    """The newest earlier run whose verdict passed this defect on exactly these pixels, or None.
+
+    The old 100% crop is decoded and hashed, so a carried pass is tied to identical pixels, not to a file name."""
+    P = pil()
+    gate_dir = store.root / "gate"
+    try: runs = sorted((d for d in gate_dir.iterdir() if d.is_dir()), reverse=True)[:limit]
+    except OSError: return None
+    for run_dir in runs:
+        try:
+            checklist = json.loads((run_dir / "checklist.json").read_text(encoding="utf-8"))
+            verdicts = json.loads((run_dir / "verdicts.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError): continue
+        if not isinstance(checklist, dict) or not isinstance(verdicts, dict) or checklist.get("deliverable") != name: continue
+        if verdicts.get("run_id") != checklist.get("run_id") or verdicts.get("nonce") != checklist.get("nonce"): continue
+        entry = next((e for e in checklist.get("defects", []) if isinstance(e, dict) and e.get("id") == defect_id), None)
+        verdict = (verdicts.get("verdicts") or {}).get(defect_id) if isinstance(verdicts.get("verdicts"), dict) else None
+        if not entry or entry.get("crop_box") != crop_box or not isinstance(verdict, dict) or verdict.get("status") != "pass": continue
+        crop = (entry.get("crops") or {}).get("100") or {}
+        ev = verdict.get("evidence")
+        if verdict.get("crop_sha256") not in {c.get("sha256") for c in (entry.get("crops") or {}).values() if isinstance(c, dict)}: continue
+        if not isinstance(ev, str) or len(ev.strip()) < MIN_EVIDENCE or verdict.get("reviewer") not in ("self", "independent"): continue
+        try:
+            crop_file = run_dir / crop["file"]
+            if sha256_file(crop_file) != crop.get("sha256"): continue
+            with P.Image.open(crop_file) as old:
+                old.load()
+                if region_hash(old, [0, 0, old.size[0], old.size[1]]) != pixels: continue
+        except (OSError, KeyError, TypeError, ValueError): continue
+        return run_dir.name, verdict
+    return None
+
+
 def new_run(store, name, path, digest, spec, defects):
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + secrets.token_hex(3)
     run_dir = store.root / "gate" / run_id
     run_dir.mkdir(parents=True)
     nonce = secrets.token_hex(16)
-    entries = []
+    entries, carried = [], {}
     for defect in defects:
         entry = {"id": defect["id"], "status": defect.get("status"), "kind": defect.get("kind"), "bbox": defect["bbox"], "crops": {}}
         if defect.get("member"): entry["member"] = defect["member"]
@@ -1039,11 +1075,21 @@ def new_run(store, name, path, digest, spec, defects):
                 for scale, (file_name, data) in render_crops(image, defect["id"], entry["crop_box"], nonce).items():
                     atomic_write(run_dir / file_name, data)
                     entry["crops"][scale] = {"file": file_name, "sha256": sha256_bytes(data)}
+                if defect.get("status") == "resolved":
+                    found = earlier_pass(store, name, defect["id"], entry["crop_box"], region_hash(image, entry["crop_box"]))
+                    if found: carried[defect["id"]] = (found, entry["crops"]["100"]["sha256"])
         except UsageError: raise
         except Exception as exc: entry["crop_box"], entry["error"] = None, f"cannot crop ({exc})"
         entries.append(entry)
     checklist = {"run_id": run_id, "nonce": nonce, "deliverable": name, "file": str(path), "sha256": digest, "created": now(), "defects": entries}
     atomic_write(run_dir / "checklist.json", dump_json(checklist))
+    if carried:
+        # A resolved defect whose pixels are identical to an earlier passing run keeps that verdict; only changed regions need a new look.
+        verdicts = {did: {"status": "pass", "crop_sha256": crop_sha, "reviewer": old["reviewer"], "time": now(), "carried_from": old_run,
+                          "evidence": f"unchanged since run {old_run}: {old['evidence'].strip()}"}
+                    for did, ((old_run, old), crop_sha) in carried.items()}
+        atomic_write(run_dir / "verdicts.json", dump_json({"run_id": run_id, "nonce": nonce, "deliverable": name, "verdicts": verdicts}))
+        print(f"Carried {len(carried)} verdict(s) for regions unchanged since an earlier passing run: {', '.join(sorted(carried, key=lambda d: int(d[1:])))}")
     return run_id, run_dir, checklist
 
 
@@ -1133,7 +1179,7 @@ def resolved_proof(store_root, path, spec, digest, defects, report):
         except UsageError: raise
         except Exception as exc: report.fail(f"{did}: cannot read its region to confirm the fix ({exc})"); continue
         if same: report.fail(f"{did} marked resolved but its pixels are unchanged since it was reported")
-        elif share is not None and share < MIN_CHANGED:
+        elif share is not None and share < (MIN_CHANGED_REQUEST if defect.get("kind") == "scope" and defect.get("quote") else MIN_CHANGED):
             report.fail(f"{did} marked resolved but almost nothing changed in its box ({share:.1%} of pixels)")
 
 
