@@ -10,7 +10,8 @@ a verdict that names a crop made in the same gate run.
 `hook session-start` and `hook stop` are thin wrappers for Claude Code and Codex plugin
 hooks; they always exit 0 and print nothing on errors.
 
-Exit codes: 0 success or gate pass, 1 gate fail, 2 bad input or missing store.
+Exit codes: 0 success or gate pass, 1 gate fail or edit-check found changes outside the
+box, 2 bad input or missing store.
 """
 
 import argparse
@@ -203,11 +204,11 @@ def plugin_version():
 
 def pil():
     try:
-        from PIL import Image, ImageChops, ImageFilter, ImageStat, PngImagePlugin
+        from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageStat, PngImagePlugin
     except ImportError:
         raise UsageError("Pillow is required: uv run --with pillow python3 ... (or pip install pillow)") from None
     res = getattr(Image, "Resampling", Image)
-    return types.SimpleNamespace(Image=Image, ImageChops=ImageChops, ImageFilter=ImageFilter, ImageStat=ImageStat,
+    return types.SimpleNamespace(Image=Image, ImageChops=ImageChops, ImageDraw=ImageDraw, ImageFilter=ImageFilter, ImageStat=ImageStat,
                                  PngImagePlugin=PngImagePlugin, NEAREST=res.NEAREST, BILINEAR=res.BILINEAR)
 
 
@@ -351,13 +352,8 @@ def region_hash(img, bbox):
 
 
 def changed_share(before, after):
-    P = pil()
     if before.size != after.size: return 1.0
-    bands = P.ImageChops.difference(before.convert("RGBA"), after.convert("RGBA")).split()
-    peak = bands[0]
-    for band in bands[1:]: peak = P.ImageChops.lighter(peak, band)
-    total = before.size[0] * before.size[1]
-    return count_on(peak.point(lambda v: 255 if v > CHANGE_LEVEL else 0)) / float(total or 1)
+    return count_on(changed_mask(before, after)) / float(before.size[0] * before.size[1] or 1)
 
 
 def alpha_problem(img, rule):
@@ -1476,6 +1472,84 @@ def run_hook(argv):
 
 # ---------------------------------------------------------------- CLI
 
+# ---------------------------------------------------------------- defect map and edit check
+
+def changed_mask(before, after):
+    """255 where any channel differs by more than CHANGE_LEVEL."""
+    P = pil()
+    bands = P.ImageChops.difference(before.convert("RGBA"), after.convert("RGBA")).split()
+    peak = bands[0]
+    for band in bands[1:]: peak = P.ImageChops.lighter(peak, band)
+    return peak.point(lambda v: 255 if v > CHANGE_LEVEL else 0)
+
+
+def outline(draw, box, color, width):
+    x0, y0, x1, y1 = box
+    for i in range(width):
+        draw.rectangle((x0 + i, y0 + i, x1 - 1 - i, y1 - 1 - i), outline=color)
+
+
+def cmd_map(args):
+    P = pil()
+    store = open_store(args.project)
+    item = store.deliverable(args.deliverable)
+    path = existing_file(args.file, "--file") if args.file else store.resolve(item.get("path", ""))
+    if item.get("spec", {}).get("format") == "ZIP": raise UsageError("map works on a single image, not a ZIP")
+    image = open_image(path).convert("RGB")
+    spec = item.get("spec") or {}
+    if (spec.get("width"), spec.get("height")) != (None, None) and image.size != (spec.get("width"), spec.get("height")):
+        raise UsageError(f"{path.name} is {image.size[0]}x{image.size[1]}; the deliverable size is "
+                         f"{spec.get('width')}x{spec.get('height')}")
+    open_items = [d for d in store.defects() if d.get("deliverable") == args.deliverable and d.get("status") == "open"]
+    draw = P.ImageDraw.Draw(image)
+    width = max(2, round(min(image.size) / 300))
+    for d in open_items:
+        box = d["bbox"]
+        outline(draw, box, (255, 0, 0), width)
+        label = str(d["id"])
+        tx, ty = box[0] + width, box[1] + width
+        left, top, right, bottom = draw.textbbox((tx, ty), label)
+        draw.rectangle((left - 1, top - 1, right + 1, bottom + 1), fill=(255, 0, 0))
+        draw.text((tx, ty), label, fill=(255, 255, 255))
+    out = Path(args.out)
+    image.save(out, "PNG")
+    print(f"Map: {out} ({len(open_items)} open defects on {path.name})")
+    for d in open_items: print(defect_line(d))
+    return 0
+
+
+def cmd_edit_check(args):
+    before_path, after_path = existing_file(args.before, "--before"), existing_file(args.after, "--after")
+    before, after = open_image(before_path), open_image(after_path)
+    if before.size != after.size:
+        raise UsageError(f"size differs: {before.size[0]}x{before.size[1]} vs {after.size[0]}x{after.size[1]}")
+    box = parse_bbox(args.bbox)
+    w, h = before.size
+    if box[2] > w or box[3] > h: raise UsageError(f"--bbox {box} is outside the image size {w}x{h}")
+    if args.ring < 0: raise UsageError("--ring must be 0 or more")
+    P = pil()
+    changed = changed_mask(before, after)
+    inside = P.Image.new("L", before.size, 0)
+    inside.paste(255, tuple(box))
+    outside = P.ImageChops.darker(changed, P.ImageChops.invert(inside))
+    count_out, span = count_on(outside), outside.getbbox()
+    print(f"Changed pixels inside the box: {count_on(P.ImageChops.darker(changed, inside))}")
+    print(f"Changed pixels outside the box: {count_out}" + (f" (span {','.join(map(str, span))})" if span else ""))
+    r = args.ring
+    view = (max(0, box[0] - r), max(0, box[1] - r), min(w, box[2] + r), min(h, box[3] + r))
+    panels = [before.crop(view).convert("RGB"), after.crop(view).convert("RGB"), changed.crop(view).convert("RGB")]
+    vw, vh = view[2] - view[0], view[3] - view[1]
+    sheet = P.Image.new("RGB", (vw * 3, vh))
+    for i, panel in enumerate(panels): sheet.paste(panel, (i * vw, 0))
+    draw = P.ImageDraw.Draw(sheet)
+    local = (box[0] - view[0], box[1] - view[1], box[2] - view[0], box[3] - view[1])
+    for i in (1, 2): outline(draw, (local[0] + i * vw, local[1], local[2] + i * vw, local[3]), (255, 0, 0), 1)
+    sheet.save(args.out, "PNG")
+    print(f"View: {args.out} (before | after | changed pixels, box + {r} px ring, 100%). Look at the ring for "
+          "leftover fragments, seams, and halos.")
+    return 1 if count_out else 0
+
+
 EPILOG = """\
 subcommands:
   init --project PATH --brand ID         example: python3 studio_state.py init --project . --brand acme
@@ -1501,11 +1575,16 @@ subcommands:
   brand set --brand B [--color NAME=#RRGGBB[:role]] [--font ROLE=Family] [--logo FILE] [--ref FILE=role] [--do T] [--dont T] [--remove KEY]
                                          example: python3 studio_state.py brand set --brand acme --color gold=#E1C178:accent --font title=Cinzel --logo logo.png --ref style.png=style --dont "no 3D render look"
   brand show [--brand B]                 example: python3 studio_state.py brand show --brand acme
+  map --deliverable N [--file F] --out F  draw every open defect on one image for the user to confirm at once
+                                         example: python3 studio_state.py map --deliverable poster --out defect-map.png
+  edit-check --before A --after B --bbox x0,y0,x1,y1 [--ring 24] [--out F]
+                                         changed pixels outside the edit box (exit 1 if any) and one before|after|changes view
+                                         example: python3 studio_state.py edit-check --before v7.png --after v8.png --bbox 280,320,370,410
   hook session-start | hook stop         example: python3 studio_state.py hook session-start < payload.json
 
 approve, defect, brief, gate and verdict find the store by walking up from --project or the current folder.
 init creates it; pref add does not use the project store; lessons (lessons.jsonl) and taste notes (brands/<brand>/taste.jsonl, taste.jsonl) live in ${IMAGE_STUDIO_HOME:-~/.image-studio}, shared by every job; hooks use the cwd from the hook input.
-exit codes: 0 ok / gate pass, 1 gate fail, 2 bad input or no store
+exit codes: 0 ok / gate pass, 1 gate fail or edit-check found changes outside the box, 2 bad input or no store
 """
 
 
@@ -1553,6 +1632,16 @@ def build_parser():
     p.add_argument("--evidence", required=True); p.add_argument("--reviewer", choices=("self", "independent"), default="self")
     p.add_argument("--crop", choices=("100", "200"), default="100")
     p.set_defaults(func=cmd_verdict)
+
+    p = sub.add_parser("map", parents=[common])
+    p.add_argument("--deliverable", required=True); p.add_argument("--file"); p.add_argument("--out", required=True)
+    p.set_defaults(func=cmd_map)
+
+    p = sub.add_parser("edit-check")
+    p.add_argument("--before", required=True); p.add_argument("--after", required=True)
+    p.add_argument("--bbox", required=True, nargs="+"); p.add_argument("--ring", type=int, default=24)
+    p.add_argument("--out", default="edit-check.png")
+    p.set_defaults(func=cmd_edit_check)
 
     pref = sub.add_parser("pref").add_subparsers(dest="what", metavar="add", required=True)
     p = pref.add_parser("add")

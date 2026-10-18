@@ -1737,5 +1737,59 @@ class ConcurrencyAndLinkTests(StudioBase):
         self.assertEqual(item["deliverable"], "poster")
 
 
+class DefectMapTests(StudioBase):
+    """map draws every open defect on one image, so the user confirms all findings in one round."""
+
+    def test_map_marks_open_defects_only(self):
+        self.init(); self.approve_poster(self.poster())
+        d1 = self.defect([20, 20, 80, 80], kind="artifact", note="mushy blob", source="agent")
+        d2 = self.defect([100, 30, 180, 120], kind="seam", note="hard edge", source="agent")
+        self.ok("defect", "close", "--id", d2, "--status", "wontfix", "--note", "not a problem", "--quote", "cái 2 ko sao")
+        out = self.project / "map.png"
+        run = self.ok("map", "--deliverable", "poster", "--out", out)
+        self.assertIn(d1, run.stdout); self.assertNotIn(d2 + " ", run.stdout)
+        with Image.open(out) as raw: img = raw.convert("RGB")
+        self.assertEqual(img.size, (200, 150))
+        self.assertEqual(img.getpixel((20, 50)), (255, 0, 0))     # D1 outline
+        self.assertEqual(img.getpixel((179, 75)), (255, 255, 255))  # closed D2 not drawn
+
+    def test_map_rejects_file_of_other_size(self):
+        self.init(); self.approve_poster(self.poster())
+        other = self.project / "small.png"; Image.new("RGB", (50, 50)).save(other)
+        run = self.run_cli("map", "--deliverable", "poster", "--file", other, "--out", self.project / "m.png")
+        self.assertEqual(run.returncode, 2); self.assertIn("size", run.stderr)
+
+
+class EditCheckTests(StudioBase):
+    """edit-check: changes outside the edit box and one before|after|changes view, without a store."""
+
+    def images(self, leak=False):
+        before = Image.new("RGB", (200, 150), (90, 120, 150)); before.save(self.project / "a.png")
+        after = before.copy(); draw = ImageDraw.Draw(after)
+        draw.rectangle((60, 40, 120, 100), fill=(200, 180, 40))
+        if leak: draw.rectangle((150, 120, 159, 129), fill=(0, 0, 0))
+        after.save(self.project / "b.png")
+
+    def test_clean_edit_passes_and_writes_view(self):
+        self.images()
+        run = self.ok("edit-check", "--before", "a.png", "--after", "b.png", "--bbox", "50,30,130,110", "--out", "v.png")
+        self.assertIn("outside the box: 0", run.stdout)
+        with Image.open(self.project / "v.png") as view: view.load()
+        self.assertEqual(view.size[1], 80 + 2 * 24)  # box plus the default 24 px ring
+        self.assertEqual(view.size[0], 3 * (80 + 2 * 24))
+
+    def test_change_outside_box_fails(self):
+        self.images(leak=True)
+        run = self.run_cli("edit-check", "--before", "a.png", "--after", "b.png", "--bbox", "50,30,130,110", "--out", "v.png")
+        self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+        self.assertIn("outside the box: 100", run.stdout)
+        self.assertIn("150,120,160,130", run.stdout)
+
+    def test_size_mismatch_is_bad_input(self):
+        self.images(); Image.new("RGB", (10, 10)).save(self.project / "c.png")
+        run = self.run_cli("edit-check", "--before", "a.png", "--after", "c.png", "--bbox", "1,1,5,5")
+        self.assertEqual(run.returncode, 2); self.assertIn("size", run.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

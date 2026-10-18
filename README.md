@@ -21,6 +21,8 @@ A plugin of ten skills for Claude Code and Codex, plus a reviewer agent in the C
 
 The `image-reviewer` agent (Claude Code plugin) grades a candidate independently, so the editing agent does not grade its own work. Other hosts get the same instructions in `image-verify/references/independent-review.md` for a fresh reviewer session.
 
+The `image-hunter` agent hunts a whole image for problems at intake and before delivery (AI slop, broken contours, leftovers of removed objects, seams, the user's past complaints) and returns one table; `studio_state.py map` draws them on one image so the user confirms everything in one round, and `studio_state.py edit-check` checks each repair's region without re-reading the whole image. Other hosts get the hunt instructions in `image-verify/references/designer-review.md`.
+
 | Before (1672×941, wrong pets) | After (repainted, upscaled, repaired) |
 | --- | --- |
 | ![Before](examples/image-repair/tavern-hero/before.webp) | ![After](examples/image-repair/tavern-hero/after.webp) |

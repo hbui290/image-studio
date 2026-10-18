@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.10.0-local.1 (2026-10-18)
+
+Finding and fixing problems in fewer rounds. In the poster job the user found 11 of 13 defects, 3 of them left by an earlier repair, over 11 versions.
+
+- **Hunt at intake and before delivery:** the designer review makes overlapping 100% tiles named by their corner and hunts with a fixed list (AI slop, broken contours, fragmented detail, leftovers of removed objects, seams, specks, style breaks, small content, frame, the user's past complaints). In Claude Code the new `image-hunter` agent does it in its own context and returns one table, so the main chat does not load the tiles; other hosts get the same instructions in `designer-review.md`.
+- **`studio_state.py map`:** draws every open defect on one image, so the user confirms or rejects all findings in one round. Agent findings are recorded with `defect add --source agent`.
+- **`studio_state.py edit-check`:** after each patch, counts changed pixels outside the edit box (exit 1 if any) and writes one before | after | changed-pixels view with a 24 px ring, the only image a repair round opens. On the real poster it showed the D12 repair had changed 16,627 pixels outside its box, up to the hair.
+- **Measured on poster v1:** a blind hunt found 13 other problems but none of the 4 the user had found there (whole-image softness, soft inset images, uneven hat trim, halo behind a horn). Given the user's past complaints as lessons, it found the soft inset image and the stepped trim beside the deadline, but still missed the whole-image softness and the halo. The hunt is a first pass, the user's lessons make it better, and the user still makes the final call.
+- **Triage and batches:** six or more high or medium problems, or whole-image softness, lead to an offer to regenerate the whole image before patching; confirmed problems are fixed in one batch and gated once.
+
 ## 2.9.3-local.1 (2026-10-18)
 
 Fixes from running every documented tool command on this Mac (ImageMagick, Upscayl with all 7 models, Real-ESRGAN, rembg, Potrace, cwebp, sips, every bundled script, both hooks).

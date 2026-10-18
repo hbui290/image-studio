@@ -115,6 +115,11 @@ class DocsTest(unittest.TestCase):
         agent = (PLUGIN / "agents/image-reviewer.md").read_text().split("---\n", 2)[2].strip()
         self.assertIn(agent, (SKILLS / "image-verify/references/independent-review.md").read_text())
 
+    def test_hunter_instructions_ship_with_every_install(self):
+        agent = (PLUGIN / "agents/image-hunter.md").read_text().split("---\n", 2)[2].strip()
+        nested = agent.replace("\n## ", "\n### ")  # nested one level under the designer review's hunt section
+        self.assertIn(nested, (SKILLS / "image-verify/references/designer-review.md").read_text())
+
     def test_every_skill_has_codex_metadata(self):
         for name in skill_names():
             self.assertTrue((SKILLS / name / "agents/openai.yaml").is_file(), name)
