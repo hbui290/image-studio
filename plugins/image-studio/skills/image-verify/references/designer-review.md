@@ -14,7 +14,7 @@ magick in.png -gravity West -crop 90x+0+0 +repage edge-left.png
 magick in.png -gravity East -crop 90x+0+0 +repage edge-right.png
 magick in.png -colorspace Gray gray.png                            # value structure and focal point
 magick in.png -resize 120x120 thumb.png                            # does it still read when small?
-magick approved.png in.png -resize x600 +append lineup.png         # next to the last approved version
+magick approved.png in.png -resize x600 +append +repage lineup.png # next to the last approved version
 ```
 
 Open every view. Crop text, logos, faces, and hands again at 200% when the 100% tile is unclear. `lineup.png` needs an earlier approved file; skip it for a first draft.

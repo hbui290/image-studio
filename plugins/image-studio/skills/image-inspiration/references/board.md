@@ -19,6 +19,7 @@ Keep the full reverse-engineered inventory separate from the selected generation
 Source paths are relative to the board file unless absolute. Source can also be an inspected URL or a clearly labeled `user-note:` reference. Save access/inspection evidence with the full inventory. Trait IDs are globally unique. Axis names are arbitrary, nonempty property names; prefer the vocabulary in SKILL.md. Confidence is `high`, `medium`, `low`, or `unknown`; unknown traits may be inventoried but cannot participate in generation. An axis containing only unknown traits needs user clarification. A fixed trait must belong to its named axis. Incompatible pairs are lists of two distinct known trait IDs, such as `["R1:flat-medium", "R2:photographic-reflection"]`.
 
 ```bash
+mkdir -p r1
 python3 <skills>/image-inspiration/scripts/combine.py board.json --count 4 --seed 7 --out r1/plan.json
 ```
 

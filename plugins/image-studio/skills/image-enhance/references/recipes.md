@@ -6,10 +6,10 @@ Measured on this project's test images (a 1672×941 anime tavern scene and a dar
 
 | Image | Recipe | Result |
 | --- | --- | --- |
-| Anime / 2D art, under ~2000 px wide | `remacri-4x` at 4x → Lanczos to delivery size (non-commercial model: for commercial work use `digital-art-4x`) | Best measured: clearly sharper line art, eyes, hair at 1920 and on mobile. ~31 s |
+| Anime / 2D art, under ~2000 px wide | `remacri-4x` at 4x → Lanczos to delivery size (non-commercial model: for commercial work use `digital-art-4x`) | Best measured: clearly sharper line art, eyes, hair at 1920 and on mobile. ~31 s. It can shift color (failed the color check on a WebP copy and on a metallic card), so always trial it against `digital-art-4x` |
 | Same, when speed matters | `realesr-animevideov3-x2` at 2x → Lanczos → `-unsharp 0x0.55+0.5+0.015` | Clearly sharper, ~2.4 s. Slight halos |
 | Same, cleanest lines | `digital-art-4x` at 4x | Clean, slightly hard shading. Same weights as `realesrgan-x4plus-anime` |
-| Photo | `upscayl-standard-4x` or `realesrgan-x4plus` at 4x; `ultrasharp-4x` for non-commercial work; compare them | Not yet verified on detailed photos; always compare |
+| Photo | `upscayl-standard-4x` (same weights as `realesrgan-x4plus`) or `ultrasharp-4x` (non-commercial) at 4x; compare them | Not yet verified on detailed photos; always compare |
 | Already at or above delivery size but soft | No upscaler. Lanczos export, optional `-unsharp 0x0.6+0.6+0.02` | Upscaling adds little you can see; fix soft areas with image-repair |
 | Small text, UI, logos | No AI upscaler | Upscalers invent wrong letters. Re-render from vector or source, or plain Lanczos |
 
@@ -30,9 +30,9 @@ Model names are the `.param`/`.bin` file names without extension. The upscaler l
 | Models | Where they come from |
 | --- | --- |
 | `remacri-4x`, `ultrasharp-4x`, `digital-art-4x`, `high-fidelity-4x`, `ultramix-balanced-4x`, `upscayl-standard-4x`, `upscayl-lite-4x` | Upscayl's app models folder (macOS: `/Applications/Upscayl.app/Contents/Resources/models`) |
-| `realesr-animevideov3-x2` (also `-x3`, `-x4`), `realesrgan-x4plus`, `realesrgan-x4plus-anime` | The [Real-ESRGAN-ncnn-vulkan release](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan/releases) `models` folder. They are not in Upscayl's folder |
+| `realesr-animevideov3-x2` (also `-x3`, `-x4`), `realesrgan-x4plus`, `realesrgan-x4plus-anime` | The `models` folder of the [Real-ESRGAN v0.2.5.0 release](https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-macos.zip) (macOS zip, 49 MB; the Real-ESRGAN-ncnn-vulkan v0.2.0 zip has no models; other systems: the same release page). They are not in Upscayl's folder |
 
-Copy both sets into one folder of your own and point `MODELS` at it; then every recipe works with either binary. If a model is missing, `upscayl-bin` prints `fopen ... failed`, writes an all-black image, and still exits 0, so check before and after each run:
+Copy both sets into one folder of your own and point `MODELS` at it; then every recipe works with either binary. If a model is missing, `upscayl-bin` prints `fopen ... failed`, writes an all-black image, and still exits 0; `realesrgan-ncnn-vulkan` crashes (exit 139, no output file, no message). Check before and after each run:
 
 ```bash
 BIN=/Applications/Upscayl.app/Contents/Resources/bin/upscayl-bin   # macOS app; or upscayl-bin / realesrgan-ncnn-vulkan on PATH
@@ -62,7 +62,7 @@ python3 <skills>/image-enhance/scripts/compare_display.py --source crop.png --ca
 
 ## Getting an upscaler
 
-With authorization, install [Upscayl](https://github.com/upscayl/upscayl) (desktop app that ships `upscayl-bin` and models) or download [Real-ESRGAN-ncnn-vulkan](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan/releases) with its model files. Both run on the GPU without Python. Check the licence before redistributing either binary.
+With authorization, install [Upscayl](https://github.com/upscayl/upscayl) (desktop app that ships `upscayl-bin` and models) or download [Real-ESRGAN-ncnn-vulkan](https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-macos.zip) with its model files (that release zip includes them). Both run on the GPU without Python. Check the licence before redistributing either binary.
 
 ## Proving the gain
 

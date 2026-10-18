@@ -47,6 +47,7 @@ After a real judgment, replace null with:
 `by` is `human` or `llm`. An LLM `ranking` must contain every eligible ID exactly once, best first. A human may give a full ranking or just a winning ID: save that single ID in the ranking and leave the others unranked. Do not invent preferences on their behalf. A stop request requires no ranking. A fully checked candidate may still have uncertain aesthetic preference: leave judgment null, record the uncertainty and stop or ask the user; never fabricate a ranking to pass this helper.
 
 ```bash
+mkdir -p r1
 python3 <skills>/image-inspiration/scripts/advance.py state.json --out r1/decision.json
 ```
 

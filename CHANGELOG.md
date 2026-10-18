@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.9.3-local.1 (2026-10-18)
+
+Fixes from running every documented tool command on this Mac (ImageMagick, Upscayl with all 7 models, Real-ESRGAN, rembg, Potrace, cwebp, sips, every bundled script, both hooks).
+
+- **Upscale:** the Real-ESRGAN link points to the release zip that includes models (the v0.2.0 zip has none, and the binary crashes without them); `upscayl-standard-4x` and `realesrgan-x4plus` are noted as the same weights; `remacri-4x` is noted to shift color on some images, so it is always trialled against `digital-art-4x`; the SKILL example uses the macOS app path for `upscayl-bin` and resizes by width.
+- **Docs:** `+repage` on the lineup view; `mkdir -p r1` before `combine.py` and `advance.py`; the audit's `evidence.json` fields and its `review.json` output listed correctly.
+
 ## 2.9.2-local.1 (2026-10-18)
 
 Fixes from researching each tool's official docs and source, every command re-tested on ImageMagick 7.1.2.
