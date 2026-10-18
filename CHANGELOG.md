@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.9.2-local.1 (2026-10-18)
+
+Fixes from researching each tool's official docs and source, every command re-tested on ImageMagick 7.1.2.
+
+- **Repair composite:** the acceptance mask is softened inward only (the old grow-and-blur spread about 14 px past the polygon and could reach the crop edge as a rectangular seam); `-depth 8` is no longer forced, since on a 16-bit source it changed almost every pixel outside the edit; a `compare -metric PDC -read-mask` command proves zero changed pixels outside the mask.
+- **Reviewer:** `review.py --crop` attaches 100% crops after the full images, because Codex shrinks attached images and missed small text; the Codex reviewer runs with image generation disabled. image-loop and image-verify name the `image-reviewer` agent and tell the caller to pass it crops.
+- **Upscale:** the black-image check uses `-alpha off` (a black result with alpha printed 1 and passed); `realesrgan-ncnn-vulkan` needs `-s` equal to the model's scale; `remacri-4x`, `ultrasharp-4x`, and `ultramix-balanced-4x` are marked non-commercial, with commercial alternatives.
+- **Cutouts and logos:** the magenta key gives soft alpha and removes magenta from edge colors (0 pink rim pixels instead of hundreds); logo color masks use `-alpha remove`, so color hidden under transparent areas no longer leaks into a layer; rembg calls must name a model (the default is a 1 GB model with a commercial licence).
+- **Codex tools and web export:** `image_gen.imagegen` limits (5 absolute reference paths, one image per call, no size or mask, copy results out of `$CODEX_HOME/generated_images`); `view_image` and Read may shrink images, so crop for true 100%; web export converts non-sRGB masters to sRGB before `-strip`.
+
 ## 2.9.1-local.1 (2026-10-18)
 
 Fixes from a full audit of code and docs (3 independent reviewers).

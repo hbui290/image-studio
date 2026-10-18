@@ -6,10 +6,10 @@ Measured on this project's test images (a 1672×941 anime tavern scene and a dar
 
 | Image | Recipe | Result |
 | --- | --- | --- |
-| Anime / 2D art, under ~2000 px wide | `remacri-4x` at 4x → Lanczos to delivery size | Best measured: clearly sharper line art, eyes, hair at 1920 and on mobile. ~31 s |
+| Anime / 2D art, under ~2000 px wide | `remacri-4x` at 4x → Lanczos to delivery size (non-commercial model: for commercial work use `digital-art-4x`) | Best measured: clearly sharper line art, eyes, hair at 1920 and on mobile. ~31 s |
 | Same, when speed matters | `realesr-animevideov3-x2` at 2x → Lanczos → `-unsharp 0x0.55+0.5+0.015` | Clearly sharper, ~2.4 s. Slight halos |
 | Same, cleanest lines | `digital-art-4x` at 4x | Clean, slightly hard shading. Same weights as `realesrgan-x4plus-anime` |
-| Photo | `ultrasharp-4x`, `upscayl-standard-4x`, or `realesrgan-x4plus` at 4x; compare them | Not yet verified on detailed photos; always compare |
+| Photo | `upscayl-standard-4x` or `realesrgan-x4plus` at 4x; `ultrasharp-4x` for non-commercial work; compare them | Not yet verified on detailed photos; always compare |
 | Already at or above delivery size but soft | No upscaler. Lanczos export, optional `-unsharp 0x0.6+0.6+0.02` | Upscaling adds little you can see; fix soft areas with image-repair |
 | Small text, UI, logos | No AI upscaler | Upscalers invent wrong letters. Re-render from vector or source, or plain Lanczos |
 
@@ -17,9 +17,11 @@ Do not use `high-fidelity-4x` for sharpening (it softened the test image), do no
 
 Upscalers amplify JPEG noise into fake texture (`ultrasharp-4x` worst). If the source is a heavily compressed JPEG, try a cleaner source first.
 
+**Licence:** Upscayl marks `remacri-4x`, `ultrasharp-4x`, and `ultramix-balanced-4x` as non-commercial. For client or commercial images use `upscayl-standard-4x`, `upscayl-lite-4x`, `high-fidelity-4x`, `digital-art-4x`, or the Real-ESRGAN models.
+
 ## Commands
 
-`upscayl-bin` and `realesrgan-ncnn-vulkan` both accept the flags used here (`-i -o -s -m -n -t -x -g`). `upscayl-bin` has a few more (`-z`, `-r`, `-w`, `-c`) that these recipes do not need.
+`upscayl-bin` and `realesrgan-ncnn-vulkan` both accept the flags used here (`-i -o -s -m -n -t -x -g`), with one difference: `realesrgan-ncnn-vulkan` needs `-s` equal to the model's own scale (4 for a `-4x`/`x4plus` model), or it writes a broken image; `upscayl-bin` resizes to any `-s`. `upscayl-bin` also has `-w WIDTH` (exact output width, aspect kept) and `-z`, `-r`, `-c`. Give `-m` an absolute path.
 
 ### Model folders
 
@@ -38,7 +40,7 @@ MODELS=/path/to/models       # your folder holding both model sets (*.param and 
 model=remacri-4x
 test -f "$MODELS/$model.param" || echo "missing $model in $MODELS"
 "$BIN" -i in.png -o out.png -s 4 -m "$MODELS" -n "$model"      # realesr-animevideov3-x2 uses -s 2
-magick out.png -format '%[fx:maxima]' info:                  # must print a number above 0
+magick out.png -alpha off -format '%[fx:maxima]' info:       # must print a number above 0 (-alpha off: a black image with alpha still prints 1)
 ```
 
 Useful flags: `-t 256` (smaller tiles when memory runs out, or to avoid visible tile seams), `-x` (slower test-time augmentation, fewer seams), `-g 0` (pick the GPU). A 3840×2160 input at 4x took 160 s and about 1 GB of memory; resize from the result immediately and do not keep the 15360-wide PNG.
@@ -53,7 +55,7 @@ for pair in remacri-4x:4 ultrasharp-4x:4 realesr-animevideov3-x2:2; do   # model
   model=${pair%:*} scale=${pair#*:}
   test -f "$MODELS/$model.param" || { echo "missing $model in $MODELS"; continue; }
   "$BIN" -i crop.png -o "crop-$model.png" -s "$scale" -m "$MODELS" -n "$model"
-  echo "$model maxima: $(magick "crop-$model.png" -format '%[fx:maxima]' info:)"   # 0 = all black, discard
+  echo "$model maxima: $(magick "crop-$model.png" -alpha off -format '%[fx:maxima]' info:)"   # 0 = all black, discard
 done
 python3 <skills>/image-enhance/scripts/compare_display.py --source crop.png --candidate crop-remacri-4x.png --out c-remacri --width 1000
 ```

@@ -71,24 +71,29 @@ h=500
 magick "$src" -crop "${w}x${h}+${x}+${y}" +repage crop.png
 magick "$candidate" -resize "${w}x${h}!" candidate-sized.png
 
-# Acceptance mask in crop coordinates: white polygon accepted, black kept, 1-2 px grow and soft edge.
+# Acceptance mask in crop coordinates: white polygon accepted, black kept, edge softened inward only.
 magick -size "${w}x${h}" xc:black -fill white \
   -draw 'polygon 120,80 480,70 520,420 90,430' \
-  -morphology Dilate Disk:2 -blur 0x3 -depth 8 "$mask"
+  -blur 0x3 -level 50%,100% "$mask"
 
 magick candidate-sized.png "$mask" \
   -alpha off -compose CopyOpacity -composite patch-with-alpha.png
 
 magick "$src" patch-with-alpha.png \
-  -geometry "+${x}+${y}" -compose Over -composite -depth 8 review.png
+  -geometry "+${x}+${y}" -compose Over -composite review.png
+
+# Prove nothing outside the mask changed: protect.png is white wherever the mask is 0.
+magick -size "$(magick identify -format '%wx%h' "$src")" xc:black "$mask" -geometry "+${x}+${y}" \
+  -compose Over -composite -threshold 0 -negate protect.png
+magick compare -metric PDC -read-mask protect.png "$src" review.png null:   # must print 0; exit 1 if any pixel differs
 ```
 
-Create `patch-mask.png` at exactly `w × h`: white accepts new pixels, black keeps the source. Feather only the boundary.
+Create `patch-mask.png` at exactly `w × h`: white accepts new pixels, black keeps the source. Feather only the boundary, and only inward: a grown or blurred-outward mask spreads past the polygon and can reach the crop edge, which shows as a rectangular seam. If the mask must grow, check that `magick "$mask" -format '%@' info:` stays clear of the crop edges.
 - **Polarity:** The final acceptance mask uses white for accepted pixels and black for kept pixels. For tools requiring inverted alpha (such as OpenAI edits where transparent pixels mark areas to redraw), convert with `magick crop.png \( "$mask" -negate \) -alpha off -compose CopyOpacity -composite openai-mask.png`, keeping the original as the acceptance mask.
 - **Coverage:** Include complete silhouettes with a small margin. If a mask cuts through an object, regenerate or redraw rather than hiding mismatches with wide blur.
 - **Nested masks:** For interior repairs, subtract protected interior masks (emblems, line work) from the outer acceptance mask before compositing.
-- **`-depth 8`:** Required to ensure 8-bit PNG output that pixel audit scripts can compare. On Windows PowerShell, use equivalent variables (`$crop = "$($w)x$($h)+$x+$y"`) with the same white-accepts convention.
+- **Bit depth:** Keep the source's depth. Do not add `-depth 8` to a 16-bit source (`magick identify -format '%z' input.png` prints 16): it changes many pixels outside the edit. The `compare -metric PDC` check above works at 16 bits; the pixel audit refuses 16-bit color PNGs, so for it compare 8-bit copies of both files (`magick input.png -depth 8 input-8.png`, same for `review.png`) and deliver the 16-bit file. On Windows PowerShell, use equivalent variables (`$crop = "$($w)x$($h)+$x+$y"`) with the same white-accepts convention.
 
-Inspect `review.png` before lossy export. For exact preservation outside edits, place the crop-local mask on a full-size black canvas at `(x, y)`, invert the nonzero mask footprint to obtain the protected area, and verify zero changed pixels there. Inspect seams at 100% and delivery size. If colors differ, convert profiles into a common colorspace before blending rather than relabeling metadata ([ImageMagick color management](https://imagemagick.org/color-management/)).
+Inspect `review.png` before lossy export. For exact preservation outside edits, place the crop-local mask on a full-size black canvas at `(x, y)`, invert the nonzero mask footprint to obtain the protected area, and verify zero changed pixels there (the `compare -metric PDC -read-mask` command above; `PDC` counts changed pixels, while `AE` on ImageMagick 7.1.2 does not give a pixel count for color images). Inspect seams at 100% and delivery size. If colors differ, convert profiles into a common colorspace before blending rather than relabeling metadata ([ImageMagick color management](https://imagemagick.org/color-management/)).
 
 Record an evidence ledger: source and approved references; crop, candidate, and accepted mask; tool/model invoked; dimensions before/after; rejected variants and why; 100% review and final display review.

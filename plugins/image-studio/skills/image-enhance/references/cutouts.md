@@ -14,7 +14,7 @@ magick cutout.png -background white -flatten on-white.png
 magick cutout.png -background black -flatten on-black.png
 ```
 
-The first run downloads the model. Inspect both backdrops for halos, holes, and missing hair. Never ask an image generator for a "transparent background" and trust a painted checkerboard.
+Always pass `-m`: without it rembg 2.0.85 downloads `bria-rmbg` (about 1 GB, commercial use needs a BRIA licence). For a folder, `rembg p -m <model> indir outdir` loads the model once. `-dc` removes backdrop color from edge pixels. The first run downloads the model. Inspect both backdrops for halos, holes, and missing hair. Never ask an image generator for a "transparent background" and trust a painted checkerboard.
 
 ### Solid backdrop
 

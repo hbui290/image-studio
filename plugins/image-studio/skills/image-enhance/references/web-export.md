@@ -2,7 +2,12 @@
 
 Read by [image-enhance](../SKILL.md) only when the condition named there holds. Upscaling recipes and the measured results are in [recipes.md](recipes.md).
 
-Export from the lossless source file, never from a previous WebP:
+Export from the lossless source file, never from a previous WebP. `-strip` drops the color profile, so first convert a master tagged Display P3, Adobe RGB, or another non-sRGB profile into sRGB, or its colors shift in the browser:
+
+```bash
+magick identify -format '%[profile:icc]\n' source.png 2>/dev/null   # empty or sRGB: skip the next line
+magick source.png -profile "/System/Library/ColorSync/Profiles/sRGB Profile.icc" source-srgb.png   # macOS path; elsewhere any sRGB .icc file; then export from source-srgb.png
+```
 
 ```bash
 mw=$(magick identify -format '%w' source.png)

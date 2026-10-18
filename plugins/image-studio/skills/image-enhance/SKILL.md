@@ -23,13 +23,13 @@ Run scripts; do not read their source - use `--help` for usage.
    ls /Applications/Upscayl.app/Contents/Resources/bin/ 2>/dev/null
    ```
    Stop if an upscale is needed and no upscaler is installed; do not use sharpen filter. Read [recipes.md](references/recipes.md#getting-an-upscaler) only when installing upscaler.
-3. **Pick recipe:** Read [recipes.md](references/recipes.md#pick-by-image-type) only when choosing a model recipe (`remacri-4x` at 4x or `realesr-animevideov3-x2` at 2x). Never AI-upscale small text or UI; read [recipes.md](references/recipes.md#keep-small-text-from-the-source) only when locking text. Rebuild flat logos as SVG; read [logo-vector.md](references/logo-vector.md) only when vectorizing.
+3. **Pick recipe:** Read [recipes.md](references/recipes.md#pick-by-image-type) only when choosing a model recipe (`remacri-4x` at 4x, non-commercial, else `digital-art-4x`; or `realesr-animevideov3-x2` at 2x). Never AI-upscale small text or UI; read [recipes.md](references/recipes.md#keep-small-text-from-the-source) only when locking text. Rebuild flat logos as SVG; read [logo-vector.md](references/logo-vector.md) only when vectorizing.
 4. **Trial & upscale:** Test on a crop of the softest area, then run winner on whole image:
    ```bash
    BIN=upscayl-bin; MODELS=/path/to/models; model=remacri-4x
    test -f "$MODELS/$model.param" || echo "missing $model in $MODELS"
    "$BIN" -i src.png -o up.png -s 4 -m "$MODELS" -n "$model"
-   magick up.png -format '%[fx:maxima]' info:
+   magick up.png -alpha off -format '%[fx:maxima]' info:
    magick up.png -filter Lanczos -resize 3840x2160 -depth 8 enhanced.png
    ```
    If a model is missing or `%[fx:maxima]` is 0, retry once with `-t 32` or another model; stop if it is still 0. Fast anime: `-unsharp 0x0.55+0.5+0.015`. `-depth 8` avoids 16-bit PNG. Read [recipes.md](references/recipes.md#model-folders) only when configuring model folders.

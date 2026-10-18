@@ -106,6 +106,32 @@ class LoopTests(unittest.TestCase):
             self.assertIn('Protected comparison criteria require --source',result.stderr)
             self.assertFalse(out.exists())
 
+    @needs_jsonschema
+    @needs_pillow
+    def test_codex_reviewer_gets_crops_and_no_image_generation(self):
+        import os
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp=Path(tmp)
+            log=tmp/'argv.txt'
+            fake=tmp/'bin'/'codex'
+            fake.parent.mkdir()
+            fake.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "'+str(log)+'"\ncat > /dev/null\nexit 1\n')
+            fake.chmod(0o755)
+            crop=ROOT/'examples/product/source.png'
+            env=dict(os.environ,PATH=str(fake.parent)+os.pathsep+os.environ.get('PATH',''))
+            subprocess.run([sys.executable,str(ROOT/'plugins/image-studio/skills/image-loop/scripts/review.py'),
+                            '--brief',str(ROOT/'examples/product/brief.json'),
+                            '--source',str(ROOT/'examples/product/source.png'),
+                            '--candidate',str(ROOT/'examples/product/source.png'),
+                            '--crop',str(crop),'--out',str(tmp/'review'),'--model','m'],
+                           capture_output=True,text=True,env=env)
+            argv=log.read_text().splitlines()
+            self.assertIn('image_generation',argv)
+            self.assertEqual(argv[argv.index('image_generation')-1],'--disable')
+            self.assertEqual(argv.count('--image'),3)
+            prompt=(tmp/'review'/'reviewer-prompt.txt').read_text()
+            self.assertIn('Image 3 is a 100% detail crop',prompt)
+
 
 if __name__ == '__main__':
     unittest.main()

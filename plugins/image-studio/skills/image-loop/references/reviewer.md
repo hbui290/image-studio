@@ -8,7 +8,7 @@
 - Python 3, Pillow, and jsonschema. The examples run `python3 <skills>/image-loop/scripts/review.py ...`; to supply the packages, prefix the command with `uv run --with pillow --with jsonschema` ([uv](https://docs.astral.sh/uv/)), or install them once with `python3 -m pip install pillow jsonschema`.
 - For `--model`: an authenticated [Codex CLI](https://github.com/openai/codex) and an explicit reviewer model that accepts images on **your configured route**. Verify with an actual image review. A model appearing in a catalog is not proof that a given account/backend can execute it.
 
-Keep the existing CLI provider configuration. The adapter uses it without editing it. It requests a read-only, ephemeral execution and instructs the reviewer to use only the attached images and brief. User-installed CLI skills/configuration may add context and usage; this is not a hermetically isolated inference call.
+Keep the existing CLI provider configuration. The adapter uses it without editing it. It requests a read-only, ephemeral execution with image generation disabled (`--disable image_generation`) and instructs the reviewer to use only the attached images and brief. User-installed CLI skills/configuration may add context and usage; this is not a hermetically isolated inference call.
 
 Pass a vision model your Codex account can actually run; there is no automatic model fallback. The live examples record the models used when they were produced.
 
@@ -40,6 +40,7 @@ For the next round, add `--previous round-0` (the folder, or its `report.json`).
 | `--repairs-used N` | no | Optional cross-check. The script derives the count from `--previous` (previous round + 1, else 0) and exits with code 2 if this value differs. |
 | `--max-repairs N` | no | Repair limit, 0 or more. Defaults to the brief's `max_repairs`, else 3; if both are given they must agree. |
 | `--timeout SECONDS` | no | Time limit for the Codex call, in whole seconds. Default 180; must be positive. A timeout ends the round with `stop_provider`. |
+| `--crop CROP` | no | A 100% crop to attach after the full images; repeat it for several. Codex shrinks attached images (about 1600 px on a side for a 2048 px square), so crop small text, logos, faces, and protected details at source resolution (`magick candidate.png -crop 600x400+X+Y +repage cand-text.png`) and name each file after its image and region. |
 
 A repository checkout includes a controlled revision test in `examples/product/`: reviewing the unchanged source against the requested revision should identify the missing edits.
 
