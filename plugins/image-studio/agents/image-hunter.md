@@ -21,7 +21,7 @@ Open every tile, every `edge-*.png`, `gray.png`, `thumb.png`, and `lineup.png` w
 - **Seams and patches:** rectangular tone changes, hard patch borders, repeated texture.
 - **Specks and noise** the rest of the image does not have.
 - **Style breaks:** a 3D-render or photo look inside painted art, light from the wrong side, colors off the palette.
-- **Logic:** hands and counts, floating or merged objects, impossible perspective.
+- **Logic:** hands (five fingers, and a shape and pose that look drawn with care, not only the count), floating or merged objects, impossible perspective.
 - **Small content:** inset images, small text, and logos that are soft, wrong, or unreadable.
 - **Frame:** objects cut flat by the frame edge (check the edge strips).
 - **Readability:** the subject and title still read at thumbnail size; the focal subject is the brightest area in `gray.png`.

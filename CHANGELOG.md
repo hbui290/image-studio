@@ -1,8 +1,19 @@
 # Changelog
 
+## 2.12.0-local.1 (2026-10-19)
+
+From a full read of the same Jadebound session, subagents included (about 50 million tokens, 148 minutes, 70% of it model time on a 100,000-380,000 token context).
+
+- **Assets first (image-create step 2):** list the user's logo files, fonts, SVG icons, approved art, and any script that already renders their text before generating; offer two or three local fonts as text layers instead of generated lettering; when the user rejects something the brand kit prescribes, ask once and update the kit. The session generated its title and flag as pictures although local display fonts, an SVG icon, and a text renderer were in the folder.
+- **Exact copy:** every word, number format, and platform name is confirmed once before the first render; the agent had added a comma ("5,000+") the user then had to remove.
+- **No idle generations:** a step waits for every generation it started (the session sat idle for 8 minutes); style drafts start in parallel.
+- **One fresh reviewer:** each hunt or review uses a fresh reviewer, never one that carried an earlier job (a reused reviewer cost 6 million tokens), and the editor does not reopen the views it handed over.
+- **Hands:** the hunt judges how hands look, not only the finger count.
+- **Sharpen last:** image-enhance runs only after every repair and layout change.
+
 ## 2.11.0-local.1 (2026-10-19)
 
-From the Jadebound "5000+ followers" banner session in Codex: 2 h 28 min, 21 user messages, 13 whole-image generations, 76 image views, and about 42 million tokens, because the chat had carried every job since Oct 11 (about 227,000 tokens resent per step) and every text or logo change regenerated the whole image.
+From the Jadebound "5000+ followers" banner session in Codex: 2 h 28 min, 21 user messages, 14 image generations (7 whole images, 4 of them text or flags drawn as pictures), 78 image views, and about 42 million tokens in the main chat, because the chat had carried every job since Oct 11 (about 227,000 tokens resent per step) and every text or logo change regenerated the whole image.
 
 - **Layers:** `image-create/scripts/compose_layers.py` places the subject cutout, the logo file, and each line of text on the generated background from a `layout.json`. Changing a word, the logo position, or the subject's size is an edit and one run, not a new generation. image-create generates art without text or logos, and image-repair sends such changes to the layout.
 - **Style first:** image-create settles the rendering (for example 2D or 2.5D, not a 3D render) from taste notes and approved references before the first full image, or shows two or three small drafts and records the pick.

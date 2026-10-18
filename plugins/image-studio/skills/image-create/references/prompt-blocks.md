@@ -18,7 +18,7 @@ Use measured values (hex colors, light direction, view angle), not adjectives al
 
 ## 2. The item (one item per image)
 
-Describe one asset per image: subject, shape, proportions or aspect ratio, what must be empty (space for a title or logo added later). Generators write text and logos badly: leave that space empty in the image and add exact text and the user's logo file afterwards with `compose_layers.py` ([image-create](../SKILL.md) step 2).
+Describe one asset per image: subject, shape, proportions or aspect ratio, what must be empty (space for a title or logo added later). Generators write text and logos badly: leave that space empty in the image and add exact text and the user's logo file afterwards with `compose_layers.py` ([image-create](../SKILL.md) step 3).
 
 ## 3. Background rule (end of the prompt, by asset type)
 

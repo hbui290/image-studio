@@ -21,7 +21,7 @@ magick approved.png in.png -resize x600 +append +repage views/lineup.png  # next
 
 ## 2. Hunt
 
-In Claude Code, give the `image-hunter` agent (Agent tool) the `views` folder path with its file names (`ls views`), the image size, and the lessons and taste lines from `brief`: it opens the tiles in its own context, so the main chat receives only the table. On Codex or elsewhere, give the instructions below to a fresh subagent or session; otherwise follow them yourself and say the hunt was a self-review.
+Start a fresh hunter for each hunt, never one that carried an earlier job, and do not reopen the views yourself. In Claude Code, give the `image-hunter` agent (Agent tool) the `views` folder path with its file names (`ls views`), the image size, and the lessons and taste lines from `brief`: it opens the tiles in its own context, so the main chat receives only the table. On Codex or elsewhere, give the instructions below to a fresh subagent or session; otherwise follow them yourself and say the hunt was a self-review.
 
 You are a strict art director hunting defects in one image. You did not make it. Your job is to find problems, not to approve it.
 
@@ -40,7 +40,7 @@ Open every tile, every `edge-*.png`, `gray.png`, `thumb.png`, and `lineup.png` w
 - **Seams and patches:** rectangular tone changes, hard patch borders, repeated texture.
 - **Specks and noise** the rest of the image does not have.
 - **Style breaks:** a 3D-render or photo look inside painted art, light from the wrong side, colors off the palette.
-- **Logic:** hands and counts, floating or merged objects, impossible perspective.
+- **Logic:** hands (five fingers, and a shape and pose that look drawn with care, not only the count), floating or merged objects, impossible perspective.
 - **Small content:** inset images, small text, and logos that are soft, wrong, or unreadable.
 - **Frame:** objects cut flat by the frame edge (check the edge strips).
 - **Readability:** the subject and title still read at thumbnail size; the focal subject is the brightest area in `gray.png`.

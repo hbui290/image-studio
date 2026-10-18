@@ -7,7 +7,7 @@ description: "Fix regions, correct defects, distorted face, malformed prop, remo
 
 Fix the confirmed regions of an accepted image in one batch while keeping other pixels untouched.
 
-A change to text, a number, the logo, or a layer's size or position is not a repair: edit `layout.json` and rerun `compose_layers.py` ([image-create](../image-create/SKILL.md) step 2). Routing: For whole-image softness use [image-enhance](../image-enhance/SKILL.md); to locate defects use [image-inspect](../image-inspect/SKILL.md); for full-image generation/loops use [image-loop](../image-loop/SKILL.md); to plan edits use [image-edit-map](../image-edit-map/SKILL.md).
+A change to text, a number, the logo, or a layer's size or position is not a repair: edit `layout.json` and rerun `compose_layers.py` ([image-create](../image-create/SKILL.md) step 3). Routing: For whole-image softness use [image-enhance](../image-enhance/SKILL.md); to locate defects use [image-inspect](../image-inspect/SKILL.md); for full-image generation/loops use [image-loop](../image-loop/SKILL.md); to plan edits use [image-edit-map](../image-edit-map/SKILL.md).
 
 Run scripts; do not read their source - use `--help` for usage.
 
