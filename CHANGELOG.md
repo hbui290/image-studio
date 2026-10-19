@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.14.0-local.1 (2026-10-19)
+
+From a comparison with the upstream image-reconstruction and image-loop repositories (ours already carries every upstream file, with fixes); only prompting lessons were missing.
+
+- **Wording rules** in prompt-blocks.md: tie each property to a named part, plain words over jargon, bundle compatible changes, and change the method after two failed tries.
+- **Mismatch table** in image-inspect's diagnosis.md: what went wrong, what to inspect, and the next action, with text sent to layers and local edits to masks.
+
 ## 2.13.1-local.1 (2026-10-19)
 
 - **Parallel patches:** image-repair starts the patches for every confirmed region at the same time (parallel `image_gen.imagegen` calls in one step), waits for all, and composites them one at a time; one image is never split between several editing agents. A generation takes minutes, so three regions now take about the time of one, at no extra model calls.

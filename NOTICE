@@ -24,3 +24,9 @@ references/recipes.md), tests/test_enhance.py, tests/test_fix_*.py, examples/ima
 New in 2.2.1: tests/test_visual_map.py, tests/test_hooks.py, the repository's
 CLAUDE.md and .claude/ hooks, and the anonymized tavern before/after images in
 examples/image-repair/tavern-hero/.
+
+New in 2.14.0: the "When a generated result misses the request" table in
+image-inspect/references/diagnosis.md and the wording rules in
+image-create/references/prompt-blocks.md are adapted from
+codejunkie99/image-loop prompt-lab/image-prompting-guide-v2.md (commit 77a1b78).
+

@@ -29,3 +29,21 @@ Choose the least disruptive operation that solves the observed defect. Use speci
 For connected structures or crowded scenes, map supports, openings, overlaps, and repeated object instances before editing. Check structure and proposed masks against source pixels. Do not infer a proprietary editor's internal algorithm from an open-source example.
 
 When a target is ambiguous among repeated objects, make a numbered review copy and a matching plain-language legend so the exact instance can be selected. Keep the clean source as the edit input, retain stable IDs across revisions, and store object locations in source-image coordinates. A rectangle locates an object; it is not an approved mask. Skip the map when the target is already unambiguous.
+
+## When a generated result misses the request
+
+Find the cause before rewriting the prompt:
+
+| What went wrong | What to inspect | Next action |
+| --- | --- | --- |
+| An object is missing or duplicated | Count it across the whole image, background included | State the exact count and role; remove competing objects from the prompt |
+| A property landed on the wrong object | Trace each color, garment, or material to its subject | Tie the property to a named part or reference ID |
+| The layout is wrong | Large shapes, overlap, viewpoint, paths | Attach a sketch or state the spatial relation |
+| A face, product, or outfit drifts | Distinctive features against the source | Attach the clean reference or a crop and limit its role |
+| Text is wrong | Spelling, line breaks, duplicates, size | Leave the space empty and place the text as a layer ([image-create](../../image-create/SKILL.md) step 3) |
+| The action reads backward | Pose, gaze, contact, direction | Name the decisive physical cues or attach a pose sketch |
+| A local edit changed other regions | Protected details against the accepted source | Narrow the request, restart from the best source, and composite through a mask |
+| A diagram looks right but is false | Every label, relation, and fact | Check against a real source; draw exact diagrams with deterministic tools |
+| The file is unusable | Size, alpha, format, editability | Check the file and use the tool's output setting (for example `transparent_background`) |
+| Correct but dull | Hierarchy, depth, scale, material contrast | Change one named artistic decision and keep what works |
+
