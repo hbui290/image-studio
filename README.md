@@ -66,7 +66,8 @@ Only the skill that matches is loaded; the others cost a line each.
 | Everything that touches pixels | [ImageMagick](https://imagemagick.org/download/) 7 and Python 3.9+ with [Pillow](https://pypi.org/project/pillow/) (run scripts with [uv](https://docs.astral.sh/uv/): `uv run --with pillow --with jsonschema python3 ...`) |
 | Generating or redrawing | Codex `image_gen` (Claude Code has no built-in generator; it hands back the prompt) |
 | Sharpen or upscale | [Upscayl](https://github.com/upscayl/upscayl) (`upscayl-bin` and models) or [Real-ESRGAN-ncnn-vulkan](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan) |
-| Optional | [rembg](https://github.com/danielgatis/rembg) (backgrounds), [Potrace](https://potrace.sourceforge.net) (logo to SVG), [jsonschema](https://pypi.org/project/jsonschema/) (spec checks and `image-loop`), [Codex CLI](https://github.com/openai/codex) (automated review) |
+| Cutouts and text checks on macOS 14+ | Built in: `mac_vision.py` uses Apple Vision (no download; needs the Xcode command line tools for `swiftc`) |
+| Optional | [rembg](https://github.com/danielgatis/rembg) (backgrounds off macOS or when edges matter: `birefnet-general-lite`), [Potrace](https://potrace.sourceforge.net) (logo to SVG), [jsonschema](https://pypi.org/project/jsonschema/) (spec checks and `image-loop`), [Codex CLI](https://github.com/openai/codex) (automated review) |
 
 Model choice by image type, measured results, and licence notes: [enhancement recipes](plugins/image-studio/skills/image-enhance/references/recipes.md). Setup checklist: [tool readiness](plugins/image-studio/skills/image-repair/references/tool-readiness.md).
 

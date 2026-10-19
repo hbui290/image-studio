@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.15.0-local.1 (2026-10-19)
+
+Free tools already on the Mac, tested on the Jadebound banner, the Unbound poster, and a card pack.
+
+- **`image-verify/scripts/mac_vision.py`** (Apple Vision, no download; built once with `swiftc` in about 2 s):
+  - `cutout IN OUTDIR [--point X Y]`: subject cutout and masks in about 0.5 s. On painted game art it kept the subject cleanly where rembg's `isnet-anime` failed.
+  - `ocr IN [--expect TEXT ...]`: reads every text line with boxes in about 0.3 s ("JADEBOUND", "5000+", "FOLLOWERS" at confidence 1.0) and exits 1 naming any expected text that is missing or misspelled ("5,000+"). The first OCR run on a machine waited 51 minutes while macOS prepared its model; the script now gives up after `--timeout` (180 s).
+- **Cutouts:** Apple Vision first; rembg `birefnet-general-lite` (213 MB) when edges matter or off macOS; `isnet-anime` only for flat anime on a plain backdrop; `birefnet-general` (927 MB) dropped.
+- **Text checks:** image-create and image-verify check finished text with `ocr --expect` before a person looks.
+
 ## 2.14.0-local.1 (2026-10-19)
 
 From a comparison with the upstream image-reconstruction and image-loop repositories (ours already carries every upstream file, with fixes); only prompting lessons were missing.

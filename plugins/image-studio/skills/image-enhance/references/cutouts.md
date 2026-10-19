@@ -4,17 +4,24 @@ Read by [image-enhance](../SKILL.md) only when the condition named there holds. 
 
 ## Background removal
 
-Uses [rembg](https://github.com/danielgatis/rembg) (optional).
+On macOS 14+, start with Apple Vision: no download, under a second, and on painted game art (a boss with flames and chains, a foil card pack) it kept the subject cleanly where rembg's `isnet-anime` turned the boss into smoke and kept a stray flag:
 
 ```bash
-rembg i -m isnet-anime in.png cutout.png        # anime / illustration
-rembg i -m birefnet-general in.png cutout.png   # photos and products
-rembg i -a -m birefnet-general in.png cutout.png  # alpha matting for hair and fur
+python3 <skills>/image-verify/scripts/mac_vision.py cutout in.png cut/                 # cut/cutout.png, cut/mask.png, cut/mask-N.png
+python3 <skills>/image-verify/scripts/mac_vision.py cutout in.png cut/ --point 2100 900 # keep only the subject under this pixel
+```
+
+It cuts whole subjects, not parts (a hand, a hat brim), and can leave background inside closed loops (between horns) and a soft halo around flames. When edges matter, or off macOS, use [rembg](https://github.com/danielgatis/rembg):
+
+```bash
+rembg i -m birefnet-general-lite in.png cutout.png   # 213 MB; best edges in testing (closed gaps, horns)
+rembg i -m isnet-anime in.png cutout.png             # only flat anime on a plain backdrop; it failed on painted art
+rembg i -a -m birefnet-general-lite in.png cutout.png  # alpha matting for hair and fur
 magick cutout.png -background white -flatten on-white.png
 magick cutout.png -background black -flatten on-black.png
 ```
 
-Always pass `-m`: without it rembg 2.0.85 downloads `bria-rmbg` (about 1 GB, commercial use needs a BRIA licence). For a folder, `rembg p -m <model> indir outdir` loads the model once. `-dc` removes backdrop color from edge pixels. The first run downloads the model. Inspect both backdrops for halos, holes, and missing hair. Never ask an image generator for a "transparent background" and trust a painted checkerboard.
+Always pass `-m`: without it rembg 2.0.85 downloads `bria-rmbg` (about 1 GB, commercial use needs a BRIA licence); `birefnet-general` (927 MB) is not needed. For a folder, `rembg p -m <model> indir outdir` loads the model once. `-dc` removes backdrop color from edge pixels. The first run downloads the model. Inspect both backdrops for halos, holes, and missing hair. Never ask an image generator for a "transparent background" and trust a painted checkerboard.
 
 ### Solid backdrop
 
