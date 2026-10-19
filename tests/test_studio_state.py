@@ -1887,5 +1887,32 @@ class PrepareReviewTests(StudioBase):
         self.assertEqual(run.returncode, 2)
 
 
+class AxisCheckTests(StudioBase):
+    """axis-check: a rigid object (sword, spear, staff) must stay on one straight line through the hand."""
+
+    def setUp(self):
+        super().setUp()
+        Image.new("RGB", (894, 1759), (10, 20, 60)).save(self.project / "s.png")
+
+    def test_bent_sword_fails_with_angle(self):
+        # measured on a generated sword: pommel -> crossguard about 43 deg, crossguard -> tip about 59 deg
+        run = self.run_cli("axis-check", "--image", "s.png", "--points", "25,355", "230,540", "850,1570", "--guide", "g.png")
+        self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+        self.assertIn("bend", run.stdout)
+        self.assertTrue((self.project / "g.png").is_file())
+
+    def test_straight_sword_passes(self):
+        run = self.ok("axis-check", "--image", "s.png", "--points", "100,100", "300,433", "700,1100")
+        self.assertIn("straight", run.stdout)
+
+    def test_bad_points_exit_2(self):
+        for bad in ("-1", "nan"):
+            run = self.run_cli("axis-check", "--image", "s.png", "--points", "1,1", "5,5", "9,9", "--max-bend", bad)
+            self.assertEqual(run.returncode, 2, (bad, run.stdout, run.stderr))
+        for pts in (["10,10"], ["10,10", "10,10"], ["a,b", "5,5"], ["10,10", "2000,5"]):
+            run = self.run_cli("axis-check", "--image", "s.png", "--points", *pts)
+            self.assertEqual(run.returncode, 2, (pts, run.stdout, run.stderr))
+
+
 if __name__ == "__main__":
     unittest.main()

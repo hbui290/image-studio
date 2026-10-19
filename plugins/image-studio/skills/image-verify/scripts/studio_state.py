@@ -10,8 +10,8 @@ a verdict that names a crop made in the same gate run.
 `hook session-start` and `hook stop` are thin wrappers for Claude Code and Codex plugin
 hooks; they always exit 0 and print nothing on errors.
 
-Exit codes: 0 success or gate pass, 1 gate fail or edit-check found changes outside the
-box, 2 bad input or missing store.
+Exit codes: 0 success or gate pass, 1 gate fail, edit-check found changes outside the box, or
+axis-check found a bend, 2 bad input or missing store.
 """
 
 import argparse
@@ -1583,6 +1583,45 @@ def cmd_prepare_review(args):
     return 0
 
 
+def cmd_axis_check(args):
+    import math
+    P = pil()
+    if not 0 <= args.max_bend <= 90: raise UsageError("--max-bend must be a number of degrees from 0 to 90")
+    path = existing_file(args.image, "--image")
+    image = open_image(path).convert("RGB")
+    W, H = image.size
+    points = []
+    for raw in args.points:
+        try: x, y = (float(v) for v in raw.split(","))
+        except ValueError: raise UsageError(f"--points takes x,y pairs, got {raw!r}") from None
+        if not (0 <= x < W and 0 <= y < H): raise UsageError(f"point {raw} is outside the image {W}x{H}")
+        points.append((x, y))
+    if len(points) < 3: raise UsageError("give at least 3 points along the object, in order (e.g. pommel, crossguard, tip)")
+    segments = list(zip(points, points[1:]))
+    if any(math.hypot(b[0] - a[0], b[1] - a[1]) < 2 for a, b in segments): raise UsageError("two consecutive points are the same")
+    angles = [math.degrees(math.atan2(b[1] - a[1], b[0] - a[0])) for a, b in segments]
+    bends = [abs((b - a + 180) % 360 - 180) for a, b in zip(angles, angles[1:])]
+    bend = max(bends)
+    (ax, ay), (bx, by) = max(segments, key=lambda s: math.hypot(s[1][0] - s[0][0], s[1][1] - s[0][1]))
+    length = math.hypot(bx - ax, by - ay); ux, uy = (bx - ax) / length, (by - ay) / length
+    print("Segment angles: " + ", ".join(f"{a:.1f} deg" for a in angles))
+    if bend <= args.max_bend:
+        print(f"straight: largest bend {bend:.1f} deg (limit {args.max_bend})")
+    else:
+        print(f"bend {bend:.1f} deg at point {bends.index(bend) + 2} (limit {args.max_bend}): the object is not one straight line")
+        print("On the longest segment's line, the points belong at: " + "  ".join(
+            f"{round(ax + ((x - ax) * ux + (y - ay) * uy) * ux)},{round(ay + ((x - ax) * ux + (y - ay) * uy) * uy)}" for x, y in points))
+    if args.guide:
+        draw = P.ImageDraw.Draw(image)
+        far = W + H
+        draw.line((ax - ux * far, ay - uy * far, bx + ux * far, by + uy * far), fill=(255, 0, 0), width=max(2, W // 300))
+        for x, y in points:
+            r = max(4, W // 150); draw.ellipse((x - r, y - r, x + r, y + r), outline=(255, 255, 0), width=2)
+        image.save(args.guide, "PNG")
+        print(f"Guide: {args.guide} (red: the straight line the whole object must follow; yellow: your points)")
+    return 0 if bend <= args.max_bend else 1
+
+
 def cmd_edit_check(args):
     before_path, after_path = existing_file(args.before, "--before"), existing_file(args.after, "--after")
     before, after = open_image(before_path), open_image(after_path)
@@ -1645,6 +1684,9 @@ subcommands:
   prepare-review --image F --out DIR [--approved A]
                                          every designer-review view in one call: overlapping tiles named tile-X_Y.png, edges, gray, thumb, lineup
                                          example: python3 studio_state.py prepare-review --image poster.png --approved v6.png --out views
+  axis-check --image F --points X,Y X,Y X,Y ... [--max-bend 3] [--guide out.png]
+                                         a rigid object (sword, spear, staff, gun) must be one straight line through the hand: exit 1 when it bends
+                                         example: python3 studio_state.py axis-check --image hero.png --points 25,355 230,540 850,1570 --guide guide.png
   edit-check --before A --after B --bbox x0,y0,x1,y1 [--ring 24] [--out F]
                                          changed pixels outside the edit box (exit 1 if any) and one before|after|changes view
                                          example: python3 studio_state.py edit-check --before v7.png --after v8.png --bbox 280,320,370,410
@@ -1652,7 +1694,7 @@ subcommands:
 
 approve, defect, brief, gate and verdict find the store by walking up from --project or the current folder.
 init creates it; pref add does not use the project store; lessons (lessons.jsonl) and taste notes (brands/<brand>/taste.jsonl, taste.jsonl) live in ${IMAGE_STUDIO_HOME:-~/.image-studio}, shared by every task; hooks use the cwd from the hook input.
-exit codes: 0 ok / gate pass, 1 gate fail or edit-check found changes outside the box, 2 bad input or no store
+exit codes: 0 ok / gate pass, 1 gate fail, edit-check found changes outside the box, or axis-check found a bend, 2 bad input or no store
 """
 
 
@@ -1710,6 +1752,11 @@ def build_parser():
     p.add_argument("--image", required=True); p.add_argument("--out", required=True)
     p.add_argument("--approved"); p.add_argument("--overlap", type=int, default=40)
     p.set_defaults(func=cmd_prepare_review)
+
+    p = sub.add_parser("axis-check")
+    p.add_argument("--image", required=True); p.add_argument("--points", required=True, nargs="+")
+    p.add_argument("--max-bend", type=float, default=3.0); p.add_argument("--guide")
+    p.set_defaults(func=cmd_axis_check)
 
     p = sub.add_parser("edit-check")
     p.add_argument("--before", required=True); p.add_argument("--after", required=True)

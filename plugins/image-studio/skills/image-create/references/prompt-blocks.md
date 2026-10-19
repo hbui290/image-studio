@@ -54,6 +54,7 @@ Attach the actual files and give each one a role: `Image 1 is the approved style
 ## 6. Wording rules
 
 - Tie every color, material, and garment to a named part or reference ID ("Image 2's gold trim on the hat brim"), so it does not land on another object.
+- Describe a long rigid prop as one straight object with its angle ("one straight sword, pommel to tip on a single line at about 60 degrees, the fist closed around the grip on that line"), and attach a guide drawn by `axis-check --guide` when it must cross a hand or another object. Generators draw the grip and the blade separately and bend them at the hand.
 - Plain words beat jargon; heavy art vocabulary did not improve results.
 - Put compatible changes in one call; make fragile or hard-to-diagnose changes one at a time.
 - After two failed tries at the same problem, change the method (a sketch, a layer, typesetting, a mask) instead of stronger adjectives. Asking harder for "transparent" still returned a painted checkerboard. When a result misses, find the cause in the [mismatch table](../../image-inspect/references/diagnosis.md#when-a-generated-result-misses-the-request) before rewriting the prompt.

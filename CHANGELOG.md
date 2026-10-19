@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.16.0-local.1 (2026-10-19)
+
+A repeated generator error: a sword bent where the hand holds it (pommel to crossguard 42 degrees, blade 59 degrees). Generators draw the grip and the blade separately across the hand.
+
+- **`studio_state.py axis-check --image F --points X,Y X,Y X,Y [--guide out.png]`:** angles of each segment of a rigid object, the bend (exit 1 above `--max-bend`, 3 degrees by default), where each point belongs on the longest segment's line, and a guide image of that line. On the sword it measured a 16.9 degree bend and placed the pommel at 94,314 instead of 25,355.
+- **Hunt:** rigid objects (swords, spears, staffs, bows, guns) must be one straight line through any hand or occlusion; the hunter reports their points for `axis-check`.
+- **Prompting and repair:** describe a long prop as one straight object with its angle and attach the guide; image-repair repaints only the grip, pommel, and hand along the guide and checks again.
+
 ## 2.15.0-local.1 (2026-10-19)
 
 Free tools already on the Mac, tested on the Jadebound banner, the Unbound poster, and a card pack.

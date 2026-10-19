@@ -97,3 +97,15 @@ Create `patch-mask.png` at exactly `w × h`: white accepts new pixels, black kee
 Inspect `review.png` before lossy export. For exact preservation outside edits, place the crop-local mask on a full-size black canvas at `(x, y)`, invert the nonzero mask footprint to obtain the protected area, and verify zero changed pixels there (the `compare -metric PDC -read-mask` command above; `PDC` counts changed pixels, while `AE` on ImageMagick 7.1.2 does not give a pixel count for color images). Inspect seams at 100% and delivery size. If colors differ, convert profiles into a common colorspace before blending rather than relabeling metadata ([ImageMagick color management](https://imagemagick.org/color-management/)).
 
 Record an evidence ledger: source and approved references; crop, candidate, and accepted mask; tool/model invoked; dimensions before/after; rejected variants and why; 100% review and final display review.
+
+## Bent rigid objects
+
+A sword, spear, staff, or gun that bends where a hand holds it is the most repeated generator error with props. Measure it, then repaint only the short part:
+
+```bash
+python3 <skills>/image-verify/scripts/studio_state.py axis-check --image hero.png \
+  --points 25,355 230,540 850,1570 --guide guide.png     # pommel, crossguard, tip; exit 1 above 3 degrees
+```
+
+It prints each segment's angle, the bend, and where every point belongs on the longest segment's line, and draws that line in `guide.png`. Keep the longest straight part (usually the blade); mask the grip, pommel, and the hand around them; attach `guide.png` as the geometry reference ("the grip and pommel lie exactly on the red line, the fist closes around the grip on it"); composite through the mask; run `axis-check` again on the result.
+
