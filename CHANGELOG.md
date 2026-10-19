@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.13.1-local.1 (2026-10-19)
+
+- **Parallel patches:** image-repair starts the patches for every confirmed region at the same time (parallel `image_gen.imagegen` calls in one step), waits for all, and composites them one at a time; one image is never split between several editing agents. A generation takes minutes, so three regions now take about the time of one, at no extra model calls.
+
 ## 2.13.0-local.1 (2026-10-19)
 
 Fewer model calls. In the Jadebound session 70% of the 148 minutes was model time, about 32 seconds per call over 194 calls, so each step folded into one command saves a call.
