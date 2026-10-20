@@ -12,7 +12,9 @@ hooks; they always exit 0 and print nothing on errors.
 
 Exit codes: 0 success or gate pass, 1 gate fail, edit-check found changes outside the box or mask
 (or a mask with no effect), axis-check found a bend, blend wrote a color-mismatched result, shape-check found a
-changed silhouette, or crop-check found a crop or size problem, 2 bad input or missing store.
+changed silhouette, crop-check found a crop or size problem, align-check --auto found no reliable match or a scale to
+fix, or mask-from-diff found no change, 2 bad input or missing store.
+numpy and OpenCV are optional (see accel.py); --engine pillow|fast or IMAGE_STUDIO_ENGINE picks the engine.
 """
 
 import argparse
@@ -34,6 +36,15 @@ except ImportError: fcntl = None  # Windows: no lock; lessons are added one at a
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
+if str(Path(__file__).resolve().parent) not in sys.path: sys.path.insert(0, str(Path(__file__).resolve().parent))
+try: import accel  # optional numpy/OpenCV engine (sibling file); imports nothing heavy until a command selects it
+except ImportError: accel = None  # studio_state.py copied alone: Pillow only
+
+
+def fast():
+    """True when the running command selected the numpy/OpenCV engine."""
+    return accel is not None and accel.fast()
+
 STORE_DIR = ".image-studio"
 SCHEMA_VERSION = 1
 PREF_CAP = 1500
@@ -50,6 +61,12 @@ MASK_EFFECT_MIN = 0.005     # edit-check --mask: below this share of changed mas
 DE_SAMPLES = 5000      # blend: most ring pixels sampled for CIEDE2000
 DE_MEAN_LIMIT, DE_P95_LIMIT = 2.0, 3.5  # blend: ring color difference (CIEDE2000) above either is a color mismatch
 ALIGN_ASPECT_LIMIT = 0.01   # align-check: largest relative aspect difference between patch and target area
+ENGINES = ("auto", "pillow", "fast")  # --engine on accelerated commands (see accel.py)
+AUTO_SCALES = tuple(round(0.90 + 0.02 * i, 2) for i in range(11))  # align-check --auto: patch scales tried, 0.90-1.10
+AUTO_MIN_SCORE = 0.8   # align-check --auto: below this TM_CCOEFF_NORMED score there is no reliable match
+AUTO_FLAT_STD = 2.0    # align-check --auto: a template whose channels vary less than this (std, 0-255) is flat
+AUTO_TIE = 0.01        # align-check --auto: another place scoring within this of the best makes the match ambiguous
+AUTO_SCALE_LIMIT = 0.01  # align-check --auto: a best scale further than this from 1 means the patch must be resized
 SHAPE_IOU_LOSS = 0.01  # shape-check: largest allowed 1 - IoU between the before and after silhouettes
 SHAPE_ASPECT = 0.01    # shape-check: largest relative change of the silhouette box w/h
 SHAPE_EDGE_CAP = 512   # shape-check: farthest boundary search (px); beyond it the offset reads "over 512 px"
@@ -152,7 +169,9 @@ def now(): return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 def sha256_bytes(data): return hashlib.sha256(data).hexdigest()
 def dump_json(value): return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
 def has_alpha(img): return img.mode in ("RGBA", "LA", "PA", "RGBa", "La") or "transparency" in img.info
-def count_on(mask): return mask.histogram()[255]
+def count_on(mask):
+    if fast(): return int(accel.modules()[0].count_nonzero(accel.to_array(mask) == 255))
+    return mask.histogram()[255]
 def spec_text(spec): return f"{spec.get('width')}x{spec.get('height')} {spec.get('format')} alpha {spec.get('alpha')}"
 def user_home(): return Path(os.environ.get("IMAGE_STUDIO_HOME") or (Path.home() / STORE_DIR)).expanduser()
 
@@ -1538,6 +1557,10 @@ def run_hook(argv):
 def changed_mask(before, after, level=CHANGE_LEVEL):
     """255 where any channel differs by more than level."""
     P = pil()
+    if fast():
+        np, cv2 = accel.modules()
+        r, g, b, a = cv2.split(cv2.absdiff(np.asarray(before.convert("RGBA")), np.asarray(after.convert("RGBA"))))
+        return P.Image.fromarray(cv2.threshold(cv2.max(cv2.max(r, g), cv2.max(b, a)), level, 255, cv2.THRESH_BINARY)[1])
     bands = P.ImageChops.difference(before.convert("RGBA"), after.convert("RGBA")).split()
     peak = bands[0]
     for band in bands[1:]: peak = P.ImageChops.lighter(peak, band)
@@ -1572,8 +1595,11 @@ def grow(mask, px):
     W, H = mask.size
     work = (max(0, box[0] - px), max(0, box[1] - px), min(W, box[2] + px), min(H, box[3] + px))
     part = mask.crop(work)
-    for _ in range(px // 2): part = part.filter(P.ImageFilter.MaxFilter(5))
-    if px % 2: part = part.filter(P.ImageFilter.MaxFilter(3))
+    if fast():
+        part = P.Image.fromarray(accel.modules()[1].dilate(accel.to_array(part), accel.square(px)))
+    else:
+        for _ in range(px // 2): part = part.filter(P.ImageFilter.MaxFilter(5))
+        if px % 2: part = part.filter(P.ImageFilter.MaxFilter(3))
     out = mask.copy(); out.paste(part, work[:2])
     return out
 
@@ -1586,6 +1612,9 @@ def parse_at(value, label="--at"):
 
 def on_indices(mask, limit):
     """Indices of the mask's on pixels, evenly thinned to at most limit."""
+    if fast():
+        idx = accel.modules()[0].flatnonzero(accel.to_array(mask))
+        return idx[::max(1, -(-len(idx) // limit))]
     idx = [i for i, v in enumerate(mask.tobytes()) if v]
     return idx[::max(1, -(-len(idx) // limit))]
 
@@ -1632,11 +1661,55 @@ def ciede2000(lab1, lab2):
     return math.sqrt(max(0.0, dl * dl + dc * dc + dh_ * dh_ + rt * dc * dh_))
 
 
+def lab_array(rgb):
+    """numpy version of srgb_to_lab: Nx3 uint8 sRGB to Nx3 CIELAB (float64), same constants."""
+    np = accel.modules()[0]
+    lin = np.asarray(_LINEAR)[rgb]
+    xyz = lin @ np.array([[0.4124564 / 0.95047, 0.2126729, 0.0193339 / 1.08883],
+                          [0.3575761 / 0.95047, 0.7151522, 0.1191920 / 1.08883],
+                          [0.1804375 / 0.95047, 0.0721750, 0.9503041 / 1.08883]])
+    f = np.where(xyz > 216 / 24389, np.cbrt(xyz), (24389 / 27 * xyz + 16) / 116)
+    return np.stack([116 * f[:, 1] - 16, 500 * (f[:, 0] - f[:, 1]), 200 * (f[:, 1] - f[:, 2])], axis=1)
+
+
+def ciede2000_array(lab1, lab2):
+    """numpy version of ciede2000 over Nx3 arrays (same formula, same branch rules)."""
+    np = accel.modules()[0]
+    L1, a1, b1 = lab1.T
+    L2, a2, b2 = lab2.T
+    cm7 = ((np.hypot(a1, b1) + np.hypot(a2, b2)) / 2) ** 7
+    g = 0.5 * (1 - np.sqrt(cm7 / (cm7 + 25 ** 7)))
+    a1, a2 = a1 * (1 + g), a2 * (1 + g)
+    c1, c2 = np.hypot(a1, b1), np.hypot(a2, b2)
+    h1 = np.where(c1 != 0, np.degrees(np.arctan2(b1, a1)) % 360, 0.0)
+    h2 = np.where(c2 != 0, np.degrees(np.arctan2(b2, a2)) % 360, 0.0)
+    both = c1 * c2 != 0
+    dh = h2 - h1
+    dh = np.where(dh > 180, dh - 360, np.where(dh < -180, dh + 360, dh))
+    dh = np.where(both, dh, 0.0)
+    dH = 2 * np.sqrt(c1 * c2) * np.sin(np.radians(dh / 2))
+    lm, cm = (L1 + L2) / 2, (c1 + c2) / 2
+    hm = np.where(np.abs(h1 - h2) <= 180, (h1 + h2) / 2, np.where(h1 + h2 < 360, (h1 + h2 + 360) / 2, (h1 + h2 - 360) / 2))
+    hm = np.where(both, hm, h1 + h2)
+    t = (1 - 0.17 * np.cos(np.radians(hm - 30)) + 0.24 * np.cos(np.radians(2 * hm))
+         + 0.32 * np.cos(np.radians(3 * hm + 6)) - 0.20 * np.cos(np.radians(4 * hm - 63)))
+    rt = -2 * np.sqrt(cm ** 7 / (cm ** 7 + 25 ** 7)) * np.sin(np.radians(60 * np.exp(-((hm - 275) / 25) ** 2)))
+    sl = 1 + 0.015 * (lm - 50) ** 2 / np.sqrt(20 + (lm - 50) ** 2)
+    sc, sh = 1 + 0.045 * cm, 1 + 0.015 * cm * t
+    dl, dc, dh_ = (L2 - L1) / sl, (c2 - c1) / sc, dH / sh
+    return np.sqrt(np.maximum(0.0, dl * dl + dc * dc + dh_ * dh_ + rt * dc * dh_))
+
+
 def ring_color_difference(patch_rgb, base_rgb, region):
     """(mean, p95, samples) CIEDE2000 between patch and base at the same pixels of region, or None."""
     import math
     idx = on_indices(region, DE_SAMPLES)
-    if not idx: return None
+    if not len(idx): return None
+    if fast():
+        np = accel.modules()[0]
+        des = np.sort(ciede2000_array(lab_array(accel.to_array(patch_rgb).reshape(-1, 3)[idx]),
+                                      lab_array(accel.to_array(base_rgb).reshape(-1, 3)[idx])))
+        return float(des.mean()), float(des[max(0, math.ceil(0.95 * len(des)) - 1)]), len(des)
     pa, ba = patch_rgb.tobytes(), base_rgb.tobytes()
     des = sorted(ciede2000(srgb_to_lab(pa[3 * i:3 * i + 3]), srgb_to_lab(ba[3 * i:3 * i + 3])) for i in idx)
     return sum(des) / len(des), des[max(0, math.ceil(0.95 * len(des)) - 1)], len(des)
@@ -1646,6 +1719,24 @@ def seam_steps(hard, out_rgb, base_rgb):
     """(output, base) mean |dL*| between each mask edge pixel and its 4-neighbors outside the mask, or None."""
     P = pil()
     W, H = hard.size
+    if fast():
+        np, cv2 = accel.modules()
+        m = accel.to_array(hard)
+        edge = accel.to_mask(m > cv2.erode(m, accel.square(1)))
+        idx = on_indices(edge, DE_SAMPLES)
+        x, y = idx % W, idx // W
+        src, dst = [], []
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):  # same neighbor order and rule as the Pillow loop
+            nx, ny = x + dx, y + dy
+            ok = (nx >= 0) & (nx < W) & (ny >= 0) & (ny < H)
+            ok[ok] = m[ny[ok], nx[ok]] == 0
+            src.append(idx[ok]); dst.append(ny[ok] * W + nx[ok])
+        src, dst = np.concatenate(src), np.concatenate(dst)
+        if not len(src): return None
+        def mean_step_np(img):
+            flat = accel.to_array(img).reshape(-1, 3)
+            return float(np.abs(lab_array(flat[src])[:, 0] - lab_array(flat[dst])[:, 0]).mean())
+        return mean_step_np(out_rgb), mean_step_np(base_rgb)
     m = hard.tobytes()
     pairs = []
     for i in on_indices(P.ImageChops.subtract(hard, hard.filter(P.ImageFilter.MinFilter(3))), DE_SAMPLES):
@@ -1657,6 +1748,31 @@ def seam_steps(hard, out_rgb, base_rgb):
         L = lambda i: srgb_to_lab(data[3 * i:3 * i + 3])[0]
         return sum(abs(L(i) - L(j)) for i, j in pairs) / len(pairs)
     return mean_step(out_rgb.tobytes()), mean_step(base_rgb.tobytes())
+
+
+def seam_grad(hard, out_rgb, base_rgb):
+    """OpenCV only: (output, base) mean Sobel gradient magnitude of the gray image on the 2 px band across the mask
+    edge, or None. Report only: a seam the blend added shows as a higher output value than the base's."""
+    np, cv2 = accel.modules()
+    m = accel.to_array(hard)
+    band = cv2.dilate(m, accel.square(1)) > cv2.erode(m, accel.square(1))
+    if not band.any(): return None
+    def grad(img):
+        gray = cv2.cvtColor(accel.to_array(img), cv2.COLOR_RGB2GRAY).astype(np.float32)
+        return float(cv2.magnitude(cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3), cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3))[band].mean())
+    return grad(out_rgb), grad(base_rgb)
+
+
+def use_engine(args):
+    """Select numpy/OpenCV or Pillow for an accelerated command (--engine, else IMAGE_STUDIO_ENGINE) and say which."""
+    if accel is None:
+        if (getattr(args, "engine", None) or os.environ.get("IMAGE_STUDIO_ENGINE", "")).strip().lower() == "fast":
+            raise UsageError(f"engine fast needs accel.py next to {Path(__file__).name}; reinstall the image-verify skill")
+        print("Engine: pillow", flush=True)
+        return
+    try: accel.select(getattr(args, "engine", None))
+    except ValueError as exc: raise UsageError(str(exc)) from None
+    print(f"Engine: {accel.label()}", flush=True)
 
 
 def outline(draw, box, color, width):
@@ -1789,6 +1905,7 @@ def cmd_axis_check(args):
     P = pil()
     if not 0 <= args.max_bend <= 90: raise UsageError("--max-bend must be a number of degrees from 0 to 90")
     if args.max_offset is not None and not args.max_offset > 0: raise UsageError("--max-offset must be a positive number of pixels")
+    use_engine(args)
     path = existing_file(args.image, "--image")
     if args.guide:
         guide = Path(args.guide).expanduser()
@@ -1862,6 +1979,7 @@ def cmd_axis_check(args):
 
 def cmd_blend(args):
     P = pil()
+    use_engine(args)
     base_path, patch_path, mask_path = (existing_file(v, k) for v, k in ((args.base, "--base"), (args.patch, "--patch"), (args.mask, "--mask")))
     out = Path(args.out).expanduser()
     if out.resolve() in (base_path.resolve(), patch_path.resolve(), mask_path.resolve()): raise UsageError("--out must be a new file, not an input")
@@ -1907,7 +2025,9 @@ def cmd_blend(args):
     m = r + feather * 2 + 2
     work = (max(0, box[0] - m), max(0, box[1] - m), min(W, box[2] + m), min(H, box[3] + m))
     hm, cw = hard.crop(work), covered.crop(work)
-    ring = P.ImageChops.darker(P.ImageChops.subtract(hm.filter(P.ImageFilter.MaxFilter(2 * (r // 2) + 1)), hm), cw)
+    if fast(): spread = P.Image.fromarray(accel.modules()[1].dilate(accel.to_array(hm), accel.square(r // 2)))
+    else: spread = hm.filter(P.ImageFilter.MaxFilter(2 * (r // 2) + 1))
+    ring = P.ImageChops.darker(P.ImageChops.subtract(spread, hm), cw)
     # fully transparent patch pixels carry no color the result will show: keep them out of the color statistics
     ring = P.ImageChops.darker(ring, placed.crop(work).getchannel("A").point(lambda v: 255 if v else 0))
     pw, bw = placed.crop(work), base.crop(work)
@@ -1947,6 +2067,8 @@ def cmd_blend(args):
     steps = seam_steps(hm, result.crop(work).convert("RGB"), rgb_b)
     if steps: print(f"seam_step: {steps[0]:.2f} mean |dL*| across the mask edge (base {steps[1]:.2f} at the same pixels)")
     else: print("seam_step: skipped (the mask has no edge inside the image)")
+    grads = seam_grad(hm, result.crop(work).convert("RGB"), rgb_b) if fast() else None
+    if grads: print(f"seam_grad: {grads[0]:.2f} mean Sobel gradient along the mask edge (base {grads[1]:.2f} at the same pixels; report only)")
     span = changed_mask(base, result).getbbox()
     print(f"Wrote {out}" + (f"; changed area {','.join(map(str, span))} (use as edit-check --bbox, or edit-check --mask "
                             f"{shlex.quote(str(mask_path))} --edge {feather})" if span else "; nothing changed"))
@@ -1958,6 +2080,7 @@ def cmd_blend(args):
 
 
 def cmd_edit_check(args):
+    use_engine(args)
     before_path, after_path = existing_file(args.before, "--before"), existing_file(args.after, "--after")
     before, after = open_8bit(before_path, "--before"), open_8bit(after_path, "--after")
     if before.size != after.size:
@@ -2030,9 +2153,82 @@ def mask_report(hard, noise, real, edge):
     return bool(problems)
 
 
+def auto_place(base, patch, hard):
+    """align-check --auto (OpenCV): (x, y, scale, score, rival) of the patch in the base, None when it never fits, or
+    a reason string when the patch (or its context outside the mask) is flat; rival is the best other place or None.
+    A flat template scores 1.0 everywhere under TM_CCOEFF_NORMED, so it is refused instead of matched; equal scores
+    prefer the scale closest to 1.
+
+    TM_CCOEFF_NORMED over the scales in AUTO_SCALES on copies shrunk to about 1024 px, then refined at full size
+    around the 8 best distinct places within a few pixels and +-0.02 scale (step 0.01). With a mask, the refinement matches only the patch's context:
+    pixels outside the mask (grown by the search margin), so a repainted inside does not lower the score."""
+    np, cv2 = accel.modules()
+    B, T = accel.to_array(base), accel.to_array(patch)
+    H, W = B.shape[:2]
+    ph, pw = T.shape[:2]
+    if T.reshape(-1, T.shape[2]).std(axis=0).max() < AUTO_FLAT_STD: return "the patch is flat"
+    k = max(1, min(min(pw, ph) // 48, -(-max(W, H) // 1024)))  # shrink factor; the shrunk patch keeps 48 px or more
+    shrink = lambda a, w, h: cv2.resize(a, (max(1, w), max(1, h)), interpolation=cv2.INTER_AREA if w < a.shape[1] else cv2.INTER_LINEAR)
+    def peaks(img, templ, mask=None, count=1):
+        """Up to count (score, x, y) best non-overlapping matches of templ in img."""
+        if templ.shape[0] > img.shape[0] or templ.shape[1] > img.shape[1]: return []
+        res = cv2.matchTemplate(img, templ, cv2.TM_CCOEFF_NORMED, mask=mask)
+        res = np.nan_to_num(res, nan=-1.0, posinf=-1.0, neginf=-1.0)  # flat windows give NaN or inf
+        out = []
+        for _ in range(count):
+            _, score, _, (x, y) = cv2.minMaxLoc(res)
+            if score <= -1: break
+            out.append((score, x, y))
+            ry, rx = max(1, templ.shape[0] // 2), max(1, templ.shape[1] // 2)
+            res[max(0, y - ry):y + ry + 1, max(0, x - rx):x + rx + 1] = -1.0  # next peak elsewhere
+        return out
+    rank = lambda c: (round(c[0], 4), -abs(c[1] - 1))  # (score, scale, ...): higher score first; on a tie the scale closest to 1
+    small = shrink(B, round(W / k), round(H / k))
+    coarse = []  # (score, scale, x, y) in full-size pixels: the best few places at every scale
+    for s in AUTO_SCALES:
+        coarse += [(v, s, x * k, y * k) for v, x, y in peaks(small, shrink(T, round(pw * s / k), round(ph * s / k)), count=5)]
+    picked = []
+    for cand in sorted(coarse, key=rank, reverse=True):  # refine the 8 best distinct places: repeated motifs can win when shrunk
+        if all(abs(cand[2] - p[2]) > 2 * k or abs(cand[3] - p[3]) > 2 * k for p in picked): picked.append(cand)
+        if len(picked) == 8: break
+    margin = 2 * k + 4
+    grown = accel.to_array(grow(hard, margin + 2)) if hard is not None else None  # once, not per place and scale
+    places = []
+    for _, s0, cx, cy in picked:
+        best = None
+        for s in sorted({round(min(1.12, max(0.88, s0 + d)), 2) for d in (-0.02, -0.01, 0.0, 0.01, 0.02)}):
+            tw, th = round(pw * s), round(ph * s)
+            templ = T if (tw, th) == (pw, ph) else shrink(T, tw, th)
+            x0, y0 = max(0, cx - margin), max(0, cy - margin)
+            window = B[y0:min(H, cy + th + margin), x0:min(W, cx + tw + margin)]
+            mask = None
+            if hard is not None:  # the patch's context: what lies outside the (grown) mask where the patch would sit
+                ctx = np.zeros((th, tw), np.uint8)
+                inside = grown[cy:cy + th, cx:cx + tw]
+                ctx[:inside.shape[0], :inside.shape[1]] = np.where(inside > 0, 0, 255)
+                if np.count_nonzero(ctx) >= 0.1 * tw * th: mask = ctx
+            if mask is not None and templ[mask > 0].std(axis=0).max() < AUTO_FLAT_STD:
+                cand = (1.0, s, cx, cy, True)  # a flat context fits anywhere (its score is 1.0 or undefined): refuse it
+            else:
+                found = peaks(window, templ, mask)
+                cand = (found[0][0], s, x0 + found[0][1], y0 + found[0][2], False) if found else None
+            if cand and (best is None or rank(cand) > rank(best)): best = cand
+        if best: places.append(best)
+    if not places: return None
+    places.sort(key=rank, reverse=True)
+    score, s, x, y, flat = places[0]
+    if flat: return "the patch's context outside the mask is flat"
+    rival = next((p for p in places[1:] if abs(p[2] - x) > 2 or abs(p[3] - y) > 2), None)
+    return x, y, s, score, rival
+
+
 def cmd_align_check(args):
     P = pil()
     base_path, patch_path = existing_file(args.base, "--base"), existing_file(args.patch, "--patch")
+    if args.auto:
+        if args.at: raise UsageError("--auto finds the position itself; give --auto or --at, not both")
+        if accel is None: raise UsageError(f"align-check --auto needs accel.py next to {Path(__file__).name}; reinstall the image-verify skill")
+        if not accel.available(): raise UsageError(f"align-check --auto needs numpy and OpenCV: {accel.INSTALL_HINT}")
     out_dir = Path(args.out_dir).expanduser()
     if out_dir.exists() and not out_dir.is_dir(): raise UsageError(f"--out-dir {args.out_dir} is a file, not a folder")
     if not out_dir.resolve().parent.is_dir(): raise UsageError(f"--out-dir {args.out_dir}: its parent folder does not exist")
@@ -2040,6 +2236,32 @@ def cmd_align_check(args):
     W, H = base.size
     pw, ph = patch.size
     hard = hard_mask(open_8bit(existing_file(args.mask, "--mask"), "--mask"), base.size, "--mask", "--base") if args.mask else None
+    if args.auto:
+        if pw > W or ph > H: raise UsageError(f"the patch ({pw}x{ph}) is larger than --base {W}x{H}")
+        if min(pw, ph) < 8: raise UsageError(f"the patch ({pw}x{ph}) is too small to match; give --at")
+        found = auto_place(base, patch, hard)
+        if isinstance(found, str):
+            print(f"no reliable match: {found} (under {AUTO_FLAT_STD:g} levels of variation, it matches anywhere); "
+                  "give --at X,Y; nothing was written")
+            return 1
+        if found is None:
+            print(f"no reliable match: the patch does not fit inside the base at any scale {AUTO_SCALES[0]:.2f}-{AUTO_SCALES[-1]:.2f}; give --at X,Y")
+            return 1
+        x, y, scale, score, rival = found
+        print(f"Auto: best match at {x},{y}, scale {scale:.2f}, score {score:.3f} (TM_CCOEFF_NORMED"
+              + (", context outside the mask" if hard is not None else "") + f"; scales {AUTO_SCALES[0]:.2f}-{AUTO_SCALES[-1]:.2f})")
+        if score < AUTO_MIN_SCORE:
+            print(f"no reliable match (score {score:.3f} < {AUTO_MIN_SCORE}): give --at X,Y; nothing was written")
+            return 1
+        if rival and rival[0] >= score - AUTO_TIE:
+            print(f"no reliable match: {rival[2]},{rival[3]} matches as well (score {rival[0]:.3f}; a repeated motif); "
+                  "give --at X,Y; nothing was written")
+            return 1
+        if abs(scale - 1) > AUTO_SCALE_LIMIT + 1e-9:
+            print(f"the patch must be resized: it matches at scale {scale:.2f}, i.e. {round(pw * scale)}x{round(ph * scale)} instead of "
+                  f"{pw}x{ph}. Resize it keeping aspect, then run align-check --auto on the resized patch; nothing was written")
+            return 1
+        args.at = f"{x},{y}"
     if args.at:
         x0, y0 = parse_at(args.at)
         if x0 < 0 or y0 < 0 or x0 + pw > W or y0 + ph > H:
@@ -2115,6 +2337,14 @@ def boundary_offset(a, b, cap):
         canvas = P.Image.new("L", (W, H), 0); canvas.paste(mask.crop(box), (pad, pad))
         return P.ImageChops.subtract(canvas, canvas.filter(P.ImageFilter.MinFilter(3)))
     ea, eb = edge(a), edge(b)
+    if fast():  # exact Euclidean distance transform: the same distances, computed for every pixel at once
+        np, cv2 = accel.modules()
+        A, B = accel.to_array(ea) > 0, accel.to_array(eb) > 0
+        far = 0.0
+        for src, dst in ((A, B), (B, A)):
+            dist = cv2.distanceTransform(np.where(dst, 0, 255).astype(np.uint8), cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
+            far = max(far, float(dist[src].max()))
+        return None if far > cap else far
     worst, none = 0, (cap + 1) ** 2
     for src, dst in ((ea, eb), (eb, ea)):
         data, todo = dst.tobytes(), P.ImageChops.subtract(src, dst).tobytes()  # pixels on both boundaries are 0 px off
@@ -2142,6 +2372,7 @@ def cmd_shape_check(args):
     if not 0 <= args.max_iou_loss < 1: raise UsageError("--max-iou-loss must be from 0 to below 1 (0.01 = IoU at least 0.99)")
     if not 0 <= args.max_aspect < 1: raise UsageError("--max-aspect must be from 0 to below 1 (0.01 = 1%)")
     if args.max_edge is not None and not 0 < args.max_edge <= 256: raise UsageError("--max-edge must be 0 to 256 pixels (above 0)")
+    use_engine(args)
     before = open_8bit(existing_file(args.before_mask, "--before-mask"), "--before-mask")
     after = open_8bit(existing_file(args.after_mask, "--after-mask"), "--after-mask")
     a = hard_mask(before, before.size, "--before-mask", "itself")
@@ -2218,6 +2449,87 @@ def cmd_crop_check(args):
     return 1 if problems else 0
 
 
+def drop_small_components(mask, min_area):
+    """Pillow engine: (mask, components, dropped) with 8-connected components under min_area pixels removed.
+
+    Works on runs of on pixels row by row inside the mask box (union-find of runs that touch, diagonals included),
+    so the cost follows the number of runs, not the image size; the same result as cv2.connectedComponentsWithStats."""
+    P = pil()
+    box = mask.getbbox()
+    if not box: return mask, 0, 0
+    bw = box[2] - box[0]
+    data = mask.crop(box).tobytes()
+    runs, parent = [], []  # runs: (row, start, end) with end exclusive
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+    prev = []
+    for y in range(box[3] - box[1]):
+        row = data[y * bw:(y + 1) * bw]
+        cur, j = [], 0
+        for m in re.finditer(rb"[^\x00]+", row):
+            i, start, end = len(runs), m.start(), m.end()
+            runs.append((y, start, end)); parent.append(i); cur.append(i)
+            while j < len(prev) and runs[prev[j]][2] < start: j += 1  # runs above that end left of this one
+            k = j
+            while k < len(prev) and runs[prev[k]][1] <= end:  # overlap or touch diagonally
+                ri, rk = find(i), find(prev[k])
+                if ri != rk: parent[ri] = rk
+                k += 1
+        prev = cur
+    area = {}
+    for i, (_, a, b) in enumerate(runs): area[find(i)] = area.get(find(i), 0) + b - a
+    out = bytearray(len(data))
+    for i, (y, a, b) in enumerate(runs):
+        if area[find(i)] >= min_area: out[y * bw + a:y * bw + b] = b"\xff" * (b - a)
+    result = P.Image.new("L", mask.size, 0)
+    result.paste(P.Image.frombytes("L", (bw, box[3] - box[1]), bytes(out)), box[:2])
+    return result, len(area), sum(1 for v in area.values() if v < min_area)
+
+
+def cmd_mask_from_diff(args):
+    P = pil()
+    if not 0 <= args.threshold <= 254: raise UsageError("--threshold must be 0 to 254 (a channel must differ by more than it)")
+    if not 0 <= args.grow <= 64: raise UsageError("--grow must be 0 to 64 pixels")
+    if args.min_area < 0: raise UsageError("--min-area must be 0 or more pixels")
+    use_engine(args)
+    before_path, after_path = existing_file(args.before, "--before"), existing_file(args.after, "--after")
+    out = Path(args.out).expanduser()
+    if out.resolve() in (before_path.resolve(), after_path.resolve()): raise UsageError("--out must be a new file, not --before or --after")
+    if out.is_dir() or not out.parent.is_dir(): raise UsageError(f"--out {args.out}: not a file path in an existing folder")
+    if out.suffix.lower() != ".png": raise UsageError("--out must end in .png (an 8-bit gray mask, 0 or 255)")
+    before, after = open_8bit(before_path, "--before"), open_8bit(after_path, "--after")
+    if before.size != after.size:
+        raise UsageError(f"size differs: {before.size[0]}x{before.size[1]} vs {after.size[0]}x{after.size[1]}")
+    changed = changed_mask(before, after, args.threshold)
+    n = count_on(changed)
+    print(f"Changed pixels (a channel differs by more than {args.threshold}/255): {n}")
+    if not n:
+        print("no change: no pixel differs by more than --threshold; nothing was written")
+        return 1
+    if args.min_area > 1 and fast():
+        np, cv2 = accel.modules()
+        count, labels, stats, _ = cv2.connectedComponentsWithStats(accel.to_array(changed), connectivity=8)
+        keep = stats[:, cv2.CC_STAT_AREA] >= args.min_area
+        keep[0] = False  # label 0 is the unchanged background
+        changed = accel.to_mask(keep[labels])
+        print(f"Components (8-connected): {count - 1}; dropped {int((~keep[1:]).sum())} under {args.min_area} px")
+    elif args.min_area > 1:
+        changed, count, dropped = drop_small_components(changed, args.min_area)
+        print(f"Components (8-connected): {count}; dropped {dropped} under {args.min_area} px")
+    mask = grow(changed, args.grow)
+    box = mask.getbbox()
+    if not box:
+        print(f"no change left: every changed area was under --min-area {args.min_area} px; nothing was written")
+        return 1
+    mask.save(out, "PNG")
+    print(f"Wrote {out}: {count_on(mask)} px after growing {args.grow} px, box {','.join(map(str, box))} "
+          "(blend --mask, edit-check --mask)")
+    return 0
+
+
 EPILOG = """\
 subcommands:
   init --project PATH --brand ID         example: python3 studio_state.py init --project . --brand acme
@@ -2248,11 +2560,11 @@ subcommands:
   prepare-review --image F --out DIR [--approved A]
                                          every designer-review view in one call: overlapping tiles named tile-X_Y.png, edges, gray, thumb, lineup
                                          example: python3 studio_state.py prepare-review --image poster.png --approved v6.png --out views
-  axis-check --image F --points X,Y X,Y ... [--max-offset PX] [--max-bend 2] [--guide out.png]
+  axis-check --image F --points X,Y X,Y ... [--max-offset PX] [--max-bend 2] [--guide out.png] [--engine E]
                                          points from pommel (first) to tip (last); the red pommel-to-tip line is the axis, the blade spine is traced
                                          from the pixels between the last two points; exit 1 when a point or the spine leaves the line
                                          example: python3 studio_state.py axis-check --image hero.png --points 25,355 230,540 250,573 850,1570 --guide guide.png
-  align-check --base B --patch P --out-dir D [--at X,Y] [--mask M] [--accept]
+  align-check --base B --patch P --out-dir D [--at X,Y | --auto] [--mask M] [--accept]
                                          before blend: writes D/checker.png (base and patch in alternating squares) and D/overlay.png
                                          (50/50 mix) over the patch area (--at, else the mask box, else the whole base), and D/align.json
                                          {base_sha256, patch_sha256, mask_sha256|null, at, accepted: false}; exit 2 when the
@@ -2260,28 +2572,44 @@ subcommands:
                                          Open both views; then the same command with --accept re-hashes the inputs and sets accepted: true
                                          (exit 2 when the inputs changed, the views are missing, or the patch was scaled for the preview).
                                          Without --mask the record has mask_sha256 null and blend accepts any mask. The record stops
-                                         accidental skips; it is not a security boundary (a hand-edited align.json is trusted)
+                                         accidental skips; it is not a security boundary (a hand-edited align.json is trusted).
+                                         --auto (needs numpy and OpenCV, exit 2 with an install hint without them) finds --at itself:
+                                         cv2.matchTemplate TM_CCOEFF_NORMED over patch scales 0.90-1.10 (step 0.02, refined to 0.01), with
+                                         --mask only the patch's context outside the mask; prints "Auto: best match at X,Y, scale S, score V",
+                                         then continues as with --at X,Y (views and align.json). Exit 1, nothing written: score under 0.8,
+                                         another place within 0.01 of it, or a flat patch or masked context (std under 2 levels)
+                                         ("no reliable match ... give --at"); equal scores prefer scale 1; a scale more than 1% from 1
+                                         ("the patch must be resized" to the printed WxH; it is never resized for you)
                                          example: python3 studio_state.py align-check --base v6.png --patch patch.png --at 1200,400 --out-dir align
-  blend --base B --patch P --mask M --out F (--align D/align.json | --no-align-check) [--at X,Y] [--feather PX] [--no-match]
+                                         example: python3 studio_state.py align-check --base v6.png --patch patch.png --mask mask.png --auto --out-dir align
+  blend --base B --patch P --mask M --out F (--align D/align.json | --no-align-check) [--at X,Y] [--feather PX] [--no-match] [--engine E]
                                          exit 2 unless --align names an accepted align.json whose hashes and at match these inputs;
                                          --no-align-check skips it and prints "warning: registration not checked".
                                          paste a repair patch through a mask: matches its color to the ring around the mask, feathers the edge
                                          (default 3% of the mask box short side, 2-8 px; a passed --feather warns over 5%), prints ring dE2000 mean/p95,
                                          seam_step (mean |dL*| across the mask edge) and the changed area for edit-check; always writes the
-                                         output, exit 1 "color mismatch" when dE2000 mean > 2.0 or p95 > 3.5 (report only with --no-match)
+                                         output, exit 1 "color mismatch" when dE2000 mean > 2.0 or p95 > 3.5 (report only with --no-match).
+                                         With numpy/OpenCV it also prints seam_grad (mean Sobel gradient on the 2 px band across the mask
+                                         edge, output vs base; report only, never changes the exit code)
                                          example: python3 studio_state.py blend --base v6.png --patch patch.png --mask mask.png --at 1200,400 --align align/align.json --out v7.png
-  edit-check --before A --after B [--bbox x0,y0,x1,y1] [--mask M [--edge PX]] [--ring 24] [--out F]
+  edit-check --before A --after B [--bbox x0,y0,x1,y1] [--mask M [--edge PX]] [--ring 24] [--out F] [--engine E]
                                          at least one of --bbox and --mask (both run both checks); 16-bit inputs are refused. --bbox: changed pixels outside the box (exit 1 if any). --mask (same rule as blend: 128+ is in,
                                          transparent is out): % of mask pixels changed over 12/255; outside it, % over 8/255 (noise) and
                                          over 12/255 (exit 1 above 0.1%); exit 1 when under max(4 px, 0.5% of the mask) changed (no effect or inverted);
                                          --edge skips the blend feather band. Writes one before|after|changes view
                                          example: python3 studio_state.py edit-check --before v7.png --after v8.png --mask mask.png --edge 2
-  shape-check --before-mask A --after-mask B [--max-iou-loss 0.01] [--max-aspect 0.01] [--max-edge PX]
+  shape-check --before-mask A --after-mask B [--max-iou-loss 0.01] [--max-aspect 0.01] [--max-edge PX] [--engine E]
                                          silhouette masks of one protected object before and after an edit (same size, blend's mask rule):
                                          exit 1 when IoU < 1 - max-iou-loss, the box w/h ratio changes by more than max-aspect, or a
                                          boundary pixel is farther than max-edge (default max(2, 0.1% of the long side)) from the other outline;
                                          the search stops at 3x the limit (16-512 px) and reports "over N px" beyond it
                                          example: python3 studio_state.py shape-check --before-mask bottle-v6.png --after-mask bottle-v7.png
+  mask-from-diff --before B --after A --out M.png [--threshold 24] [--grow 5] [--min-area 16] [--engine E]
+                                         repair mask from two images: pixels where a channel differs by more than --threshold, components under
+                                         --min-area px dropped (8-connected; OpenCV or a pure-Python run labeling, the same mask on both
+                                         engines), then grown --grow px (square). Writes an 8-bit gray PNG of 0/255; refuses to
+                                         overwrite --before or --after; exit 1 and no file when nothing changed (or nothing is left)
+                                         example: python3 studio_state.py mask-from-diff --before v6.png --after edited.png --out mask.png
   crop-check --image F --focus x0,y0,x1,y1 [--display WxH] [--out-dir D]
                                          largest 16:9, 4:5, 1:1 and 9:16 crops centered on the focus and kept inside the image: ok with the
                                          focus share of the crop, "focus does not fit", or "image too small for this ratio"; --display: the image must be 2x WxH on both axes;
@@ -2292,8 +2620,13 @@ subcommands:
 approve, defect, brief, gate and verdict find the store by walking up from --project or the current folder.
 init creates it; pref add does not use the project store; lessons (lessons.jsonl) and taste notes (brands/<brand>/taste.jsonl, taste.jsonl) live in ${IMAGE_STUDIO_HOME:-~/.image-studio}, shared by every task; hooks use the cwd from the hook input.
 gate fails a wrong size and says whether the aspect matches (w/h within 0.025); a PNG/JPEG/WebP over 1 MB gets a warning, not a fail.
+engine (axis-check, blend, edit-check, shape-check, mask-from-diff): --engine auto|pillow|fast, else IMAGE_STUDIO_ENGINE, else auto.
+auto uses numpy + OpenCV when both import, pillow never does, fast exits 2 with an install hint without them; the first output
+line says "Engine: numpy/opencv" or "Engine: pillow". Both engines give the same verdict; optional install (Python 3.9+):
+uv run --with pillow --with jsonschema --with numpy==2.0.2 --with opencv-python-headless==4.11.0.86 python3 studio_state.py ...
 exit codes: 0 ok / gate pass, 1 gate fail, edit-check found changes outside the box or mask (or a mask with no effect), axis-check found a bend,
-blend found a color mismatch (output still written), shape-check found a changed silhouette, or crop-check found a crop or size problem,
+blend found a color mismatch (output still written), shape-check found a changed silhouette, crop-check found a crop or size problem,
+align-check --auto found no reliable match or a scale to fix, or mask-from-diff found no change,
 2 bad input or no store (blend without an accepted align record also exits 2)
 """
 
@@ -2355,11 +2688,13 @@ def build_parser():
     p.set_defaults(func=cmd_prepare_review)
 
     p = sub.add_parser("axis-check")
+    p.add_argument("--engine", choices=ENGINES, help="auto (default; or IMAGE_STUDIO_ENGINE), pillow, or fast (needs numpy and OpenCV)")
     p.add_argument("--image", required=True); p.add_argument("--points", required=True, nargs="+")
     p.add_argument("--max-bend", type=float, default=2.0); p.add_argument("--max-offset", type=float); p.add_argument("--guide")
     p.set_defaults(func=cmd_axis_check)
 
     p = sub.add_parser("blend")
+    p.add_argument("--engine", choices=ENGINES, help="auto (default; or IMAGE_STUDIO_ENGINE), pillow, or fast (needs numpy and OpenCV)")
     p.add_argument("--base", required=True); p.add_argument("--patch", required=True); p.add_argument("--mask", required=True)
     p.add_argument("--out", required=True); p.add_argument("--at"); p.add_argument("--feather", type=int)
     p.add_argument("--no-match", action="store_true")
@@ -2369,6 +2704,7 @@ def build_parser():
     p.set_defaults(func=cmd_blend)
 
     p = sub.add_parser("edit-check")
+    p.add_argument("--engine", choices=ENGINES, help="auto (default; or IMAGE_STUDIO_ENGINE), pillow, or fast (needs numpy and OpenCV)")
     p.add_argument("--before", required=True); p.add_argument("--after", required=True)
     p.add_argument("--bbox", nargs="+"); p.add_argument("--mask"); p.add_argument("--edge", type=int, default=0)
     p.add_argument("--ring", type=int, default=24); p.add_argument("--out", default="edit-check.png")
@@ -2378,13 +2714,22 @@ def build_parser():
     p.add_argument("--base", required=True); p.add_argument("--patch", required=True); p.add_argument("--at"); p.add_argument("--mask")
     p.add_argument("--out-dir", required=True)
     p.add_argument("--accept", action="store_true", help="after opening checker.png and overlay.png: mark D/align.json accepted")
+    p.add_argument("--auto", action="store_true", help="find --at with OpenCV template matching (needs numpy and OpenCV)")
     p.set_defaults(func=cmd_align_check)
 
     p = sub.add_parser("shape-check")
+    p.add_argument("--engine", choices=ENGINES, help="auto (default; or IMAGE_STUDIO_ENGINE), pillow, or fast (needs numpy and OpenCV)")
     p.add_argument("--before-mask", required=True); p.add_argument("--after-mask", required=True)
     p.add_argument("--max-iou-loss", type=float, default=SHAPE_IOU_LOSS); p.add_argument("--max-aspect", type=float, default=SHAPE_ASPECT)
     p.add_argument("--max-edge", type=float)
     p.set_defaults(func=cmd_shape_check)
+
+    p = sub.add_parser("mask-from-diff")
+    p.add_argument("--engine", choices=ENGINES, help="auto (default; or IMAGE_STUDIO_ENGINE), pillow, or fast (needs numpy and OpenCV)")
+    p.add_argument("--before", required=True); p.add_argument("--after", required=True); p.add_argument("--out", required=True)
+    p.add_argument("--threshold", type=int, default=24); p.add_argument("--grow", type=int, default=5)
+    p.add_argument("--min-area", type=int, default=16)
+    p.set_defaults(func=cmd_mask_from_diff)
 
     p = sub.add_parser("crop-check")
     p.add_argument("--image", required=True); p.add_argument("--focus", required=True); p.add_argument("--display"); p.add_argument("--out-dir")
@@ -2448,6 +2793,7 @@ def main(argv=None):
     if argv[:1] == ["hook"]: return run_hook(argv[1:])
     args = build_parser().parse_args(argv)
     lock = store_lock(args)
+    if accel is not None: accel.reset()  # only the accelerated commands select an engine, each run anew
     try: return args.func(args)
     except UsageError as exc: print(f"error: {exc}", file=sys.stderr)
     except OSError as exc: print(f"error: {exc}", file=sys.stderr)

@@ -1,5 +1,26 @@
 # Changelog
 
+## 2.22.0-local.1 (2026-10-20)
+
+Optional numpy + OpenCV engine and three OpenCV features. Pillow and jsonschema stay the only required dependencies; every check also runs on Pillow alone with the same verdict.
+
+- **Engine (`image-verify/scripts/accel.py`):** `axis-check`, `blend`, `edit-check`, `shape-check` and `mask-from-diff` take `--engine auto|pillow|fast` (else `IMAGE_STUDIO_ENGINE`, else auto) and print `Engine: numpy/opencv` or `Engine: pillow` first. auto uses `numpy==2.0.2` and `opencv-python-headless==4.11.0.86` when both import (pins chosen for Python 3.9); fast without them exits 2 with the install line. Vectorized: changed-pixel masks, mask growing (cv2.dilate), the blend ring, ring CIEDE2000, `seam_step`, pixel counts, and the shape-check boundary distance (exact cv2.distanceTransform). Blend output pixels are identical on both engines. `audit_candidate.py` already diffs with Pillow's C operations (no per-pixel loop) and is unchanged; the axis-check blade trace is at most 200 profiles (0.17 s on 4K) and stays as is.
+- **4K timings** (3840x2160, macOS arm64, Python 3.9, best of 3; "pixel work" excludes PNG decode/encode, which both engines share):
+
+  | Command | Pillow total | numpy/OpenCV total | Pillow pixel work | numpy/OpenCV pixel work | Speed-up (pixel work) |
+  | --- | --- | --- | --- | --- | --- |
+  | `blend` | 1.23 s | 0.69 s | 0.64 s | 0.09 s | 7.0x |
+  | `edit-check --mask --edge 8` | 0.76 s | 0.39 s | 0.45 s | 0.08 s | 5.5x |
+  | `shape-check` | 0.16 s | 0.10 s | 0.15 s | 0.09 s | 1.7x |
+  | `axis-check` | 0.20 s | 0.20 s | 0.17 s | 0.17 s | 1.0x |
+
+  A fresh process adds about 0.1 s to import numpy and OpenCV.
+- **`align-check --auto` (needs OpenCV):** finds `--at` with cv2.matchTemplate (TM_CCOEFF_NORMED) over patch scales 0.90-1.10, refined at full size; with `--mask` it matches only the patch's context outside the mask. Prints `Auto: best match at X,Y, scale S, score V` and writes that position into the views and `align.json`, so `--accept` and `blend --align` use it. Exit 1 with nothing written when the score is under 0.8, another place scores within 0.01 (a repeated motif), or the patch or its masked context is flat (std under 2 levels; TM_CCOEFF_NORMED scores a flat template 1.0 everywhere) ("no reliable match ... give --at"); equal scores prefer the scale closest to 1, or when the scale is more than 1% from 1 ("the patch must be resized"; it never resizes for you).
+- **`mask-from-diff --before B --after A --out M.png [--threshold 24] [--grow 5] [--min-area 16]`:** changed pixels (a channel differs by more than the threshold), components under `--min-area` px dropped (cv2.connectedComponentsWithStats, or the same 8-connected filter in pure Python by run labeling: both engines write the same mask), grown by `--grow` px; writes a 0/255 gray PNG, refuses to overwrite its inputs, exit 1 without a file when nothing changed.
+- **`seam_grad` in blend (OpenCV):** mean Sobel gradient on the band across the mask edge, output against base; report only.
+- **axis-check:** takes `--engine` but measures the same way on both engines (least-squares spine tilt), so verdicts cannot differ. Real swords (copies): v56 passes (spine 24 px off, 0.9 deg), v51 fails (spine 31 px off the red line; hilt left of the blade axis).
+- **Tests and CI:** `tests/test_accel.py` runs each accelerated command on both engines with the same inputs and requires the same exit code and numbers within 1%; fast-only tests skip without numpy/OpenCV. CI adds Python 3.9 and 3.12 jobs with the pinned numpy and OpenCV.
+
 ## 2.21.0-local.1 (2026-10-20)
 
 Closes the gaps left after comparing with the closest competitors. No new dependency.

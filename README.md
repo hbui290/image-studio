@@ -63,11 +63,11 @@ Only the skill that matches is loaded; the others cost a line each.
 | --- | --- | --- |
 | Skills (`SKILL.md`) | 10 | One workflow each; only the matching one is loaded |
 | References | 30 | Detailed rules, opened only when a step needs them |
-| Scripts (Python, one Swift helper) | 13 | Measurements the agent runs instead of guessing: `studio_state.py` (memory, gate, defects, `axis-check`, `align-check`, `blend`, `edit-check`, `shape-check`, `crop-check`), `review.py` and `controller.py` (review rounds), `audit_candidate.py` (pixel audit), `mac_vision.py` (Apple Vision), `compose_layers.py` (text and logo layers) |
+| Scripts (Python, one Swift helper) | 14 | Measurements the agent runs instead of guessing: `studio_state.py` (memory, gate, defects, `axis-check`, `align-check` with `--auto`, `blend`, `edit-check`, `mask-from-diff`, `shape-check`, `crop-check`), `accel.py` (optional numpy/OpenCV engine), `review.py` and `controller.py` (review rounds), `audit_candidate.py` (pixel audit), `mac_vision.py` (Apple Vision), `compose_layers.py` (text and logo layers) |
 | Agents | 2 | `image-hunter` finds problems, `image-reviewer` judges results; neither is the agent that made the image |
 | Hooks | 2 | Memory card at session start; block "done" until the gate passes |
 
-Runtime needs only Python with Pillow and jsonschema: no local AI model and no GPU. The measuring commands take one to three seconds on a 4K image.
+Runtime needs only Python with Pillow and jsonschema: no local AI model and no GPU. The measuring commands take one to three seconds on a 4K image. With the optional numpy and OpenCV, the pixel work of `blend` and `edit-check` runs about 5x faster and `align-check --auto` can find a patch's position.
 
 ## Speed and tokens
 
@@ -84,6 +84,7 @@ Runtime needs only Python with Pillow and jsonschema: no local AI model and no G
 | Generating or redrawing | Codex `image_gen` (Claude Code has no built-in generator; it hands back the prompt) |
 | Sharpen or upscale | [Upscayl](https://github.com/upscayl/upscayl) (`upscayl-bin` and models) or [Real-ESRGAN-ncnn-vulkan](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan) |
 | Cutouts, text checks, and hand boxes on macOS 14+ | Built in: `mac_vision.py` uses Apple Vision (no download; needs the Xcode command line tools for `swiftc`) |
+| Faster checks and `align-check --auto` (optional) | [numpy](https://numpy.org/install/) and [OpenCV](https://pypi.org/project/opencv-python-headless/) (`opencv-python-headless`): `uv run --with pillow --with jsonschema --with numpy==2.0.2 --with opencv-python-headless==4.11.0.86 python3 ...`; every check also runs on Pillow alone with the same verdict (`--engine pillow`) |
 | Optional | [rembg](https://github.com/danielgatis/rembg) (backgrounds off macOS or when edges matter: `birefnet-general-lite`), [Potrace](https://potrace.sourceforge.net) (logo to SVG), [jsonschema](https://pypi.org/project/jsonschema/) (spec checks and `image-loop`), [Codex CLI](https://github.com/openai/codex) (automated review) |
 
 Model choice by image type, measured results, and licence notes: [enhancement recipes](plugins/image-studio/skills/image-enhance/references/recipes.md). Setup checklist: [tool readiness](plugins/image-studio/skills/image-repair/references/tool-readiness.md).

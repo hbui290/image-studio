@@ -10,12 +10,13 @@ This repo is a plugin for Claude Code and Codex. The plugin contains 10 skills i
 ## Code
 
 - Scripts must run on Python 3.9: no `X | Y` type unions, no `match`. The CI job on Python 3.9 is the final check.
-- Dependencies are Pillow and jsonschema only. Do not add others without asking.
+- Dependencies: Pillow and jsonschema are required. numpy and opencv-python-headless (and later playwright) are optional, pinned to versions that support Python 3.9 (`numpy==2.0.2`, `opencv-python-headless==4.11.0.86`). No command may require an optional one unless the docs say the feature needs it; then it exits 2 with an install hint. Every accelerated path (`image-verify/scripts/accel.py`, `--engine auto|pillow|fast`, `IMAGE_STUDIO_ENGINE`) keeps a pure-Pillow fallback that gives the same pass/fail verdict, checked by the parity tests in `tests/test_accel.py`. Do not add other dependencies without asking.
 - Bad input ends in a clear message and exit code 2, never a traceback. Exit codes, flags, output file names, and JSON field names must match what the docs say.
 - Every behavior fix gets a regression test in `tests/` that fails before the fix.
 - Run the tests:
   ```bash
   uv run --with pillow --with jsonschema python3 -m unittest discover -s tests
+  uv run --with pillow --with jsonschema --with numpy==2.0.2 --with opencv-python-headless==4.11.0.86 python3 -m unittest discover -s tests
   ```
 - `image-reconstruction/visual-map.html` embeds copies of `references/reconstruction.schema.json` and the prompt compiler from `scripts/reconstruct.py`. When you change either one, update the copy in the page in the same change; `tests/test_visual_map.py` fails if they drift.
 
