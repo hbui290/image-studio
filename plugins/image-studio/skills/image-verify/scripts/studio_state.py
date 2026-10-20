@@ -41,6 +41,7 @@ MIN_EVIDENCE = 10
 NOTE_LIMIT = 120
 MIN_BOX = 16           # smallest defect box side (px) without a user quote
 MIN_BOX_SHARE = 0.001  # smallest defect box area (share of the image) without a user quote
+WIDE_BOX_SHARE = 0.25  # largest agent defect box (share of the image) without --wide
 CHANGE_LEVEL = 8       # per-channel difference that counts as a changed pixel
 CARD_LIMIT = 2400
 LESSONS_SHOWN = 5      # lessons printed in the session card and brief
@@ -476,6 +477,13 @@ def cmd_defect_add(args):
     if small and not quote:
         raise UsageError(f"--bbox {width}x{height} is too small to prove a fix (needs >= {MIN_BOX}x{MIN_BOX} px and "
                          f">= {MIN_BOX_SHARE:.1%} of the image); draw a larger box or pass --quote with the user's words")
+    if args.wide and args.source != "agent": raise UsageError("--wide is only for --source agent")
+    seen = (min(box[2], image.size[0]) - box[0]) * (min(box[3], image.size[1]) - box[1])
+    if args.source == "agent" and seen > WIDE_BOX_SHARE * image.size[0] * image.size[1] and not args.wide:
+        raise UsageError(f"--bbox covers {seen / (image.size[0] * image.size[1]):.0%} of the image; an agent box over "
+                         f"{WIDE_BOX_SHARE:.0%} has not located the defect: re-check the crop and draw a tighter box, or pass "
+                         "--wide for a whole-image problem (overall softness, color cast)")
+    if args.wide: record["wide"] = True
     if quote: record["quote"] = quote
     defects = store.defects()
     # A requested change (kind scope with the user's words: new text, a removed element) is not a miss, so it needs no lesson.
@@ -1553,7 +1561,8 @@ def cmd_prepare_review(args):
     if out.exists() and (not out.is_dir() or any(out.iterdir())): raise UsageError(f"{out} exists and is not empty; choose a new folder")
     out.mkdir(parents=True, exist_ok=True)
     W, H = image.size
-    cols, rows = (4, 4) if max(W, H) > 3000 else (3, 2)
+    # at least 3x2 tiles, and no tile side over about 1024 px: larger views are shrunk by the model and cost the most tokens
+    cols, rows = min(5, max(3, -(-W // 1000))), min(5, max(2, -(-H // 1000)))  # at most 5x5; above 5000 px tiles grow
     ov = max(0, args.overlap)
     tw, th = -(-(W + (cols - 1) * ov) // cols), -(-(H + (rows - 1) * ov) // rows)
     names = []
@@ -1570,7 +1579,7 @@ def cmd_prepare_review(args):
     e = min(90, W, H)
     save(image.crop((0, 0, W, e)), "edge-top.png"); save(image.crop((0, H - e, W, H)), "edge-bottom.png")
     save(image.crop((0, 0, e, H)), "edge-left.png"); save(image.crop((W - e, 0, W, H)), "edge-right.png")
-    save(image.convert("L"), "gray.png")
+    gray = image.convert("L"); gray.thumbnail((1024, 1024)); save(gray, "gray.png")
     thumb = image.copy(); thumb.thumbnail((120, 120)); save(thumb, "thumb.png")
     if args.approved:
         approved = open_image(existing_file(args.approved, "--approved")).convert("RGB")
@@ -1710,6 +1719,74 @@ def cmd_axis_check(args):
     return 1 if problems else 0
 
 
+def cmd_blend(args):
+    P = pil()
+    base_path, patch_path, mask_path = (existing_file(v, k) for v, k in ((args.base, "--base"), (args.patch, "--patch"), (args.mask, "--mask")))
+    out = Path(args.out).expanduser()
+    if out.resolve() in (base_path.resolve(), patch_path.resolve(), mask_path.resolve()): raise UsageError("--out must be a new file, not an input")
+    if out.is_dir() or not out.parent.is_dir(): raise UsageError(f"--out {args.out}: not a file path in an existing folder")
+    if out.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"): raise UsageError("--out must end in .png, .jpg, .jpeg, or .webp")
+    if not 0 <= args.feather <= 64: raise UsageError("--feather must be 0 to 64 pixels")
+    images = {}
+    for label, path in (("--base", base_path), ("--patch", patch_path), ("--mask", mask_path)):
+        img = open_image(path)
+        if img.mode in ("I", "F") or img.mode.startswith("I;"):
+            raise UsageError(f"{label} is a 16-bit or float image ({img.mode}); save an 8-bit copy first")
+        images[label] = img
+    base, patch, mask_img = images["--base"], images["--patch"], images["--mask"]
+    alpha_out = base.mode in ("RGBA", "LA", "PA") or "transparency" in base.info
+    base, patch = base.convert("RGBA"), patch.convert("RGBA")
+    W, H = base.size
+    if mask_img.size != base.size: raise UsageError(f"--mask is {mask_img.size[0]}x{mask_img.size[1]}; it must match --base {W}x{H}")
+    mask = mask_img.convert("L")
+    if "A" in mask_img.getbands(): mask = P.ImageChops.darker(mask, mask_img.getchannel("A"))  # transparent = not part of the mask
+    x0, y0 = 0, 0
+    if args.at:
+        try: x0, y0 = (int(v) for v in args.at.split(","))
+        except ValueError: raise UsageError(f"--at takes x,y, got {args.at!r}") from None
+    if x0 < 0 or y0 < 0 or x0 + patch.size[0] > W or y0 + patch.size[1] > H:
+        raise UsageError(f"the patch ({patch.size[0]}x{patch.size[1]} at {x0},{y0}) does not fit inside --base {W}x{H}; "
+                         "resize it or pass --at")
+    hard = mask.point(lambda v: 255 if v >= 128 else 0)
+    box = hard.getbbox()
+    if not box: raise UsageError("--mask is empty (no pixel at 128 or brighter)")
+    placed = base.copy(); placed.paste(patch, (x0, y0))
+    covered = P.Image.new("L", (W, H), 0); covered.paste(255, (x0, y0, x0 + patch.size[0], y0 + patch.size[1]))
+    # work on the mask box plus a margin: the ring is the band just outside the mask that the patch also covers
+    r = max(8, 2 * args.feather)
+    m = r + args.feather * 2 + 2
+    work = (max(0, box[0] - m), max(0, box[1] - m), min(W, box[2] + m), min(H, box[3] + m))
+    hm, cw = hard.crop(work), covered.crop(work)
+    ring = P.ImageChops.darker(P.ImageChops.subtract(hm.filter(P.ImageFilter.MaxFilter(2 * (r // 2) + 1)), hm), cw)
+    pw, bw = placed.crop(work), base.crop(work)
+    rgb_p, rgb_b = pw.convert("RGB"), bw.convert("RGB")
+    def delta(img):
+        a, b = P.ImageStat.Stat(img, ring).mean, P.ImageStat.Stat(rgb_b, ring).mean
+        return max(abs(x - y) for x, y in zip(a, b))
+    if args.no_match: pass
+    elif ring.getbbox():
+        before = delta(rgb_p)
+        sp, sb = P.ImageStat.Stat(rgb_p, ring), P.ImageStat.Stat(rgb_b, ring)
+        luts = []
+        for mp, dp, mb, db in zip(sp.mean, sp.stddev, sb.mean, sb.stddev):
+            gain = min(1.25, max(0.8, db / dp)) if dp > 1 else 1.0
+            luts += [max(0, min(255, round((v - mp) * gain + mb))) for v in range(256)]
+        rgb_p = rgb_p.point(luts)
+        print(f"Color match: ring difference {before:.1f} -> {delta(rgb_p):.1f} (largest channel mean, 0-255)")
+    else:
+        print("Color match: skipped (the patch does not cover any pixels around the mask)")
+    pw = P.Image.merge("RGBA", rgb_p.split() + (pw.getchannel("A"),))
+    # the mask itself stays fully replaced; the feather only softens the band just outside it
+    alpha = P.ImageChops.lighter(hm, hm.filter(P.ImageFilter.GaussianBlur(args.feather / 2))) if args.feather else hm
+    alpha = P.ImageChops.darker(alpha, cw)
+    result = base.copy(); result.paste(P.Image.composite(pw, bw, alpha), work[:2])
+    if not alpha_out or out.suffix.lower() in (".jpg", ".jpeg"): result = result.convert("RGB")
+    result.save(out)
+    span = changed_mask(base, result).getbbox()
+    print(f"Wrote {out}" + (f"; changed area {','.join(map(str, span))} (use as edit-check --bbox)" if span else "; nothing changed"))
+    return 0
+
+
 def cmd_edit_check(args):
     before_path, after_path = existing_file(args.before, "--before"), existing_file(args.after, "--after")
     before, after = open_image(before_path), open_image(after_path)
@@ -1747,7 +1824,7 @@ subcommands:
   init --project PATH --brand ID         example: python3 studio_state.py init --project . --brand acme
   approve deliverable --name N --file F [--width W --height H --format PNG|JPEG|WEBP|ZIP] [--alpha required|forbidden|any] [--quote T]
                                          example: python3 studio_state.py approve deliverable --name poster --file poster.png --width 1200 --height 800 --format PNG
-  defect add --deliverable N --bbox x0,y0,x1,y1 --kind logo|seam|artifact|scope|color|other --note T [--source user|agent] [--quote T]
+  defect add --deliverable N --bbox x0,y0,x1,y1 --kind logo|seam|artifact|scope|color|other --note T [--source user|agent] [--quote T] [--wide]
                                          example: python3 studio_state.py defect add --deliverable poster --bbox 100,50,200,150 --kind seam --note "visible seam"
   defect close --id D1 --status resolved|wontfix --note T [--quote T]
                                          example: python3 studio_state.py defect close --id D1 --status resolved --note "feathered seam"
@@ -1776,6 +1853,10 @@ subcommands:
                                          points from pommel (first) to tip (last); the red pommel-to-tip line is the axis, the blade spine is traced
                                          from the pixels between the last two points; exit 1 when a point or the spine leaves the line
                                          example: python3 studio_state.py axis-check --image hero.png --points 25,355 230,540 250,573 850,1570 --guide guide.png
+  blend --base B --patch P --mask M --out F [--at X,Y] [--feather 8] [--no-match]
+                                         paste a repair patch through a mask: matches its color to the ring around the mask, feathers the edge,
+                                         and prints the changed area for edit-check
+                                         example: python3 studio_state.py blend --base v6.png --patch patch.png --mask mask.png --out v7.png
   edit-check --before A --after B --bbox x0,y0,x1,y1 [--ring 24] [--out F]
                                          changed pixels outside the edit box (exit 1 if any) and one before|after|changes view
                                          example: python3 studio_state.py edit-check --before v7.png --after v8.png --bbox 280,320,370,410
@@ -1810,6 +1891,7 @@ def build_parser():
     p.add_argument("--deliverable", required=True); p.add_argument("--bbox", required=True, nargs="+")
     p.add_argument("--kind", required=True, choices=KINDS); p.add_argument("--note", required=True)
     p.add_argument("--source", choices=("user", "agent"), default="user"); p.add_argument("--quote")
+    p.add_argument("--wide", action="store_true")
     p.set_defaults(func=cmd_defect_add)
 
     p = defect.add_parser("close", parents=[common])
@@ -1846,6 +1928,12 @@ def build_parser():
     p.add_argument("--image", required=True); p.add_argument("--points", required=True, nargs="+")
     p.add_argument("--max-bend", type=float, default=2.0); p.add_argument("--max-offset", type=float); p.add_argument("--guide")
     p.set_defaults(func=cmd_axis_check)
+
+    p = sub.add_parser("blend")
+    p.add_argument("--base", required=True); p.add_argument("--patch", required=True); p.add_argument("--mask", required=True)
+    p.add_argument("--out", required=True); p.add_argument("--at"); p.add_argument("--feather", type=int, default=8)
+    p.add_argument("--no-match", action="store_true")
+    p.set_defaults(func=cmd_blend)
 
     p = sub.add_parser("edit-check")
     p.add_argument("--before", required=True); p.add_argument("--after", required=True)

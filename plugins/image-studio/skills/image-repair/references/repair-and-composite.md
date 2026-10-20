@@ -57,7 +57,7 @@ For removal, describe what should appear behind the removed object (texture fill
 
 ## Masked composite
 
-Confirm the generated candidate matches the crop's aspect ratio and landmarks before resizing. In a POSIX shell with ImageMagick:
+Confirm the generated candidate matches the crop's aspect ratio and landmarks before resizing. The short path, once the patch is resized to its crop: `studio_state.py blend --base input.png --patch patch.png --at X,Y --mask mask.png --out candidate.png` (mask at full image size; pixels at 128 or brighter take the patch, and the feather softens only the band outside them; a transparent base keeps its alpha; 16-bit files are refused). It shifts the patch's color to match the ring of pixels around the mask, feathers the edge, and prints the changed area for `edit-check`. The manual equivalent in a POSIX shell with ImageMagick:
 
 ```bash
 src='input.png'

@@ -66,6 +66,11 @@ class MacVisionTests(unittest.TestCase):
             self.assertEqual(bad.returncode, 2, bad.stderr)
             self.assertIn("--timeout", bad.stderr)
 
+    def test_hands_on_an_image_without_hands_reports_none(self):
+        run = self.run_tool("hands", self.dir / "banner.png")
+        self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+        self.assertIn("No hands", run.stderr)
+
     def test_bad_input_exits_2(self):
         self.assertEqual(self.run_tool("ocr", self.dir / "missing.png").returncode, 2)
         (self.dir / "bad.png").write_text("not an image")

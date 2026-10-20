@@ -1841,6 +1841,77 @@ class BatchVerdictTests(StudioBase):
         self.assertEqual(run.returncode, 2)
 
 
+class AgentBoxTests(StudioBase):
+    """An agent box over a quarter of the image is not a located defect (LEGION: VLMs box most of the image)."""
+
+    def test_wide_agent_box_needs_wide_flag(self):
+        self.init()
+        self.approve_poster(self.poster())
+        run = self.run_cli("defect", "add", "--deliverable", "poster", "--bbox", "0,0,180,140", "--kind", "artifact",
+                           "--note", "soft", "--source", "agent")
+        self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+        self.assertIn("25%", run.stderr)
+        self.ok("defect", "add", "--deliverable", "poster", "--bbox", "0,0,180,140", "--kind", "artifact",
+                "--note", "whole image is soft", "--source", "agent", "--wide")
+        self.ok("defect", "add", "--deliverable", "poster", "--bbox", "0,0,180,140", "--kind", "artifact",
+                "--note", "user says soft", "--source", "user")
+        run = self.run_cli("defect", "add", "--deliverable", "poster", "--bbox", "0,0,180,140", "--kind", "artifact",
+                           "--note", "user says soft", "--source", "user", "--wide")
+        self.assertEqual(run.returncode, 2)
+
+
+class BlendTests(StudioBase):
+    """blend: color-match a patch to the ring around its mask, feather the edge, change nothing far outside."""
+
+    def setUp(self):
+        super().setUp()
+        Image.new("RGB", (200, 160), (100, 100, 100)).save(self.project / "base.png")
+        patch = Image.new("RGB", (200, 160), (140, 140, 140))
+        patch.paste((180, 180, 180), (90, 70, 110, 90))  # the repaired detail, 40 brighter than the patch's own background
+        patch.save(self.project / "patch.png")
+        mask = Image.new("L", (200, 160), 0)
+        mask.paste(255, (60, 50, 140, 110))
+        mask.save(self.project / "mask.png")
+
+    def test_patch_tone_is_matched_and_outside_kept(self):
+        run = self.ok("blend", "--base", "base.png", "--patch", "patch.png", "--mask", "mask.png", "--out", "out.png")
+        self.assertIn("edit-check --bbox", run.stdout)
+        out = Image.open(self.project / "out.png").convert("RGB")
+        self.assertLessEqual(abs(out.getpixel((75, 65))[0] - 100), 3)  # patch background matched to the surrounding tone
+        self.assertLessEqual(abs(out.getpixel((100, 80))[0] - 140), 3)  # the detail keeps its contrast
+        self.assertEqual(out.getpixel((5, 5)), (100, 100, 100))
+
+    def test_no_match_keeps_patch_tone_and_offset_patch(self):
+        self.ok("blend", "--base", "base.png", "--patch", "patch.png", "--mask", "mask.png", "--out", "raw.png", "--no-match")
+        self.assertEqual(Image.open(self.project / "raw.png").convert("RGB").getpixel((75, 65)), (140, 140, 140))
+        Image.new("RGB", (100, 80), (140, 140, 140)).save(self.project / "small.png")
+        self.ok("blend", "--base", "base.png", "--patch", "small.png", "--at", "50,40", "--mask", "mask.png", "--out", "o2.png")
+
+    def test_alpha_kept_mask_interior_full_and_16_bit_refused(self):
+        rgba = Image.new("RGBA", (200, 160), (100, 100, 100, 0)); rgba.save(self.project / "cut.png")
+        self.ok("blend", "--base", "cut.png", "--patch", "patch.png", "--mask", "mask.png", "--out", "cut2.png", "--no-match", "--feather", "40")
+        out = Image.open(self.project / "cut2.png")
+        self.assertEqual(out.mode, "RGBA")
+        self.assertEqual(out.getpixel((5, 5))[3], 0)  # transparent base stays transparent
+        self.assertEqual(out.getpixel((61, 51))[:3], (140, 140, 140))  # mask edge fully replaced despite a large feather
+        Image.new("I;16", (200, 160), 30000).save(self.project / "deep.png")
+        for extra in (["--base", "deep.png", "--patch", "patch.png"], ["--base", "base.png", "--patch", "patch.png", "--feather", "500"],
+                      ["--base", "base.png", "--patch", "patch.png", "--out", "o.xyz"]):
+            args = ["blend", "--mask", "mask.png"] + extra
+            if "--out" not in extra: args += ["--out", "z.png"]
+            run = self.run_cli(*args)
+            self.assertEqual(run.returncode, 2, (extra, run.stdout, run.stderr))
+            self.assertNotIn("unexpected", run.stderr)
+
+    def test_bad_input_exit_2(self):
+        Image.new("L", (10, 10), 255).save(self.project / "tiny.png")
+        for extra in (["--mask", "tiny.png"], ["--mask", "mask.png", "--feather", "-1"], ["--mask", "mask.png", "--at", "190,150"]):
+            run = self.run_cli("blend", "--base", "base.png", "--patch", "patch.png", "--out", "x.png", *extra)
+            self.assertEqual(run.returncode, 2, (extra, run.stdout, run.stderr))
+        run = self.run_cli("blend", "--base", "base.png", "--patch", "patch.png", "--mask", "mask.png", "--out", "base.png")
+        self.assertEqual(run.returncode, 2)
+
+
 class PrepareReviewTests(StudioBase):
     """prepare-review writes every hunt view in one call, tiles named by their corner."""
 
@@ -1864,6 +1935,17 @@ class PrepareReviewTests(StudioBase):
                 self.assertEqual(tile.tobytes(), img.crop((x, y, x + tile.size[0], y + tile.size[1])).tobytes())
         self.assertIn("300x200", run.stdout)
         self.assertIn("tile-0_0.png", run.stdout)
+
+    def test_large_image_tiles_and_gray_fit_the_token_budget(self):
+        Image.new("RGB", (9000, 600), (30, 40, 50)).save(self.project / "huge.png")
+        run = self.ok("prepare-review", "--image", "huge.png", "--out", "hugeviews")
+        self.assertLessEqual(len([n for n in run.stdout.split() if n.startswith("tile-")]), 25)
+        Image.new("RGB", (3840, 2161), (30, 40, 50)).save(self.project / "big.png")
+        run = self.ok("prepare-review", "--image", "big.png", "--out", "bigviews")
+        for name in run.stdout.split():
+            if name.startswith("tile-") or name == "gray.png":
+                with Image.open(self.project / "bigviews" / name) as v:
+                    self.assertLessEqual(max(v.size), 1100, (name, v.size))
 
     def test_small_and_thin_images_get_true_unique_tiles(self):
         for i, size in enumerate([(50, 30), (1, 1), (100, 7), (3001, 40)]):

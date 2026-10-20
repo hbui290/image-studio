@@ -2,6 +2,7 @@
 // Built and run by mac_vision.py; see that file for usage. Prints one JSON object on stdout.
 //   cutout IN OUTDIR [X Y]   foreground cutout.png, mask.png, and mask-N.png per instance; X Y (pixels) keeps one instance
 //   ocr IN                   text lines with confidence and boxes [x0, y0, x1, y1] in image pixels
+//   hands IN                 one box per detected hand with the number of the 21 joints seen
 // Exit codes: 0 written, 1 nothing found, 2 bad input.
 import CoreImage
 import Foundation
@@ -33,7 +34,7 @@ func writePNG(_ image: CIImage, _ path: String, _ extent: CGRect) {
 }
 
 let args = CommandLine.arguments
-guard args.count >= 3 else { fail("usage: cutout IN OUTDIR [X Y] | ocr IN") }
+guard args.count >= 3 else { fail("usage: cutout IN OUTDIR [X Y] | ocr IN | hands IN") }
 let image = load(args[2])
 let W = Double(image.width), H = Double(image.height)
 let handler = VNImageRequestHandler(cgImage: image, options: [:])
@@ -93,6 +94,24 @@ case "ocr":
     }
     emit(["lines": lines, "seconds": Date().timeIntervalSince(start)], code: lines.isEmpty ? 1 : 0)
 
+case "hands":
+    let request = VNDetectHumanHandPoseRequest()
+    request.maximumHandCount = 12
+    do { try handler.perform([request]) } catch { fail("Vision failed: \(error.localizedDescription)") }
+    var hands: [[String: Any]] = []
+    for observation in request.results ?? [] {
+        guard let points = try? observation.recognizedPoints(.all) else { continue }
+        let seen = points.values.filter { $0.confidence > 0.3 }
+        if seen.isEmpty { continue }
+        let xs = seen.map { $0.location.x * W }, ys = seen.map { (1 - $0.location.y) * H }
+        let x0 = xs.min()!, x1 = xs.max()!, y0 = ys.min()!, y1 = ys.max()!
+        let pad = max(16.0, 0.3 * max(x1 - x0, y1 - y0))  // joints sit inside the hand: pad to the skin edge
+        let side = observation.chirality == .left ? "left" : (observation.chirality == .right ? "right" : "unknown")
+        hands.append(["joints": seen.count, "side": side, "confidence": Double(observation.confidence),
+                      "box": [Int(max(0, x0 - pad)), Int(max(0, y0 - pad)), Int(min(W, x1 + pad)), Int(min(H, y1 + pad))]])
+    }
+    emit(["hands": hands, "seconds": Date().timeIntervalSince(start)], code: hands.isEmpty ? 1 : 0)
+
 default:
-    fail("unknown command \(args[1]); use cutout or ocr")
+    fail("unknown command \(args[1]); use cutout, ocr, or hands")
 }

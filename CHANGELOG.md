@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.18.0-local.1 (2026-10-20)
+
+Four upgrades from a research pass on defect localization (LEGION, RichHF), region repair (libcom-style harmonization), and image token costs (Claude vision docs). None adds a dependency.
+
+- **`studio_state.py blend --base B --patch P --mask M --out F [--at X,Y] [--feather 8] [--no-match]`:** pastes a repair patch through its mask, shifts the patch's color to match the ring of pixels just outside the mask (gain 0.8-1.25 per channel), feathers only the band outside the mask (the mask itself is always fully replaced), keeps a transparent base's alpha, refuses 16-bit files, and prints the changed area for `edit-check`. A generated patch that came back 40 levels lighter now lands within 3.
+- **Agent boxes must locate the problem:** `defect add --source agent` refuses a box over 25% of the image unless `--wide` marks a whole-image problem; the hunter keeps boxes under a quarter of the image and writes "whole image" for overall softness or a color cast.
+- **`mac_vision.py hands IN`:** Apple Vision boxes every hand with the number of its 21 joints it saw (no download). The hunt saves each box as `hand-N.png` so every hand is checked at 100%; a found hand is never a pass.
+- **Token budget:** `prepare-review` tiles are at least 3x2 and at most about 1024 px a side up to 5x5 tiles (a 3840x2161 image now gives 12 tiles of about 990x750 instead of 16), and `gray.png` is at most 1024 px. The main chat opens only the map, the thumbnail, and the `edit-check` view.
+
 ## 2.17.0-local.1 (2026-10-20)
 
 Rule for every straight sword: a red line from the pommel to the tip is the axis, and the blade's own spine must run along it.

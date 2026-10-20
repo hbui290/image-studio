@@ -50,7 +50,7 @@ Only the skill that matches is loaded; the others cost a line each.
 2. **Assets and copy first:** it uses your own logo, fonts, and icons, confirms every word and number once, and settles the style (for example 2D, not a 3D render) before the first full image.
 3. **Layers:** text, numbers, and logos are never drawn by the generator. `compose_layers.py` places them, and a cut-out subject, on the art, so changing a word or moving the logo takes one run, not a new generation.
 4. **Hunt:** a fresh reviewer agent checks the whole image once (AI slop, broken outlines, leftovers, seams, hands, your past complaints) and `map` draws every problem on one image, so you confirm them all at once.
-5. **Repair in one batch:** patches for all confirmed regions are generated in parallel and composited through masks; `edit-check` proves nothing outside each region changed.
+5. **Repair in one batch:** patches for all confirmed regions are generated in parallel and pasted through masks with `blend`, which matches each patch's color to its surroundings; `edit-check` proves nothing outside each region changed.
 6. **Gate:** before the agent may say "done", every problem ever reported must be re-checked on a fresh crop. A hook blocks "done" while the gate has not passed.
 
 ## Speed and tokens
@@ -58,6 +58,7 @@ Only the skill that matches is loaded; the others cost a line each.
 - **One chat per task.** A long chat resends its whole history on every step (one measured chat sent about 227,000 tokens per step). Memory lives in the project store, lessons, and taste notes, so a new chat loses nothing. The session card says when a chat has grown too long.
 - **Name the skill** when you know it, so the agent does not guess.
 - **Confirm the map once** instead of reporting problems one by one.
+- **Images cost the most tokens:** the main chat opens only the map, the thumbnail, and one check view; review tiles (each at most about 1024 px) are opened by the hunter agent.
 
 ## Tools
 
@@ -66,7 +67,7 @@ Only the skill that matches is loaded; the others cost a line each.
 | Everything that touches pixels | [ImageMagick](https://imagemagick.org/download/) 7 and Python 3.9+ with [Pillow](https://pypi.org/project/pillow/) (run scripts with [uv](https://docs.astral.sh/uv/): `uv run --with pillow --with jsonschema python3 ...`) |
 | Generating or redrawing | Codex `image_gen` (Claude Code has no built-in generator; it hands back the prompt) |
 | Sharpen or upscale | [Upscayl](https://github.com/upscayl/upscayl) (`upscayl-bin` and models) or [Real-ESRGAN-ncnn-vulkan](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan) |
-| Cutouts and text checks on macOS 14+ | Built in: `mac_vision.py` uses Apple Vision (no download; needs the Xcode command line tools for `swiftc`) |
+| Cutouts, text checks, and hand boxes on macOS 14+ | Built in: `mac_vision.py` uses Apple Vision (no download; needs the Xcode command line tools for `swiftc`) |
 | Optional | [rembg](https://github.com/danielgatis/rembg) (backgrounds off macOS or when edges matter: `birefnet-general-lite`), [Potrace](https://potrace.sourceforge.net) (logo to SVG), [jsonschema](https://pypi.org/project/jsonschema/) (spec checks and `image-loop`), [Codex CLI](https://github.com/openai/codex) (automated review) |
 
 Model choice by image type, measured results, and licence notes: [enhancement recipes](plugins/image-studio/skills/image-enhance/references/recipes.md). Setup checklist: [tool readiness](plugins/image-studio/skills/image-repair/references/tool-readiness.md).
