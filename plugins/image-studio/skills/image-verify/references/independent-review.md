@@ -24,6 +24,13 @@ If any input is missing or an image cannot be opened, write nothing and report e
 3. Write evidence that names what you saw, where. Do not claim exact pixel identity, measured colors, or an exact font; the pixel audit handles exact comparison.
 4. Do not add requirements, rewrite the brief, or judge taste.
 
+
+### Straight-prop evidence
+
+When the criteria concern a straight rigid prop, independently inspect the final pixels at 100% (200% only to resolve a landmark). For a sword, record the visible pommel center, crossguard center, blade-base center immediately beyond the guard, and actual tip, plus the grip center when visible. Name the image dimensions and coordinate origin; add crop offsets to obtain final-image pixels. Do not reuse the editor's proposed guide points as observations.
+
+Ask the caller to run `axis-check --guide` on those observed points (pommel first, tip last) and open the guide: the red pommel-to-tip line must run along the traced blade spine (yellow dots) inside the cyan blade outline. Include the point labels, coordinates, estimated pixel uncertainty, command result, and the largest offset in the check evidence. Report the result as a measurement from selected landmarks, not exact geometry. If plausible landmark positions can cross the agreed angle limit, mark it uncertain. The hilt points are supplied coordinates and the blade trace can follow the wrong object: exit 0 alone is not proof, so confirm the cyan outline sits on the blade. A hidden, clipped, blurred, or ambiguous landmark means `uncertain`, not a synthetic point on the intended line. Review the actual blade base and tip so a straight handle cannot conceal a bent blade. Check that the fist encloses the grip, the guard separates grip from blade, the cape does not cut through the blade, and the prop does not cover protected cards or text. Apply straightness only to intended straight parts; preserve intentional bow curvature, curved swords, and angled gun grips/stocks.
+
 ## Output
 
 Write this JSON to the output path (it is accepted by both `audit_candidate.py --review` and the image-loop controller):

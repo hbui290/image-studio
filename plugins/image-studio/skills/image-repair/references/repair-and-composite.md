@@ -100,12 +100,17 @@ Record an evidence ledger: source and approved references; crop, candidate, and 
 
 ## Bent rigid objects
 
-A sword, spear, staff, or gun that bends where a hand holds it is the most repeated generator error with props. Measure it, then repaint only the short part:
+For an intended straight sword, spear, staff, or gun barrel, keep the accepted long straight part and repair the short misaligned part. This rule does not straighten an intentionally curved blade or bow, or a gun's angled grip or stock.
 
-```bash
-python3 <skills>/image-verify/scripts/studio_state.py axis-check --image hero.png \
-  --points 25,355 230,540 850,1570 --guide guide.png     # pommel, crossguard, tip; exit 1 above 3 degrees
-```
+1. **Measure actual pixels:** on a native-size crop, observe the pommel center, crossguard center, blade-base center immediately beyond the guard, and actual blade tip; add the grip center when visible. Convert crop coordinates to final-image pixels. Record labels, dimensions, offsets, and estimated pixel uncertainty. If plausible landmark positions cross the agreed angle limit, the result is uncertain; do not report exact angular precision. Never infer a hidden point from the desired axis. If the tip is outside the frame or a landmark is ambiguous, straightness remains uncertain.
+2. **Draw the guide:** use only the independently observed points. For example (illustrative coordinates, not a measurement of your image):
 
-It prints each segment's angle, the bend, and where every point belongs on the longest segment's line, and draws that line in `guide.png`. Keep the longest straight part (usually the blade); mask the grip, pommel, and the hand around them; attach `guide.png` as the geometry reference ("the grip and pommel lie exactly on the red line, the fist closes around the grip on it"); composite through the mask; run `axis-check` again on the result.
+   ```bash
+   python3 <skills>/image-verify/scripts/studio_state.py axis-check --image hero.png \
+     --points 25,355 230,540 250,573 850,1570 --guide guide.png
+   # pommel, crossguard, blade base, tip (pommel first, tip last); exit 1 when bent
+   ```
 
+   The rule: a straight red line from the pommel (first point) to the tip (last point) is the sword's axis. The tool traces the blade from the pixels between the last two points, outlines its edges in cyan and marks its spine in yellow, and prints how far each point and the spine sit from the red line. It fails when any of them is farther than 0.4 of the blade width (at most 3% of the sword length; `--max-offset PX` to override) or the spine tilts more than `--max-bend` degrees (default 2) against the line. Open the guide: the red line must run along the yellow spine inside the cyan outline. When the trace says "not traced", only the points were checked. Do not move the points onto the line to get exit 0.
+3. **Patch only the defect:** mask the grip, pommel, and hand with enough surrounding context. Preserve the accepted long blade, subject identity, and protected cards/text. Prompt: "one straight sword, pommel, grip, guard center, blade base, and tip on the same axis at [measured angle]; the fist encloses the grip; the cape stays behind the blade." Attach the guide as geometry only; do not paint its annotations into the result. If alignment would enter a protected region, change only the short handle/hand arrangement within the permitted area; do not translate the long blade over the cards.
+4. **Verify afresh:** composite through the acceptance mask and run `edit-check`. An independent reviewer observes the final landmarks again, including blade base and tip, and the caller reruns `axis-check --guide`. Save both annotated images and labeled point sets with the result. Numeric pass plus visible continuous geometry is required; ambiguous landmarks stay uncertain.

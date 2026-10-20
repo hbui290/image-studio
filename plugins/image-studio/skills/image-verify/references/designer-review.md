@@ -33,7 +33,7 @@ Open every tile, every `edge-*.png`, `gray.png`, `thumb.png`, and `lineup.png` w
 - **Seams and patches:** rectangular tone changes, hard patch borders, repeated texture.
 - **Specks and noise** the rest of the image does not have.
 - **Style breaks:** a 3D-render or photo look inside painted art, light from the wrong side, colors off the palette.
-- **Rigid objects:** a sword, spear, staff, bow, or gun must be one straight line from end to end, also where a hand or another object hides part of it; report the pommel, crossguard, and tip (or both ends and the grip) as points so the caller can run `axis-check`.
+- **Straight rigid parts:** inspect the actual visible centerline through occlusions. For a straight sword, report separately observed centers for the pommel, crossguard, blade base immediately beyond the guard, and blade tip in final-image pixels. Include the grip center if visible. Never invent a hidden point or place points on the guide to obtain a pass. The caller runs `axis-check`: it draws a red line from the pommel to the tip, outlines the blade and marks its spine from the pixels, and fails when a point or the spine leaves the line. If a landmark is hidden, clipped, or too soft to locate reliably, mark the measurement uncertain. A curved bow or sword can be intentional; for a gun check its straight barrel, not its angled grip or stock.
 - **Logic:** hands (five fingers, and a shape and pose that look drawn with care, not only the count), floating or merged objects, impossible perspective.
 - **Small content:** inset images, small text, and logos that are soft, wrong, or unreadable.
 - **Frame:** objects cut flat by the frame edge (check the edge strips).

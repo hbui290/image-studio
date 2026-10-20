@@ -1583,11 +1583,67 @@ def cmd_prepare_review(args):
     return 0
 
 
+def trace_blade(image, start, end):
+    """Follow the blade across perpendicular profiles from start (blade base) to end (tip).
+
+    A pixel belongs to the blade when its color is closer to the blade color (sampled on the
+    observed start-end segment) than to the background on either side of that profile.
+    Returns [(x, y, width)] of blade centers; empty when no blade is found."""
+    import math
+    W, H = image.size
+    px = image.load()
+    (sx, sy), (ex, ey) = start, end
+    length = math.hypot(ex - sx, ey - sy)
+    ux, uy = (ex - sx) / length, (ey - sy) / length
+    nx, ny = -uy, ux
+    inside = lambda x, y: 0 <= x < W and 0 <= y < H
+    # the blade color is sampled just past the observed blade base, the one spot known to be on the blade
+    samples = [px[int(sx + ux * length * t), int(sy + uy * length * t)] for t in (0.0, 0.01, 0.02, 0.03, 0.04)]
+    ref = tuple(sorted(c[i] for c in samples)[2] for i in range(3))
+    dist = lambda a, b: (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2
+    band = max(20, round(length * 0.08))
+    gap = max(3, band // 10)
+    found, shift = [], 0.0  # shift follows the blade sideways when it drifts off the straight segment
+    steps = max(10, min(200, round(length / 8)))
+    for i in range(steps + 1):
+        t = 0.03 + 0.92 * i / steps
+        cx, cy = sx + ux * length * t + nx * shift, sy + uy * length * t + ny * shift
+        if not (inside(cx + nx * band, cy + ny * band) and inside(cx - nx * band, cy - ny * band)): continue
+        bg = (px[int(cx - nx * band), int(cy - ny * band)], px[int(cx + nx * band), int(cy + ny * band)])
+        blade = [dist(c, ref) < min(dist(c, bg[0]), dist(c, bg[1]))
+                 for c in (px[int(cx + nx * k), int(cy + ny * k)] for k in range(-band, band + 1))]
+        hits = [k for k, b in enumerate(blade) if b]
+        if not hits: continue
+        seed = min(hits, key=lambda k: abs(k - band))
+        lo = hi = seed
+        while True:  # grow the run, bridging dark outlines and ridge lines up to `gap` px
+            nxt = [k for k in hits if hi < k <= hi + gap + 1]
+            if not nxt: break
+            hi = max(nxt)
+        while True:
+            prv = [k for k in hits if lo - gap - 1 <= k < lo]
+            if not prv: break
+            lo = min(prv)
+        if lo == 0 or hi == 2 * band: continue  # the run reached the profile edge: not a blade
+        mid = (lo + hi) / 2 - band
+        shift += mid
+        found.append((cx + nx * mid, cy + ny * mid, hi - lo + 1))
+    if len(found) < max(5, steps // 3): return []
+    widths = sorted(f[2] for f in found)
+    med = widths[len(widths) // 2]
+    return [f for f in found if 0.4 * med <= f[2] <= 2.0 * med]
+
+
 def cmd_axis_check(args):
     import math
     P = pil()
     if not 0 <= args.max_bend <= 90: raise UsageError("--max-bend must be a number of degrees from 0 to 90")
+    if args.max_offset is not None and not args.max_offset > 0: raise UsageError("--max-offset must be a positive number of pixels")
     path = existing_file(args.image, "--image")
+    if args.guide:
+        guide = Path(args.guide).expanduser()
+        if guide.resolve() == path.resolve(): raise UsageError("--guide must not be the --image file")
+        if guide.is_dir() or not guide.parent.is_dir(): raise UsageError(f"--guide {args.guide}: not a file path in an existing folder")
     image = open_image(path).convert("RGB")
     W, H = image.size
     points = []
@@ -1596,30 +1652,62 @@ def cmd_axis_check(args):
         except ValueError: raise UsageError(f"--points takes x,y pairs, got {raw!r}") from None
         if not (0 <= x < W and 0 <= y < H): raise UsageError(f"point {raw} is outside the image {W}x{H}")
         points.append((x, y))
-    if len(points) < 3: raise UsageError("give at least 3 points along the object, in order (e.g. pommel, crossguard, tip)")
-    segments = list(zip(points, points[1:]))
-    if any(math.hypot(b[0] - a[0], b[1] - a[1]) < 2 for a, b in segments): raise UsageError("two consecutive points are the same")
-    angles = [math.degrees(math.atan2(b[1] - a[1], b[0] - a[0])) for a, b in segments]
-    bends = [abs((b - a + 180) % 360 - 180) for a, b in zip(angles, angles[1:])]
-    bend = max(bends)
-    (ax, ay), (bx, by) = max(segments, key=lambda s: math.hypot(s[1][0] - s[0][0], s[1][1] - s[0][1]))
-    length = math.hypot(bx - ax, by - ay); ux, uy = (bx - ax) / length, (by - ay) / length
-    print("Segment angles: " + ", ".join(f"{a:.1f} deg" for a in angles))
-    if bend <= args.max_bend:
-        print(f"straight: largest bend {bend:.1f} deg (limit {args.max_bend})")
+    if len(points) < 2: raise UsageError("give at least the pommel and the tip, in order (e.g. pommel, crossguard, blade base, tip)")
+    if any(math.hypot(b[0] - a[0], b[1] - a[1]) < 2 for a, b in zip(points, points[1:])): raise UsageError("two consecutive points are the same")
+    (ax, ay), (bx, by) = points[0], points[-1]
+    length = math.hypot(bx - ax, by - ay)
+    if length < 20: raise UsageError("the first and last points must be at least 20 px apart")
+    ux, uy = (bx - ax) / length, (by - ay) / length
+    off = lambda x, y: (x - ax) * -uy + (y - ay) * ux  # signed distance from the red line, px
+    start = points[-2] if len(points) >= 3 else (ax + (bx - ax) * 0.35, ay + (by - ay) * 0.35)
+    spine = trace_blade(image, start, points[-1])
+    width = sorted(s[2] for s in spine)[len(spine) // 2] if spine else 0
+    if not spine and len(points) < 3:
+        raise UsageError("blade not traced between the two points and no other point to check: add the crossguard or blade base")
+    # 0.4 of the blade width, capped at 3% of the sword length so a wide blade does not hide a bend
+    limit = args.max_offset or (max(4.0, min(0.4 * width, 0.03 * length)) if spine else max(4.0, 0.015 * length))
+    print(f"Red line: first point {round(ax)},{round(ay)} -> last point {round(bx)},{round(by)} "
+          f"({round(length)} px at {math.degrees(math.atan2(by - ay, bx - ax)):.1f} deg); limit {limit:.0f} px off the line")
+    offsets = [off(x, y) for x, y in points[1:-1]]
+    if offsets: print("Points off the red line: " + ", ".join(f"P{i + 2} {d:+.0f} px" for i, d in enumerate(offsets)))
+    problems = [f"P{i + 2} is {abs(d):.0f} px off the red line" for i, d in enumerate(offsets) if abs(d) > limit]
+    if spine:
+        devs = [off(x, y) for x, y, _ in spine]
+        worst = max(devs, key=abs)
+        # angle of the traced spine against the red line (least squares slope of offset over distance along the line)
+        ts = [(x - ax) * ux + (y - ay) * uy for x, y, _ in spine]
+        mt, md = sum(ts) / len(ts), sum(devs) / len(devs)
+        var = sum((t - mt) ** 2 for t in ts)
+        tilt = abs(math.degrees(math.atan(sum((t - mt) * (d - md) for t, d in zip(ts, devs)) / var))) if var else 0.0
+        print(f"Blade spine: {len(spine)} samples, blade about {width} px wide, at most {abs(worst):.0f} px off the red line, "
+              f"{tilt:.1f} deg against it (limit {args.max_bend} deg)")
+        if abs(worst) > limit: problems.append(f"the blade spine leaves the red line by {abs(worst):.0f} px")
+        if tilt > args.max_bend: problems.append(f"the blade spine is {tilt:.1f} deg off the red line")
     else:
-        print(f"bend {bend:.1f} deg at point {bends.index(bend) + 2} (limit {args.max_bend}): the object is not one straight line")
-        print("On the longest segment's line, the points belong at: " + "  ".join(
+        print("Blade spine: not traced (no blade found between the last two points); only the points were checked")
+    if problems:
+        print("bent: " + "; ".join(problems))
+        print("On the red line, the points belong at: " + "  ".join(
             f"{round(ax + ((x - ax) * ux + (y - ay) * uy) * ux)},{round(ay + ((x - ax) * ux + (y - ay) * uy) * uy)}" for x, y in points))
+    else:
+        print("straight: every point" + (" and the blade spine stay" if spine else " stays") + " on the red line")
     if args.guide:
         draw = P.ImageDraw.Draw(image)
-        far = W + H
-        draw.line((ax - ux * far, ay - uy * far, bx + ux * far, by + uy * far), fill=(255, 0, 0), width=max(2, W // 300))
-        for x, y in points:
-            r = max(4, W // 150); draw.ellipse((x - r, y - r, x + r, y + r), outline=(255, 255, 0), width=2)
+        lw = max(2, min(W, H) // 400)
+        if spine:  # outline both blade edges in cyan and mark the spine in yellow
+            left = [(x - uy * w / 2, y + ux * w / 2) for x, y, w in spine]
+            right = [(x + uy * w / 2, y - ux * w / 2) for x, y, w in spine]
+            draw.line(left, fill=(0, 255, 255), width=lw); draw.line(right, fill=(0, 255, 255), width=lw)
+            for x, y, _ in spine[::3]: draw.ellipse((x - lw, y - lw, x + lw, y + lw), fill=(255, 255, 0))
+        draw.line((ax, ay, bx, by), fill=(255, 0, 0), width=lw)
+        r = max(5, min(W, H) // 120)
+        for i, (x, y) in enumerate(points):
+            draw.ellipse((x - r, y - r, x + r, y + r), outline=(255, 255, 0), width=lw)
+            draw.text((x + r + 2, y - r), f"P{i + 1}", fill=(255, 255, 0))
         image.save(args.guide, "PNG")
-        print(f"Guide: {args.guide} (red: the straight line the whole object must follow; yellow: your points)")
-    return 0 if bend <= args.max_bend else 1
+        print(f"Guide: {args.guide} (red: straight line from the first to the last point; cyan: traced blade edges; "
+              "yellow dots: blade spine; yellow circles: your points)")
+    return 1 if problems else 0
 
 
 def cmd_edit_check(args):
@@ -1684,9 +1772,10 @@ subcommands:
   prepare-review --image F --out DIR [--approved A]
                                          every designer-review view in one call: overlapping tiles named tile-X_Y.png, edges, gray, thumb, lineup
                                          example: python3 studio_state.py prepare-review --image poster.png --approved v6.png --out views
-  axis-check --image F --points X,Y X,Y X,Y ... [--max-bend 3] [--guide out.png]
-                                         a rigid object (sword, spear, staff, gun) must be one straight line through the hand: exit 1 when it bends
-                                         example: python3 studio_state.py axis-check --image hero.png --points 25,355 230,540 850,1570 --guide guide.png
+  axis-check --image F --points X,Y X,Y ... [--max-offset PX] [--max-bend 2] [--guide out.png]
+                                         points from pommel (first) to tip (last); the red pommel-to-tip line is the axis, the blade spine is traced
+                                         from the pixels between the last two points; exit 1 when a point or the spine leaves the line
+                                         example: python3 studio_state.py axis-check --image hero.png --points 25,355 230,540 250,573 850,1570 --guide guide.png
   edit-check --before A --after B --bbox x0,y0,x1,y1 [--ring 24] [--out F]
                                          changed pixels outside the edit box (exit 1 if any) and one before|after|changes view
                                          example: python3 studio_state.py edit-check --before v7.png --after v8.png --bbox 280,320,370,410
@@ -1755,7 +1844,7 @@ def build_parser():
 
     p = sub.add_parser("axis-check")
     p.add_argument("--image", required=True); p.add_argument("--points", required=True, nargs="+")
-    p.add_argument("--max-bend", type=float, default=3.0); p.add_argument("--guide")
+    p.add_argument("--max-bend", type=float, default=2.0); p.add_argument("--max-offset", type=float); p.add_argument("--guide")
     p.set_defaults(func=cmd_axis_check)
 
     p = sub.add_parser("edit-check")

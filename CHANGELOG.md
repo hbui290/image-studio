@@ -1,11 +1,20 @@
 # Changelog
 
+## 2.17.0-local.1 (2026-10-20)
+
+Rule for every straight sword: a red line from the pommel to the tip is the axis, and the blade's own spine must run along it.
+
+- **`axis-check` traces the blade from the pixels:** it follows the blade between the last two points, outlines its edges (cyan) and spine (yellow) in the guide, and draws the red pommel-to-tip line. It fails when a point or the spine is farther from the line than 0.4 of the blade width, capped at 3% of the sword length (`--max-offset PX` overrides) or the spine tilts more than `--max-bend` degrees (now 2 by default). Two points are enough when the blade traces; otherwise it exits 2 instead of passing unchecked. `--guide` may not overwrite `--image`. Segment angles between close points are gone: on the user's straight Canva sword they reported false bends of 9 and 19 degrees; the new check passes it (spine at most 24 px off a 67 px blade, 0.9 degrees) and flags v51's hilt sitting about 25 px left of the blade axis.
+- Straight-prop review now requires independent final-pixel landmarks, including the blade base and actual tip, checked with `axis-check`; a guide or numeric pass alone is not evidence. Hidden or ambiguous landmarks stay uncertain.
+- Repair preserves the accepted long blade and protected cards/text, patches the short grip/pommel/hand region, and repeats measurement after compositing.
+- Scope straightness to intended straight parts: preserve curved bows/blades and angled gun grips/stocks.
+
 ## 2.16.0-local.1 (2026-10-19)
 
 A repeated generator error: a sword bent where the hand holds it (pommel to crossguard 42 degrees, blade 59 degrees). Generators draw the grip and the blade separately across the hand.
 
 - **`studio_state.py axis-check --image F --points X,Y X,Y X,Y [--guide out.png]`:** angles of each segment of a rigid object, the bend (exit 1 above `--max-bend`, 3 degrees by default), where each point belongs on the longest segment's line, and a guide image of that line. On the sword it measured a 16.9 degree bend and placed the pommel at 94,314 instead of 25,355.
-- **Hunt:** rigid objects (swords, spears, staffs, bows, guns) must be one straight line through any hand or occlusion; the hunter reports their points for `axis-check`.
+- **Hunt:** intended straight parts (straight swords, spears, staffs, gun barrels) must be one straight line through any hand or occlusion; the hunter reports their points for `axis-check`.
 - **Prompting and repair:** describe a long prop as one straight object with its angle and attach the guide; image-repair repaints only the grip, pommel, and hand along the guide and checks again.
 
 ## 2.15.0-local.1 (2026-10-19)

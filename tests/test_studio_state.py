@@ -1898,16 +1898,84 @@ class AxisCheckTests(StudioBase):
         # measured on a generated sword: pommel -> crossguard about 43 deg, crossguard -> tip about 59 deg
         run = self.run_cli("axis-check", "--image", "s.png", "--points", "25,355", "230,540", "850,1570", "--guide", "g.png")
         self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
-        self.assertIn("bend", run.stdout)
+        self.assertIn("bent", run.stdout)
         self.assertTrue((self.project / "g.png").is_file())
 
     def test_straight_sword_passes(self):
         run = self.ok("axis-check", "--image", "s.png", "--points", "100,100", "300,433", "700,1100")
         self.assertIn("straight", run.stdout)
 
+    def draw_sword(self, name, pommel, guard, tip, bow=0):
+        """Silver blade from guard to tip (bow: sideways bulge of the blade middle in px), brown grip, grey pommel."""
+        from PIL import ImageDraw
+        img = Image.new("RGB", (894, 1759), (20, 40, 150))
+        d = ImageDraw.Draw(img)
+        d.line((pommel, guard), fill=(110, 70, 40), width=26)
+        d.ellipse((pommel[0] - 22, pommel[1] - 22, pommel[0] + 22, pommel[1] + 22), fill=(170, 170, 180))
+        dx, dy = tip[0] - guard[0], tip[1] - guard[1]
+        n = (dx * dx + dy * dy) ** 0.5
+        px, py = -dy / n, dx / n
+        steps = 40
+        for i in range(steps):
+            a, b = i / steps, (i + 1) / steps
+            off = lambda t: bow * 4 * t * (1 - t)
+            p = (guard[0] + dx * a + px * off(a), guard[1] + dy * a + py * off(a))
+            q = (guard[0] + dx * b + px * off(b), guard[1] + dy * b + py * off(b))
+            d.line((p, q), fill=(225, 228, 235) if i % 2 else (160, 165, 178), width=max(4, round(44 * (1 - a * 0.8))))
+        d.line(((guard[0] - px * 70, guard[1] - py * 70), (guard[0] + px * 70, guard[1] + py * 70)), fill=(190, 190, 200), width=18)
+        img.save(self.project / name)
+
+    def test_traced_straight_sword_passes_and_outlines_blade(self):
+        self.draw_sword("ok.png", (100, 100), (300, 433), (700, 1100))
+        run = self.ok("axis-check", "--image", "ok.png", "--points", "100,100", "300,433", "330,483", "700,1100", "--guide", "g.png")
+        self.assertIn("Blade spine", run.stdout)
+        self.assertIn("straight", run.stdout)
+        from PIL import Image as I
+        r, g, b = I.open(self.project / "g.png").convert("RGB").getpixel((500, 767))  # on the red pommel-to-tip line
+        self.assertTrue(r > 200 and g < 80 and b < 80, (r, g, b))
+
+    def test_hilt_off_the_blade_line_fails(self):
+        self.draw_sword("hilt.png", (60, 230), (300, 433), (700, 1100))
+        run = self.run_cli("axis-check", "--image", "hilt.png", "--points", "60,230", "300,433", "330,483", "700,1100")
+        self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+        self.assertIn("off the red line", run.stdout)
+
+    def test_bent_blade_fails_even_when_points_lie_on_the_line(self):
+        # landmarks are on one line, but the drawn blade bulges 70 px sideways: only the pixel trace can see it
+        self.draw_sword("bow.png", (100, 100), (300, 433), (700, 1100), bow=70)
+        run = self.run_cli("axis-check", "--image", "bow.png", "--points", "100,100", "300,433", "700,1100")
+        self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+        self.assertIn("spine", run.stdout)
+
+    def test_untraced_two_points_is_not_a_pass(self):
+        run = self.run_cli("axis-check", "--image", "s.png", "--points", "100,100", "700,1100")
+        self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+        self.assertIn("not traced", run.stderr)
+
+    def test_guide_must_not_overwrite_the_image_or_fail_late(self):
+        self.draw_sword("ok.png", (100, 100), (300, 433), (700, 1100))
+        before = (self.project / "ok.png").read_bytes()
+        for guide in ("ok.png", "missing-dir/g.png"):
+            run = self.run_cli("axis-check", "--image", "ok.png", "--points", "100,100", "300,433", "700,1100", "--guide", guide)
+            self.assertEqual(run.returncode, 2, (guide, run.stdout, run.stderr))
+            self.assertNotIn("straight", run.stdout)
+        self.assertEqual((self.project / "ok.png").read_bytes(), before)
+
+    def test_wide_blade_limit_is_capped_by_length(self):
+        # a 120 px wide blade must not tolerate 48 px: the limit is also capped at 3% of the sword length
+        from PIL import ImageDraw
+        img = Image.new("RGB", (894, 1759), (20, 40, 150))
+        ImageDraw.Draw(img).line(((300, 300), (420, 1500)), fill=(220, 220, 230), width=120)
+        img.save(self.project / "wide.png")
+        run = self.run_cli("axis-check", "--image", "wide.png", "--points", "282,120", "244,200", "300,300", "420,1500")  # grip 45 px off
+        self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+
     def test_bad_points_exit_2(self):
         for bad in ("-1", "nan"):
             run = self.run_cli("axis-check", "--image", "s.png", "--points", "1,1", "5,5", "9,9", "--max-bend", bad)
+            self.assertEqual(run.returncode, 2, (bad, run.stdout, run.stderr))
+        for bad in ("0", "-3", "nan"):
+            run = self.run_cli("axis-check", "--image", "s.png", "--points", "1,1", "90,90", "--max-offset", bad)
             self.assertEqual(run.returncode, 2, (bad, run.stdout, run.stderr))
         for pts in (["10,10"], ["10,10", "10,10"], ["a,b", "5,5"], ["10,10", "2000,5"]):
             run = self.run_cli("axis-check", "--image", "s.png", "--points", *pts)
