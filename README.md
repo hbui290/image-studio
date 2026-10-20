@@ -48,10 +48,10 @@ Only the skill that matches is loaded; the others cost a line each.
 
 1. **Memory:** the agent loads your taste notes, lessons from earlier tasks, and the brand kit (logo, fonts, colors).
 2. **Assets and copy first:** it uses your own logo, fonts, and icons, confirms every word and number once, and settles the style (for example 2D, not a 3D render) before the first full image.
-3. **Layers:** text, numbers, and logos are never drawn by the generator. `compose_layers.py` places them, and a cut-out subject, on the art, so changing a word or moving the logo takes one run, not a new generation.
+3. **Layers:** text, numbers, and logos are never drawn by the generator. `compose_layers.py` places them, and a cut-out subject, on the art, so changing a word or moving the logo takes one run, not a new generation. Text can be laid out inside a box (wrap, shrink to fit, or clip), and a PNG keeps the resolved layout in a tEXt chunk.
 4. **Hunt:** a fresh reviewer agent checks the whole image once (AI slop, broken outlines, leftovers, seams, hands, your past complaints) and `map` draws every problem on one image, so you confirm them all at once.
-5. **Repair in one batch:** patches for all confirmed regions are generated in parallel, resized without stretching and checked with `align-check` (checker and overlay views), then pasted through masks with `blend`, which matches each patch's color to its surroundings and reports the color difference (CIEDE2000) and seam step; `edit-check --mask` proves nothing outside each region changed and that the mask took effect.
-6. **Gate:** before the agent may say "done", every problem ever reported must be re-checked on a fresh crop. A hook blocks "done" while the gate has not passed.
+5. **Repair in one batch:** patches for all confirmed regions are generated in parallel, resized without stretching and checked with `align-check` (checker and overlay views; `blend` refuses a patch until those views are accepted with `--accept`), then pasted through masks with `blend`, which matches each patch's color to its surroundings and reports the color difference (CIEDE2000) and seam step; `edit-check --mask` proves nothing outside each region changed and that the mask took effect, and `shape-check` proves a protected object kept its silhouette (IoU, proportions, outline).
+6. **Gate:** before the agent may say "done", every problem ever reported must be re-checked on a fresh crop. A hook blocks "done" while the gate has not passed. `crop-check` confirms the focus survives 16:9, 4:5, 1:1, and 9:16 crops and that the image is twice its display size.
 
 ## Speed and tokens
 

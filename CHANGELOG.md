@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.21.0-local.1 (2026-10-20)
+
+Closes the gaps left after comparing with the closest competitors. No new dependency.
+
+- **No blend without registration (idea from Frame-Patcher):** `align-check` writes `align.json`; after looking at `checker.png` and `overlay.png`, `align-check ... --accept` marks it accepted. `blend --align D/align.json` refuses unless it is accepted and the inputs and `--at` still match; `--no-align-check` skips it with a warning.
+- **`shape-check --before-mask A --after-mask B` (idea from aeolo-image-fidelity):** a protected object keeps its silhouette: IoU at least 0.99, box aspect change at most 1%, boundary moved at most max(2 px, 0.1% of the long side). About 0.3 s on 4K masks.
+- **`crop-check --image I --focus BOX [--display WxH] [--out-dir D]` (from slop-cop, MIT):** checks that the subject survives 16:9, 4:5, 1:1 and 9:16 crops and that the image is at least twice the display size.
+- **Exact text in `compose_layers.py` (adapted from scenario-labs/skills, MIT):** text layers take a `box` with `overflow` wrap / shrink / clip and `align`; shrink finds the largest size that fits or exits 2; PNG output embeds the resolved layout in an `image-studio-layout` text chunk.
+- **Benchmark (development only):** `bench/score.py` scores an `image-hunter` table against an owner-labelled answer key (recall per defect kind, precision); see `bench/README.md`.
+
 ## 2.20.0-local.1 (2026-10-20)
 
 Lessons from nine similar projects on GitHub (credits in NOTICE). No new dependency.

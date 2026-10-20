@@ -11,7 +11,8 @@ a verdict that names a crop made in the same gate run.
 hooks; they always exit 0 and print nothing on errors.
 
 Exit codes: 0 success or gate pass, 1 gate fail, edit-check found changes outside the box or mask
-(or a mask with no effect), axis-check found a bend, or blend wrote a color-mismatched result, 2 bad input or missing store.
+(or a mask with no effect), axis-check found a bend, blend wrote a color-mismatched result, shape-check found a
+changed silhouette, or crop-check found a crop or size problem, 2 bad input or missing store.
 """
 
 import argparse
@@ -49,6 +50,12 @@ MASK_EFFECT_MIN = 0.005     # edit-check --mask: below this share of changed mas
 DE_SAMPLES = 5000      # blend: most ring pixels sampled for CIEDE2000
 DE_MEAN_LIMIT, DE_P95_LIMIT = 2.0, 3.5  # blend: ring color difference (CIEDE2000) above either is a color mismatch
 ALIGN_ASPECT_LIMIT = 0.01   # align-check: largest relative aspect difference between patch and target area
+SHAPE_IOU_LOSS = 0.01  # shape-check: largest allowed 1 - IoU between the before and after silhouettes
+SHAPE_ASPECT = 0.01    # shape-check: largest relative change of the silhouette box w/h
+SHAPE_EDGE_CAP = 512   # shape-check: farthest boundary search (px); beyond it the offset reads "over 512 px"
+SHAPE_EDGE_SHARE = 0.001  # shape-check: default boundary offset limit, share of the long side (at least 2 px)
+CROP_RATIOS = ((16, 9), (4, 5), (1, 1), (9, 16))  # crop-check: common feed and banner ratios
+CROP_DISPLAY_FACTOR = 2  # crop-check --display: the image must be this many times the display size (high-DPI screens)
 ASPECT_LIMIT = 0.025   # gate: largest absolute w/h difference that a resize keeping aspect can fix
 FILE_BUDGET = 1000000  # gate: PNG/JPEG/WebP deliverables above this many bytes get a warning
 CARD_LIMIT = 2400
@@ -453,12 +460,12 @@ def cmd_approve_deliverable(args):
     return 0
 
 
-def parse_bbox(values):
+def parse_bbox(values, label="--bbox"):
     raw = values[0].split(",") if len(values) == 1 else values
     try: box = [int(str(v).strip()) for v in raw]
-    except ValueError: raise UsageError("--bbox must be 4 integers: x0,y0,x1,y1") from None
+    except ValueError: raise UsageError(f"{label} must be 4 integers: x0,y0,x1,y1") from None
     if len(box) != 4 or box[0] < 0 or box[1] < 0 or box[2] <= box[0] or box[3] <= box[1]:
-        raise UsageError("--bbox needs 0 <= x0 < x1 and 0 <= y0 < y1 (x1, y1 exclusive)")
+        raise UsageError(f"{label} needs 0 <= x0 < x1 and 0 <= y0 < y1 (x1, y1 exclusive)")
     return box
 
 
@@ -1870,6 +1877,21 @@ def cmd_blend(args):
     if x0 < 0 or y0 < 0 or x0 + patch.size[0] > W or y0 + patch.size[1] > H:
         raise UsageError(f"the patch ({patch.size[0]}x{patch.size[1]} at {x0},{y0}) does not fit inside --base {W}x{H}; "
                          "resize it or pass --at")
+    if args.no_align_check:
+        print("warning: registration not checked (--no-align-check): the patch position was not verified against the base")
+    elif not args.align:
+        raise UsageError("blend needs --align D/align.json: run align-check with these inputs, open D/checker.png and "
+                         "D/overlay.png, then align-check ... --accept (or pass --no-align-check when position cannot be wrong)")
+    else:
+        record = read_json(existing_file(args.align, "--align"), "--align record")
+        if record.get("accepted") is not True:
+            raise UsageError(f"{args.align} is not accepted: open checker.png and overlay.png next to it, then run align-check ... --accept")
+        wrong = [k for k, path in (("base_sha256", base_path), ("patch_sha256", patch_path)) if record.get(k) != sha256_file(path)]
+        if record.get("mask_sha256") is not None and record["mask_sha256"] != sha256_file(mask_path): wrong.append("mask_sha256")
+        if record.get("at") != [x0, y0]: wrong.append(f"at (record {record.get('at')}, blend {x0},{y0})")
+        if wrong:
+            raise UsageError(f"{args.align} does not match the blend inputs ({', '.join(wrong)}): run align-check and --accept on these files")
+        print(f"Registration: accepted in {args.align}")
     box = hard.getbbox()
     short = min(box[2] - box[0], box[3] - box[1])
     feather = args.feather
@@ -2040,6 +2062,28 @@ def cmd_align_check(args):
         patch = patch.resize((aw, ah), P.BILINEAR)
         print(f"Patch scaled {pw}x{ph} -> {aw}x{ah} for the preview (aspect within {ALIGN_ASPECT_LIMIT * 100:.0f}%); "
               f"resize it the same way, then blend --at {area[0]},{area[1]}")
+    checker, overlay, record_path = out_dir / "checker.png", out_dir / "overlay.png", out_dir / "align.json"
+    inputs = {p.resolve() for p in (base_path, patch_path) + ((Path(args.mask).expanduser(),) if args.mask else ())}
+    if {checker.resolve(), overlay.resolve(), record_path.resolve()} & inputs:
+        raise UsageError(f"--out-dir {args.out_dir} would overwrite an input (checker.png, overlay.png or align.json); choose another folder")
+    record = {"base_sha256": sha256_file(base_path), "patch_sha256": sha256_file(patch_path),
+              "mask_sha256": sha256_file(Path(args.mask).expanduser()) if args.mask else None,
+              "at": [area[0], area[1]], "accepted": False}
+    if args.accept:
+        if (pw, ph) != (aw, ah):
+            raise UsageError(f"the patch was scaled for the preview; resize it to {aw}x{ah} keeping aspect, run align-check "
+                             "on the resized patch, look at the views, then accept")
+        if not (checker.is_file() and overlay.is_file()):
+            raise UsageError(f"no checker.png and overlay.png in {out_dir}: run align-check without --accept first and look at them")
+        old = read_json(record_path, "align.json (run align-check without --accept first)")
+        changed = [k for k in ("base_sha256", "patch_sha256", "mask_sha256", "at") if old.get(k) != record[k]]
+        if changed:
+            raise UsageError(f"{', '.join(changed)} differ from {record_path}: the views show other inputs; run align-check "
+                             "again without --accept and look at the new views")
+        record["accepted"] = True
+        atomic_write(record_path, dump_json(record))
+        print(f"Accepted: {record_path} (blend --align {shlex.quote(str(record_path))} --at {area[0]},{area[1]} with these exact files)")
+        return 0
     region = base.crop(area)
     s = max(24, min(aw, ah) // 12)
     cells = P.Image.new("L", (aw, ah), 0)
@@ -2048,15 +2092,130 @@ def cmd_align_check(args):
         for gx in range(0, aw, s):
             if (gx // s + gy // s) % 2: draw.rectangle((gx, gy, gx + s - 1, gy + s - 1), fill=255)
     out_dir.mkdir(exist_ok=True)
-    checker, overlay = out_dir / "checker.png", out_dir / "overlay.png"
-    inputs = {p.resolve() for p in (base_path, patch_path) + ((Path(args.mask).expanduser(),) if args.mask else ())}
-    if checker.resolve() in inputs or overlay.resolve() in inputs:
-        raise UsageError(f"--out-dir {args.out_dir} would overwrite an input (checker.png or overlay.png); choose another folder")
     P.Image.composite(patch, region, cells).save(checker, "PNG")
     P.Image.blend(region, patch, 0.5).save(overlay, "PNG")
+    atomic_write(record_path, dump_json(record))
     print(f"Checker: {checker} (base and patch in alternating {s} px squares; lines that jump at square borders are misaligned)")
     print(f"Overlay: {overlay} (50/50 mix; doubled or ghosted edges are misaligned)")
+    print(f"Record: {record_path} (accepted: false). Open both views; when nothing jumps or ghosts, run the same command with --accept")
     return 0
+
+
+def boundary_offset(a, b, cap):
+    """Largest distance (px, Euclidean) from a boundary pixel of either 0/255 mask to the nearest boundary pixel of the
+    other; None when some boundary pixel has none within cap px. Only boundary pixels are visited: each one searches the
+    rows around it with bytes.find, nearest rows first, so the cost follows the boundary length, not the image size."""
+    import math
+    P = pil()
+    ba, bb = a.getbbox(), b.getbbox()
+    box = (min(ba[0], bb[0]), min(ba[1], bb[1]), max(ba[2], bb[2]), max(ba[3], bb[3]))
+    pad = cap + 2  # zero border: shapes touching the image edge get a boundary there, and row searches never wrap
+    W, H = box[2] - box[0] + 2 * pad, box[3] - box[1] + 2 * pad
+    def edge(mask):
+        canvas = P.Image.new("L", (W, H), 0); canvas.paste(mask.crop(box), (pad, pad))
+        return P.ImageChops.subtract(canvas, canvas.filter(P.ImageFilter.MinFilter(3)))
+    ea, eb = edge(a), edge(b)
+    worst, none = 0, (cap + 1) ** 2
+    for src, dst in ((ea, eb), (eb, ea)):
+        data, todo = dst.tobytes(), P.ImageChops.subtract(src, dst).tobytes()  # pixels on both boundaries are 0 px off
+        i = todo.find(255)
+        while i >= 0:
+            y, x = divmod(i, W)
+            best, dy = none, 0
+            while dy * dy < best:
+                r = math.isqrt(best - dy * dy)
+                for row in {(y + dy) * W, (y - dy) * W}:
+                    j = data.find(255, row + x, row + x + r + 1)
+                    if j >= 0: best = min(best, (j - row - x) ** 2 + dy * dy)
+                    k = data.rfind(255, row + x - r, row + x + 1)
+                    if k >= 0: best = min(best, (row + x - k) ** 2 + dy * dy)
+                dy += 1
+            if best > cap * cap: return None
+            worst = max(worst, best)
+            i = todo.find(255, i + 1)
+    return math.sqrt(worst)
+
+
+def cmd_shape_check(args):
+    import math
+    P = pil()
+    if not 0 <= args.max_iou_loss < 1: raise UsageError("--max-iou-loss must be from 0 to below 1 (0.01 = IoU at least 0.99)")
+    if not 0 <= args.max_aspect < 1: raise UsageError("--max-aspect must be from 0 to below 1 (0.01 = 1%)")
+    if args.max_edge is not None and not 0 < args.max_edge <= 256: raise UsageError("--max-edge must be 0 to 256 pixels (above 0)")
+    before = open_8bit(existing_file(args.before_mask, "--before-mask"), "--before-mask")
+    after = open_8bit(existing_file(args.after_mask, "--after-mask"), "--after-mask")
+    a = hard_mask(before, before.size, "--before-mask", "itself")
+    b = hard_mask(after, before.size, "--after-mask", "--before-mask")
+    W, H = a.size
+    iou = count_on(P.ImageChops.darker(a, b)) / count_on(P.ImageChops.lighter(a, b))
+    (ax0, ay0, ax1, ay1), (bx0, by0, bx1, by1) = a.getbbox(), b.getbbox()
+    ra, rb = (ax1 - ax0) / (ay1 - ay0), (bx1 - bx0) / (by1 - by0)
+    aspect = abs(rb / ra - 1)
+    limit = args.max_edge if args.max_edge is not None else max(2.0, SHAPE_EDGE_SHARE * max(W, H))
+    cap = min(SHAPE_EDGE_CAP, int(math.ceil(max(16, 3 * limit))))  # the search cost grows with the cap squared
+    offset = boundary_offset(a, b, cap)
+    print(f"Before: {count_on(a)} px, box {ax0},{ay0},{ax1},{ay1}; after: {count_on(b)} px, box {bx0},{by0},{bx1},{by1}")
+    print(f"IoU: {iou:.4f} (limit {1 - args.max_iou_loss:.4f} or more)")
+    print(f"Box aspect: {ra:.4f} -> {rb:.4f}, change {aspect * 100:.2f}% (limit {args.max_aspect * 100:.2f}%)")
+    print(f"Max boundary offset: " + (f"{offset:.2f} px" if offset is not None else f"over {cap} px") + f" (limit {limit:.2f} px)")
+    problems = []
+    if iou < 1 - args.max_iou_loss: problems.append(f"IoU {iou:.4f} is under {1 - args.max_iou_loss:.4f}: the silhouette changed")
+    if aspect > args.max_aspect: problems.append(f"box aspect changed {aspect * 100:.2f}%: the object was stretched or squashed")
+    if offset is None or offset > limit:
+        problems.append("boundary moved " + (f"{offset:.2f}" if offset is not None else f"over {cap}") + f" px: the outline drifted")
+    for p in problems: print(f"FAIL: {p}")
+    if not problems: print("pass: the silhouette kept its shape, proportions and outline")
+    return 1 if problems else 0
+
+
+def cmd_crop_check(args):
+    path = existing_file(args.image, "--image")
+    image = open_8bit(path, "--image")
+    image = image.convert("RGBA" if has_alpha(image) else "RGB")
+    W, H = image.size
+    fx0, fy0, fx1, fy1 = parse_bbox([args.focus], "--focus")
+    if fx1 > W or fy1 > H: raise UsageError(f"--focus {args.focus} is outside the image size {W}x{H}")
+    display = None
+    if args.display:
+        try: display = tuple(int(v) for v in args.display.lower().split("x"))
+        except ValueError: display = ()
+        if len(display) != 2 or min(display) <= 0: raise UsageError(f"--display takes WxH in pixels, e.g. 1280x720, got {args.display!r}")
+    out_dir = Path(args.out_dir).expanduser() if args.out_dir else None
+    if out_dir is not None:
+        if out_dir.exists() and not out_dir.is_dir(): raise UsageError(f"--out-dir {args.out_dir} is a file, not a folder")
+        if not out_dir.resolve().parent.is_dir(): raise UsageError(f"--out-dir {args.out_dir}: its parent folder does not exist")
+        if path.resolve().parent == out_dir.resolve() and path.name in {f"crop-{w}x{h}.png" for w, h in CROP_RATIOS}:
+            raise UsageError(f"--out-dir {args.out_dir} would overwrite --image; choose another folder")
+    fw, fh = fx1 - fx0, fy1 - fy0
+    print(f"Image {W}x{H}; focus {fx0},{fy0},{fx1},{fy1} ({fw}x{fh})")
+    problems, crops = [], []
+    for rw, rh in CROP_RATIOS:
+        cw, ch = (H * rw // rh, H) if W * rh >= H * rw else (W, W * rh // rw)  # the largest crop of this ratio
+        x0 = min(max(0, round((fx0 + fx1 - cw) / 2)), W - cw)  # centered on the focus, then kept inside the image
+        y0 = min(max(0, round((fy0 + fy1 - ch) / 2)), H - ch)
+        crop = (x0, y0, x0 + cw, y0 + ch)
+        name = f"{rw}:{rh}"
+        if min(cw, ch) < 2 or abs(cw * rh - ch * rw) > max(rw, rh):  # rounding down left a crop of another shape
+            print(f"{name}: image too small for this ratio (largest crop {cw}x{ch})")
+            problems.append(f"{name}: image too small for this ratio"); continue
+        if crop[0] <= fx0 and crop[1] <= fy0 and crop[2] >= fx1 and crop[3] >= fy1:
+            print(f"{name}: ok, crop {','.join(map(str, crop))} ({cw}x{ch}), focus {100.0 * fw * fh / (cw * ch):.1f}% of the crop")
+        else:
+            print(f"{name}: focus does not fit (focus {fw}x{fh}, largest {name} crop {cw}x{ch})")
+            problems.append(f"{name}: focus does not fit")
+        crops.append((f"crop-{rw}x{rh}.png", crop))
+    if display:
+        dw, dh = display
+        factor = min(W / dw, H / dh)
+        print(f"Display {dw}x{dh}: the image is {factor:.2f}x the display (needs {CROP_DISPLAY_FACTOR}x on both axes for sharp high-DPI screens)")
+        if W < CROP_DISPLAY_FACTOR * dw or H < CROP_DISPLAY_FACTOR * dh:
+            problems.append(f"image {W}x{H} is under {CROP_DISPLAY_FACTOR}x the {dw}x{dh} display ({factor:.2f}x)")
+    if out_dir is not None:
+        out_dir.mkdir(exist_ok=True)
+        for name, crop in crops: image.crop(crop).save(out_dir / name, "PNG")
+        print(f"Crops: {out_dir} ({', '.join(n for n, _ in crops)})")
+    for p in problems: print(f"FAIL: {p}")
+    return 1 if problems else 0
 
 
 EPILOG = """\
@@ -2093,30 +2252,49 @@ subcommands:
                                          points from pommel (first) to tip (last); the red pommel-to-tip line is the axis, the blade spine is traced
                                          from the pixels between the last two points; exit 1 when a point or the spine leaves the line
                                          example: python3 studio_state.py axis-check --image hero.png --points 25,355 230,540 250,573 850,1570 --guide guide.png
-  align-check --base B --patch P --out-dir D [--at X,Y] [--mask M]
+  align-check --base B --patch P --out-dir D [--at X,Y] [--mask M] [--accept]
                                          before blend: writes D/checker.png (base and patch in alternating squares) and D/overlay.png
-                                         (50/50 mix) over the patch area (--at, else the mask box, else the whole base); exit 2 when the
-                                         patch must be scaled into an area whose aspect differs by more than 1% (never stretch a patch)
+                                         (50/50 mix) over the patch area (--at, else the mask box, else the whole base), and D/align.json
+                                         {base_sha256, patch_sha256, mask_sha256|null, at, accepted: false}; exit 2 when the
+                                         patch must be scaled into an area whose aspect differs by more than 1% (never stretch a patch).
+                                         Open both views; then the same command with --accept re-hashes the inputs and sets accepted: true
+                                         (exit 2 when the inputs changed, the views are missing, or the patch was scaled for the preview).
+                                         Without --mask the record has mask_sha256 null and blend accepts any mask. The record stops
+                                         accidental skips; it is not a security boundary (a hand-edited align.json is trusted)
                                          example: python3 studio_state.py align-check --base v6.png --patch patch.png --at 1200,400 --out-dir align
-  blend --base B --patch P --mask M --out F [--at X,Y] [--feather PX] [--no-match]
+  blend --base B --patch P --mask M --out F (--align D/align.json | --no-align-check) [--at X,Y] [--feather PX] [--no-match]
+                                         exit 2 unless --align names an accepted align.json whose hashes and at match these inputs;
+                                         --no-align-check skips it and prints "warning: registration not checked".
                                          paste a repair patch through a mask: matches its color to the ring around the mask, feathers the edge
                                          (default 3% of the mask box short side, 2-8 px; a passed --feather warns over 5%), prints ring dE2000 mean/p95,
                                          seam_step (mean |dL*| across the mask edge) and the changed area for edit-check; always writes the
                                          output, exit 1 "color mismatch" when dE2000 mean > 2.0 or p95 > 3.5 (report only with --no-match)
-                                         example: python3 studio_state.py blend --base v6.png --patch patch.png --mask mask.png --out v7.png
+                                         example: python3 studio_state.py blend --base v6.png --patch patch.png --mask mask.png --at 1200,400 --align align/align.json --out v7.png
   edit-check --before A --after B [--bbox x0,y0,x1,y1] [--mask M [--edge PX]] [--ring 24] [--out F]
                                          at least one of --bbox and --mask (both run both checks); 16-bit inputs are refused. --bbox: changed pixels outside the box (exit 1 if any). --mask (same rule as blend: 128+ is in,
                                          transparent is out): % of mask pixels changed over 12/255; outside it, % over 8/255 (noise) and
                                          over 12/255 (exit 1 above 0.1%); exit 1 when under max(4 px, 0.5% of the mask) changed (no effect or inverted);
                                          --edge skips the blend feather band. Writes one before|after|changes view
                                          example: python3 studio_state.py edit-check --before v7.png --after v8.png --mask mask.png --edge 2
+  shape-check --before-mask A --after-mask B [--max-iou-loss 0.01] [--max-aspect 0.01] [--max-edge PX]
+                                         silhouette masks of one protected object before and after an edit (same size, blend's mask rule):
+                                         exit 1 when IoU < 1 - max-iou-loss, the box w/h ratio changes by more than max-aspect, or a
+                                         boundary pixel is farther than max-edge (default max(2, 0.1% of the long side)) from the other outline;
+                                         the search stops at 3x the limit (16-512 px) and reports "over N px" beyond it
+                                         example: python3 studio_state.py shape-check --before-mask bottle-v6.png --after-mask bottle-v7.png
+  crop-check --image F --focus x0,y0,x1,y1 [--display WxH] [--out-dir D]
+                                         largest 16:9, 4:5, 1:1 and 9:16 crops centered on the focus and kept inside the image: ok with the
+                                         focus share of the crop, "focus does not fit", or "image too small for this ratio"; --display: the image must be 2x WxH on both axes;
+                                         --out-dir writes crop-16x9.png, crop-4x5.png, crop-1x1.png, crop-9x16.png; exit 1 on any problem
+                                         example: python3 studio_state.py crop-check --image hero.png --focus 820,300,1240,900 --display 1440x810 --out-dir crops
   hook session-start | hook stop         example: python3 studio_state.py hook session-start < payload.json
 
 approve, defect, brief, gate and verdict find the store by walking up from --project or the current folder.
 init creates it; pref add does not use the project store; lessons (lessons.jsonl) and taste notes (brands/<brand>/taste.jsonl, taste.jsonl) live in ${IMAGE_STUDIO_HOME:-~/.image-studio}, shared by every task; hooks use the cwd from the hook input.
 gate fails a wrong size and says whether the aspect matches (w/h within 0.025); a PNG/JPEG/WebP over 1 MB gets a warning, not a fail.
 exit codes: 0 ok / gate pass, 1 gate fail, edit-check found changes outside the box or mask (or a mask with no effect), axis-check found a bend,
-or blend found a color mismatch (output still written), 2 bad input or no store
+blend found a color mismatch (output still written), shape-check found a changed silhouette, or crop-check found a crop or size problem,
+2 bad input or no store (blend without an accepted align record also exits 2)
 """
 
 
@@ -2185,6 +2363,9 @@ def build_parser():
     p.add_argument("--base", required=True); p.add_argument("--patch", required=True); p.add_argument("--mask", required=True)
     p.add_argument("--out", required=True); p.add_argument("--at"); p.add_argument("--feather", type=int)
     p.add_argument("--no-match", action="store_true")
+    gate = p.add_mutually_exclusive_group()
+    gate.add_argument("--align", help="D/align.json written by align-check and accepted with align-check ... --accept")
+    gate.add_argument("--no-align-check", action="store_true", help="skip the registration check (prints a warning)")
     p.set_defaults(func=cmd_blend)
 
     p = sub.add_parser("edit-check")
@@ -2196,7 +2377,18 @@ def build_parser():
     p = sub.add_parser("align-check")
     p.add_argument("--base", required=True); p.add_argument("--patch", required=True); p.add_argument("--at"); p.add_argument("--mask")
     p.add_argument("--out-dir", required=True)
+    p.add_argument("--accept", action="store_true", help="after opening checker.png and overlay.png: mark D/align.json accepted")
     p.set_defaults(func=cmd_align_check)
+
+    p = sub.add_parser("shape-check")
+    p.add_argument("--before-mask", required=True); p.add_argument("--after-mask", required=True)
+    p.add_argument("--max-iou-loss", type=float, default=SHAPE_IOU_LOSS); p.add_argument("--max-aspect", type=float, default=SHAPE_ASPECT)
+    p.add_argument("--max-edge", type=float)
+    p.set_defaults(func=cmd_shape_check)
+
+    p = sub.add_parser("crop-check")
+    p.add_argument("--image", required=True); p.add_argument("--focus", required=True); p.add_argument("--display"); p.add_argument("--out-dir")
+    p.set_defaults(func=cmd_crop_check)
 
     pref = sub.add_parser("pref").add_subparsers(dest="what", metavar="add", required=True)
     p = pref.add_parser("add")

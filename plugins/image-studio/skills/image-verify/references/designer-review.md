@@ -75,11 +75,11 @@ In image-loop, skip steps 1-2 below: mark each problem `fail` on the brief check
 
 Images are the largest token cost. A model charges about (width / 28) x (height / 28) tokens per image up to its size cap and shrinks larger images, losing the detail you wanted it to see ([Claude vision docs](https://platform.claude.com/docs/en/build-with-claude/vision)). So the main chat opens only the defect map, the thumbnail, and the one `edit-check` view; tiles and hand crops are opened only by the hunter or reviewer agent; never attach a full-size image to the main chat or a patch prompt when a crop of about 1024 px or less shows the region.
 
-Paste each patch with `blend`: it matches the patch color to the ring of pixels just outside the mask (so a generated patch does not come back lighter or darker), feathers the mask edge, and prints the changed area to pass to `edit-check`:
+Paste each patch with `blend`: it matches the patch color to the ring of pixels just outside the mask (so a generated patch does not come back lighter or darker), feathers the mask edge, and prints the changed area to pass to `edit-check`. It refuses (exit 2) until `align-check ... --out-dir align` was run, its `checker.png` and `overlay.png` were opened, and the same command was rerun with `--accept`; `--no-align-check` skips that with a "registration not checked" warning:
 
 ```bash
 python3 <skills>/image-verify/scripts/studio_state.py blend --base previous.png --patch patch.png --mask mask.png \
-  --out candidate.png            # --at X,Y for a patch smaller than the image; --feather 8; --no-match to keep its color
+  --at X,Y --align align/align.json --out candidate.png   # --feather 8; --no-match to keep its color
 ```
 
 After each patch, check only the edited region:
