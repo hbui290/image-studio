@@ -29,6 +29,13 @@
           "requirement": {
             "type": "string",
             "minLength": 1
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         },
         "required": [

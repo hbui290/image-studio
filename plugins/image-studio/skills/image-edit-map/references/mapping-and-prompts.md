@@ -60,7 +60,9 @@ Check success: [visible acceptance criteria]
 Do not render map badges, review labels, or annotation arrows.
 ```
 
-Resolve IDs into descriptions and coordinates; the model cannot understand `#3` alone. Attach the clean source, not just its filename or an old conversation reference unavailable to the tool. Use one change per iteration when exploring an uncertain direction; apply a clearly specified compatible batch together when the user requested it.
+Resolve IDs into descriptions and coordinates; the model cannot understand `#3` alone. Attach the clean source, not just its filename or an old conversation reference unavailable to the tool. Edits spill onto attached parts: recoloring a lantern and its chain also recolored the ceiling mount. List attached parts under Preserve, or include them in the change region. Every edit turn repeats the full preserve list; for a small edit also lock saturation, contrast, camera angle, arrows, labels, and nearby objects. A color-only edit drifts texture (an orange sofa got a stronger weave): use a masked color or hue adjustment instead of a generative edit.
+
+Use one change per iteration when exploring an uncertain direction; apply a clearly specified compatible batch together when the user requested it.
 
 ## Reference mixing
 

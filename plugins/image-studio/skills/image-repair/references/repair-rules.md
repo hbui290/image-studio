@@ -15,6 +15,12 @@ Use these gates only for exact logos, packaging text, and transparent exports. T
 3. Measure placement; apply perspective once. Preserve silhouette, seam geometry, lighting, occlusion, letter proportions, and pixels outside accepted masks.
 4. Inspect occurrences at native size and delivery size, and at 200% when the native view is unclear. Reject doubled strokes, residual ink, missing symbols, unreadable marks, matte boxes, or bright fringes.
 
+## Edit spill
+
+- Edits spill onto attached parts (recoloring a lantern and chain also recolored the ceiling mount): list attached parts in Preserve or include them in the change region.
+- Every edit turn repeats the full preserve list; for a small edit also lock saturation, contrast, camera angle, arrows, labels, and nearby objects.
+- A color-only edit drifts texture (an orange sofa got a stronger weave): use a masked color or hue adjustment, not a generative edit.
+
 ## Alpha and composite safeguards
 
 - Build grayscale masks with alpha disabled before conversion or arithmetic; opaque white must identify intended changed pixels.

@@ -14,6 +14,8 @@ Example judge instruction:
 
 Set `improved` to null on the first round, true/false for an evidenced incumbent comparison, and null when the comparison is uncertain. For later rounds null stops the loop. A tie retains the incumbent and counts as no improvement. Prefer a modest model when adequate, but record the actual route/model, elapsed time and usage; no savings claim without a baseline. In hybrid mode its report is advisory until the person's choice arrives.
 
+To compare branches fairly, fix the same candidate budget per branch in advance, record repair cost separately, and keep the losing images.
+
 ## State and decision helper
 
 `state.json` is host-maintained, not an automatic tracker of provider calls. Update it from saved evidence before invoking the gate. Never increase caps silently. Reserve/count an image slot before every provider generation/edit attempt, even when it fails. Review calls consume separate account usage; record them too. No automatic fallback after provider failure.

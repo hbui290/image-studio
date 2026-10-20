@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.19.0-local.1 (2026-10-20)
+
+Lessons from the links and experiments in codejunkie99/image-loop: the prompt-lab experiment records, OpenAI's GPT Image 2.5 prompting and vision guides, and the papers it cites (M3 2602.06166, DSG 2310.18235, Attend-and-Excite, GenEval, T2I-CompBench).
+
+- **One failure per repair round:** an image-loop `repair` decision names one `focus` check (protected first, then brief order) and `repair-prompt.txt` fixes only that one, leaving the other failures for later rounds. `ids` still lists every failure, so the loop and the audit keep the same actions.
+- **No building on a regression:** `regressed` lists checks that passed in the previous round and fail now; the next repair starts from the image the last repair edited and retries its focus with that image's verdicts (`start_review`). A restart from the clean source re-applies every requested change. Each focus gets one try, so set `max_repairs` to at least the number of failures.
+- **Checks can depend on each other:** a brief criterion may list `depends_on`; a check whose prerequisite fails is marked `blocked by <ID>` by the reviewer, listed in `blocked`, and never chosen as the focus. Unknown, repeated, self or circular links are refused (exit 2).
+- **Reviewers reread the whole request** after the checks: in the prompt-lab runs a sphere "hanging" came out resting on a pedestal while every check passed.
+- **Prompt and repair rules from the experiments and guides:** see the reference updates (reference images leak traits, edits spill onto attached parts, numbers in prompts are approximate, transparency and character-anchor prompts, API mask limits, reviewer vision limits).
+
 ## 2.18.0-local.1 (2026-10-20)
 
 Four upgrades from a research pass on defect localization (LEGION, RichHF), region repair (libcom-style harmonization), and image token costs (Claude vision docs). None adds a dependency.

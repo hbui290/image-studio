@@ -32,7 +32,7 @@ When a target is ambiguous among repeated objects, make a numbered review copy a
 
 ## When a generated result misses the request
 
-Find the cause before rewriting the prompt:
+Find the cause before rewriting the prompt. Spatial prepositions (left of, behind, underneath) are unreliable: attach a layout sketch instead of only stating the relation. Check exclusions beyond the main subject (trees seen through a window, tiny background people, an extra bridge).
 
 | What went wrong | What to inspect | Next action |
 | --- | --- | --- |

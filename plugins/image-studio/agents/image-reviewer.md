@@ -21,10 +21,10 @@ If any input is missing or an image cannot be opened, write nothing and report e
 2. For each check ID, exactly once, decide `pass`, `fail`, or `uncertain`:
    - `change` / `requested`: the requested result is visibly present in the candidate.
    - `keep` / `protected`: compare that region in the source and candidate; it must look the same.
-   - If the target object is missing, its dependent checks cannot pass.
+   - If the target object is missing, its dependent checks cannot pass. When a brief criterion lists `depends_on` and one of those criteria fails, mark it `fail` with the evidence `blocked by <ID>` instead of judging it.
    - Use `uncertain` for small text you cannot read, unclear spatial relationships, or anything you cannot resolve. Do not assume success.
 3. Write evidence that names what you saw, where. Do not claim exact pixel identity, measured colors, or an exact font; the pixel audit handles exact comparison.
-4. Do not add requirements, rewrite the brief, or judge taste.
+4. Do not add requirements, rewrite the brief, or judge taste. After the checks, reread the whole intent once: a requirement the checks missed (an object resting instead of hanging, a figure facing the wrong way) goes in the summary, because a full set of passes does not prove the image matches the request.
 
 
 ### Straight-prop evidence

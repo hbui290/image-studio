@@ -29,6 +29,8 @@ The `prompt` output is a starting brief with trait assignments, not a guarantee 
 
 For a loop child, copy the selected parent's recipe into a new board, fix liked axes, and offer alternatives on only the one or two axes being explored. Retain source IDs, record `parent_id`, and skip recipes already tried. If the planner returns only the parent or duplicates from earlier rounds, stop or ask for new ingredients; do not spend generation calls on duplicate recipes without a stated reason.
 
+For a design reference (a real page or app), screenshot the real page and record observed, then decisions, then "design study only, not attached to the generator". Borrow principles, not brand: no names, palette, or emblems. Fix the reference's weak points (text over a photo with low contrast becomes a solid panel).
+
 Recommended run files:
 
 ```text

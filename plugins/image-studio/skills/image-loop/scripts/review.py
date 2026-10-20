@@ -13,7 +13,7 @@ import sys
 import time
 from pathlib import Path
 
-from controller import coverage_errors, decide, repair_prompt
+from controller import coverage_errors, decide, dependency_errors, repair_prompt
 
 BASE = Path(__file__).resolve().parents[1]
 
@@ -136,6 +136,9 @@ def main():
             p.error('Duplicate brief criterion IDs.')
         if any(c['id'] != c['id'].strip() for c in brief['criteria']):
             p.error('Brief criterion IDs must not start or end with whitespace.')
+        dep_errors = dependency_errors(brief)
+        if dep_errors:
+            p.error(' '.join(dep_errors))
         if brief['file_checks'].get('format') == 'JPG':
             p.error("file_checks.format: use the decoded format name JPEG, not JPG.")
         candidate = args.candidate.resolve(strict=True)
@@ -178,11 +181,18 @@ def main():
                 if key in prior_run and prior_run[key] != now:
                     p.error(f'Previous round used a different {label}; keep the brief, source, and limit fixed within one loop.')
             repairs_used = prior_count + 1
-            previous = normalize_report(read_json(folder/'report.json'))
-            Draft202012Validator(review_schema).validate(previous)
-            errors = coverage_errors(brief, previous)
-            if errors:
-                p.error(' '.join(errors))
+            # After a regression the next repair edited an earlier image, so compare against that image's review.
+            prior_decision = read_object(folder/'decision.json')
+            if 'start_review' in prior_decision:
+                # None: the last repair restarted from the clean source, so no earlier verdicts apply.
+                previous = prior_decision['start_review'] and normalize_report(prior_decision['start_review'])
+            else:
+                previous = normalize_report(read_json(folder/'report.json'))
+            if previous is not None:
+                Draft202012Validator(review_schema).validate(previous)
+                errors = coverage_errors(brief, previous)
+                if errors:
+                    p.error(' '.join(errors))
         if args.repairs_used is not None and args.repairs_used != repairs_used:
             p.error(f'--repairs-used {args.repairs_used} does not match the round history ({repairs_used}).')
         args.repairs_used = repairs_used
@@ -241,6 +251,8 @@ def main():
               'Do not assume success. Use pass, fail, or uncertain and cite visible evidence. '+
               'Do not invent aesthetic requirements. Do not claim exact pixel comparison, measured colors or exact font identity from visual inspection. '+
               'For protected criteria compare the source to the candidate. For an unclear arrow endpoint or illegible word use uncertain. '+
+              'When a criterion lists depends_on and one of those criteria fails, mark it fail with the evidence "blocked by <ID>" instead of judging it. '+
+              'After the criteria, reread the whole intent: a requirement the criteria missed (an object hanging instead of resting, a direction reversed) goes in the summary. '+
               'Suggested fixes must address only observed failures, and should be empty for passes.\nBRIEF:\n'+json.dumps(brief))
     (out/'reviewer-prompt.txt').write_text(prompt+'\n', encoding='utf-8')
     cmd = ['codex','exec','--ephemeral','--sandbox','read-only','--skip-git-repo-check','--disable','image_generation',

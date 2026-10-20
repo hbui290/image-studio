@@ -14,6 +14,13 @@
 
 A `repair` decision lists the failed check `ids` and `protected_failed`. When `protected_failed` is not empty, the candidate damaged something that had to stay, so never build the next repair on it.
 
+In `review.py`, a `repair` decision also names one `focus`: the next round fixes only that check, and `repair-prompt.txt` tells the editor to leave the other failures for later rounds, because fixing everything at once lets one fix undo another. The focus is a failure whose `depends_on` prerequisites pass, protected checks first, then brief order; failures waiting on a failed prerequisite are listed in `blocked`. `start_from` names the image to edit:
+- `this candidate` when nothing protected failed and nothing regressed;
+- the clean source when `protected_failed` is not empty; the prompt then re-applies every requested change;
+- the previous start image when `regressed` lists checks that passed there and fail now; the prompt retries that image's focus (which may not be in `ids`).
+
+`start_review` in `decision.json` holds the verdicts of the image the next repair edits, and the next round's `--previous` compares against it; after a restart from the clean source it is `null`, so the next round has nothing to regress from. Damage to a protected check that passed in the start image is a regression, so the loop goes back to that image instead of the source. Each focus gets one try: if the failure set does not change, the loop stops with `stop_repeated_failure`, so change the approach. With N failures, set `max_repairs` to at least N. The audit lists all failed checks and has no focus.
+
 One intended exception: with `review.py --model`, the file checks run before the Codex call so a broken file does not spend reviewer usage, and a failure there is `reject_technical` without a review. With `--report`, the supplied review is validated first, as in the audit.
 
 Exit 0 means a usable decision was written: `reject_technical`, `hold_for_inspection`, `accepted_by_checks`, `stop_budget`, `stop_repeated_failure`, or `repair`. Read `decision.json` rather than trusting the exit code. Exit 2 means nothing usable was decided: invalid arguments or inputs (both scripts write nothing), `stop_invalid_review` (`review.py` writes it to `decision.json`; the audit writes nothing), or `review.py`'s `stop_provider` (written to `decision.json`). `review.py` checks file properties but not pixels; only the audit compares pixels against the source and mask.
