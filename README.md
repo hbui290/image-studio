@@ -49,9 +49,25 @@ Only the skill that matches is loaded; the others cost a line each.
 1. **Memory:** the agent loads your taste notes, lessons from earlier tasks, and the brand kit (logo, fonts, colors).
 2. **Assets and copy first:** it uses your own logo, fonts, and icons, confirms every word and number once, and settles the style (for example 2D, not a 3D render) before the first full image.
 3. **Layers:** text, numbers, and logos are never drawn by the generator. `compose_layers.py` places them, and a cut-out subject, on the art, so changing a word or moving the logo takes one run, not a new generation. Text can be laid out inside a box (wrap, shrink to fit, or clip), and a PNG keeps the resolved layout in a tEXt chunk.
-4. **Hunt:** a fresh reviewer agent checks the whole image once (AI slop, broken outlines, leftovers, seams, hands, your past complaints) and `map` draws every problem on one image, so you confirm them all at once.
-5. **Repair in one batch:** patches for all confirmed regions are generated in parallel, resized without stretching and checked with `align-check` (checker and overlay views; `blend` refuses a patch until those views are accepted with `--accept`), then pasted through masks with `blend`, which matches each patch's color to its surroundings and reports the color difference (CIEDE2000) and seam step; `edit-check --mask` proves nothing outside each region changed and that the mask took effect, and `shape-check` proves a protected object kept its silhouette (IoU, proportions, outline).
-6. **Gate:** before the agent may say "done", every problem ever reported must be re-checked on a fresh crop. A hook blocks "done" while the gate has not passed. `crop-check` confirms the focus survives 16:9, 4:5, 1:1, and 9:16 crops and that the image is twice its display size.
+4. **Hunt:** a fresh `image-hunter` agent checks the whole image once on 100% tiles (AI slop, broken outlines, leftovers, seams, your past complaints). It traces every arm to one hand and counts fingers hand by hand, copies all text word for word, judges each panel of a grid on its own, and checks each reference for traits that leaked in. `mac_vision.py hands` boxes every hand for a close look, and `axis-check` draws a red pommel-to-tip line to prove a sword or staff is straight. `map` draws every problem on one image, so you confirm them all at once.
+5. **Repair in one batch:** patches for all confirmed regions are generated in parallel, then:
+   - `align-check` shows each patch over the base (checker and 50/50 overlay) and refuses a stretched one; `blend` will not paste until those views are accepted with `--accept`;
+   - `blend` pastes through the mask, matches the patch's color to its surroundings, and reports the color difference (CIEDE2000) and the seam step;
+   - `edit-check --mask` proves nothing outside the region changed and that the mask took effect; `shape-check` proves a protected object kept its silhouette.
+6. **Review rounds** (`image-loop`): an independent `image-reviewer` agent, starting fresh each round, gives one verdict per check. Each round repairs one failure; checks can depend on each other (no judging "the lantern is red" while the lantern is missing); a repair that breaks something that already passed is dropped and retried from the previous image.
+7. **Gate:** before the agent may say "done", every problem ever reported must be re-checked on a fresh crop. A hook blocks "done" while the gate has not passed. `crop-check` confirms the focus survives 16:9, 4:5, 1:1, and 9:16 crops and that the image is twice its display size.
+
+## What is inside
+
+| Part | Count | Role |
+| --- | --- | --- |
+| Skills (`SKILL.md`) | 10 | One workflow each; only the matching one is loaded |
+| References | 30 | Detailed rules, opened only when a step needs them |
+| Scripts (Python, one Swift helper) | 13 | Measurements the agent runs instead of guessing: `studio_state.py` (memory, gate, defects, `axis-check`, `align-check`, `blend`, `edit-check`, `shape-check`, `crop-check`), `review.py` and `controller.py` (review rounds), `audit_candidate.py` (pixel audit), `mac_vision.py` (Apple Vision), `compose_layers.py` (text and logo layers) |
+| Agents | 2 | `image-hunter` finds problems, `image-reviewer` judges results; neither is the agent that made the image |
+| Hooks | 2 | Memory card at session start; block "done" until the gate passes |
+
+Runtime needs only Python with Pillow and jsonschema: no local AI model and no GPU. The measuring commands take one to three seconds on a 4K image.
 
 ## Speed and tokens
 
@@ -100,4 +116,6 @@ uv run --with pillow --with jsonschema python3 -m unittest discover -s tests
 
 Offline tests: no model calls; tests skip themselves when a dependency is missing. Changes are listed in [CHANGELOG](CHANGELOG.md).
 
-MIT license. See [NOTICE](NOTICE) for sources.
+To measure the hunt on real images, label the known problems of each test image and score the hunter's table with `bench/score.py` (recall per kind of problem, and precision): see [bench](bench/README.md).
+
+MIT license. See [NOTICE](NOTICE) for sources and [third-party notices](plugins/image-studio/THIRD_PARTY_NOTICES.md) for adapted MIT code.
