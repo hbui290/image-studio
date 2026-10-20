@@ -17,6 +17,8 @@ This repo is a plugin for Claude Code and Codex. The plugin contains 10 skills i
   ```bash
   uv run --with pillow --with jsonschema python3 -m unittest discover -s tests
   uv run --with pillow --with jsonschema --with numpy==2.0.2 --with opencv-python-headless==4.11.0.86 python3 -m unittest discover -s tests
+  uv run --with playwright==1.48.0 python3 -m playwright install chromium  # once, for the html layer tests
+  uv run --with pillow --with jsonschema --with playwright==1.48.0 python3 -m unittest discover -s tests
   ```
 - `image-reconstruction/visual-map.html` embeds copies of `references/reconstruction.schema.json` and the prompt compiler from `scripts/reconstruct.py`. When you change either one, update the copy in the page in the same change; `tests/test_visual_map.py` fails if they drift.
 

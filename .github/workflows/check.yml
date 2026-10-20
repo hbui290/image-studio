@@ -16,6 +16,8 @@ jobs:
           - python: '3.12'
             deps: 'pillow jsonschema numpy==2.0.2 opencv-python-headless==4.11.0.86'
           - python: '3.12'
+            deps: 'pillow jsonschema playwright==1.48.0'
+          - python: '3.12'
             deps: 'pillow'
           - python: '3.12'
             deps: ''
@@ -26,6 +28,8 @@ jobs:
           python-version: ${{ matrix.python }}
       - if: matrix.deps != ''
         run: python -m pip install ${{ matrix.deps }}
+      - if: contains(matrix.deps, 'playwright')
+        run: python -m playwright install --with-deps chromium
       - run: python -m unittest discover -s tests -v
       - if: startsWith(matrix.deps, 'pillow jsonschema')
         run: |

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.23.0-local.1 (2026-10-20)
+
+Optional HTML/CSS text layers in `compose_layers.py`. Pillow and jsonschema stay the only required dependencies.
+
+- **`{"html": ..., "css": ..., "box": [x0, y0, x1, y1], "fonts": {"Family": "fonts/F.ttf"}}`:** rendered by headless Chromium through Playwright (`playwright==1.48.0`, supports Python 3.9): the page is the box in px at device scale 1 with a transparent background, body margin 0, overflow hidden, border-box sizing; the screenshot is alpha-composited at the box. Listed fonts must be .ttf/.otf/.woff/.woff2 files inside the layout's folder (a path escaping it exits 2) and are embedded as `data:` URIs in `@font-face`, so the browser reads no file itself.
+- **Safety:** the browser context has page JavaScript off (`java_script_enabled=False`) and is offline, and `page.route("**/*")` aborts every request except `data:` URIs: `<img src="http://...">`, `@import`, `url(...)`, iframes and `file://` fetch nothing (tested against a local HTTP server). Waiting for fonts and measuring use Playwright's own `evaluate`, which runs with page scripts disabled (`document.fonts.load` per listed family, then `document.fonts.ready`); a font that does not load exits 2. Html containing `<script` and CSS containing `</style` exit 2; `on*=` handlers are inert.
+- **Fit:** content larger than the box exits 2 "html layer does not fit its box" (with the content size, its left and top offset, and which edges ink crosses) unless `"overflow": "clip"`. Measured two ways: element boxes and every text node's `Range.getClientRects()` (catches `text-indent`), then three probe renders with overflow visible shifted by a quarter of the box, which find ink the DOM cannot measure (negative `letter-spacing`, `::before`/`::after` text, `text-shadow`). The page wrapper makes img, svg, iframe, video and canvas `display:block`, so a full-height image has no baseline gap. The resolved layout chunk records `box_px` and `content_px` for each html layer. The same input gives identical PNG bytes (tested).
+- **Missing Playwright or Chromium:** a layout with html layers exits 2 with `uv run --with playwright==1.48.0 python3 -m playwright install chromium`; layouts without html layers never import Playwright.
+- **Tests and CI:** html rendering tests skip when Playwright's Chromium cannot start; input checks and the missing-Playwright path always run. CI adds a Python 3.12 job with `playwright==1.48.0` and `python -m playwright install --with-deps chromium`.
+
 ## 2.22.0-local.1 (2026-10-20)
 
 Optional numpy + OpenCV engine and three OpenCV features. Pillow and jsonschema stay the only required dependencies; every check also runs on Pillow alone with the same verdict.

@@ -1,9 +1,14 @@
 """compose_layers.py: text, numbers, and logos are placed on the art, not generated into it."""
 
+import http.server
+import importlib.util
 import json
+import os
+import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -14,6 +19,22 @@ SCRIPT = ROOT / "plugins/image-studio/skills/image-create/scripts/compose_layers
 FONTS = ["/System/Library/Fonts/Supplemental/Arial.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
          "C:/Windows/Fonts/arial.ttf"]
 FONT = next((f for f in FONTS if Path(f).is_file()), None)
+_CHROMIUM = []
+
+
+def have_chromium():
+    """Detect once whether Playwright and its Chromium can start; html rendering tests skip otherwise."""
+    if not _CHROMIUM:
+        ok = False
+        if importlib.util.find_spec("playwright"):
+            try:
+                from playwright.sync_api import sync_playwright
+                with sync_playwright() as p: p.chromium.launch().close()
+                ok = True
+            except Exception:
+                ok = False
+        _CHROMIUM.append(ok)
+    return _CHROMIUM[0]
 
 
 @needs_pillow
@@ -173,6 +194,211 @@ class ComposeLayersTests(unittest.TestCase):
             run = self.boxed(text=text)
             self.assertEqual(run.returncode, 2, (text, run.stdout))
             self.assertNotIn("Traceback", run.stderr)
+
+
+@needs_pillow
+class HtmlLayerChecksTests(unittest.TestCase):
+    """html layer checks that run before Chromium starts, so they need no Playwright."""
+
+    setUp = ComposeLayersTests.setUp
+    tearDown = ComposeLayersTests.tearDown
+    run_layout = ComposeLayersTests.run_layout
+
+    def html(self, **extra):
+        layer = {"html": "<div>5000+</div>", "box": [0.25, 0.25, 0.75, 0.75]}
+        layer.update(extra)
+        return self.run_layout({"background": "art.png", "layers": [layer]})
+
+    def test_script_is_refused(self):
+        run = self.html(html="<div>hi</div><SCRIPT>alert(1)</script>")
+        self.assertEqual(run.returncode, 2, run.stdout)
+        self.assertIn("<script> is not allowed", run.stderr)
+        self.assertNotIn("Traceback", run.stderr)
+
+    def test_font_path_escaping_the_folder_is_refused(self):
+        sub = self.dir / "job"
+        sub.mkdir()
+        (self.dir / "outside.ttf").write_bytes(b"x")
+        shutil.copy(self.dir / "art.png", sub / "art.png")
+        (sub / "layout.json").write_text(json.dumps({"background": "art.png", "layers": [
+            {"html": "<div>x</div>", "box": [0, 0, 1, 1], "fonts": {"Out": "../outside.ttf"}}]}))
+        run = subprocess.run([sys.executable, str(SCRIPT), str(sub / "layout.json"), "--out", str(sub / "out.png")],
+                             capture_output=True, text=True)
+        self.assertEqual(run.returncode, 2, run.stdout)
+        self.assertIn("outside the layout folder", run.stderr)
+        self.assertNotIn("Traceback", run.stderr)
+
+    def test_missing_box_and_bad_overflow_exit_2(self):
+        for layer in ({"html": "<b>x</b>"}, {"html": "<b>x</b>", "box": [0, 0, 1, 1], "overflow": "shrink"},
+                      {"html": "", "box": [0, 0, 1, 1]}):
+            run = self.run_layout({"background": "art.png", "layers": [layer]})
+            self.assertEqual(run.returncode, 2, (layer, run.stdout))
+            self.assertIn("html layer 1", run.stderr)
+            self.assertNotIn("Traceback", run.stderr)
+
+    def test_missing_playwright_exits_2_with_install_line_and_other_layers_still_work(self):
+        fake = self.dir / "fake"
+        (fake / "playwright").mkdir(parents=True)
+        (fake / "playwright" / "__init__.py").write_text("raise ImportError('simulated: playwright is not installed')\n")
+        env = dict(os.environ, PYTHONPATH=str(fake))
+        argv = [sys.executable, str(SCRIPT), str(self.dir / "layout.json"), "--out", str(self.dir / "out.png")]
+        (self.dir / "layout.json").write_text(json.dumps({"background": "art.png", "layers": [
+            {"html": "<div>5000+</div>", "box": [0.25, 0.25, 0.75, 0.75]}]}))
+        run = subprocess.run(argv, capture_output=True, text=True, env=env)
+        self.assertEqual(run.returncode, 2, run.stdout)
+        self.assertIn("html layers need Playwright", run.stderr)
+        self.assertIn("python3 -m playwright install chromium", run.stderr)
+        self.assertNotIn("Traceback", run.stderr)
+        (self.dir / "layout.json").write_text(json.dumps({"background": "art.png", "layers": [
+            {"image": "logo.png", "x": 0.5, "y": 0.5, "width": 0.5}]}))
+        run = subprocess.run(argv, capture_output=True, text=True, env=env)
+        self.assertEqual(run.returncode, 0, run.stderr)
+
+    @unittest.skipUnless(importlib.util.find_spec("playwright"), "playwright is not installed")
+    def test_missing_chromium_exits_2_with_install_line(self):
+        env = dict(os.environ, PLAYWRIGHT_BROWSERS_PATH=str(self.dir / "no-browsers"))
+        (self.dir / "layout.json").write_text(json.dumps({"background": "art.png", "layers": [
+            {"html": "<div>5000+</div>", "box": [0.25, 0.25, 0.75, 0.75]}]}))
+        run = subprocess.run([sys.executable, str(SCRIPT), str(self.dir / "layout.json"), "--out", str(self.dir / "out.png")],
+                             capture_output=True, text=True, env=env)
+        self.assertEqual(run.returncode, 2, run.stdout)
+        self.assertIn("python3 -m playwright install chromium", run.stderr)
+        self.assertNotIn("Traceback", run.stderr)
+
+
+@needs_pillow
+class HtmlLayerRenderTests(unittest.TestCase):
+    """html layers rendered by Playwright Chromium; skipped when Playwright or its Chromium is missing."""
+
+    setUp = ComposeLayersTests.setUp
+    tearDown = ComposeLayersTests.tearDown
+    run_layout = ComposeLayersTests.run_layout
+    read_layout = ComposeLayersTests.read_layout
+    outside_box_pixels = ComposeLayersTests.outside_box_pixels
+    html = HtmlLayerChecksTests.html
+
+    @classmethod
+    def setUpClass(cls):
+        if not have_chromium():
+            raise unittest.SkipTest("Playwright Chromium is not available (python3 -m playwright install chromium)")
+
+    def ink(self, box=(100, 50, 300, 150)):
+        """Return (number of pixels that differ from the art inside box, ink width in px)."""
+        from PIL import Image
+        with Image.open(self.dir / "out.png") as out:
+            out = out.convert("RGB")
+            cols = [x for x in range(box[0], box[2]) for y in range(box[1], box[3]) if out.getpixel((x, y)) != (20, 40, 80)]
+        return len(cols), (max(cols) - min(cols) + 1) if cols else 0
+
+    def test_text_is_drawn_inside_the_box_only(self):
+        run = self.html(css="div{color:#fff;font-size:30px}")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn("html layer 1: box 100,50,300,150", run.stdout)
+        self.assertGreater(self.ink()[0], 50)
+        self.assertEqual(self.outside_box_pixels((100, 50, 300, 150)), 0)
+        layer = self.read_layout()["layout"]["layers"][0]
+        self.assertEqual(layer["html"], "<div>5000+</div>")
+        self.assertEqual(layer["resolved"]["box_px"], [100, 50, 300, 150])
+
+    @unittest.skipUnless(FONT, "no system font")
+    def test_listed_font_file_is_used(self):
+        (self.dir / "fonts").mkdir()
+        shutil.copy(FONT, self.dir / "fonts" / "Brand.ttf")
+        css = "div{color:#fff;font:40px 'Brand', monospace;white-space:nowrap}"
+        run = self.html(html="<div>iiii</div>", css=css)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        fallback = self.ink()[1]
+        run = self.html(html="<div>iiii</div>", css=css, fonts={"Brand": "fonts/Brand.ttf"})
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertNotEqual(self.ink()[1], fallback)
+        self.assertLess(self.ink()[1], fallback)  # proportional "i" is narrower than monospace
+
+    def test_broken_font_file_exits_2(self):
+        (self.dir / "bad.ttf").write_text("not a font")
+        run = self.html(css="div{font-family:Bad}", fonts={"Bad": "bad.ttf"})
+        self.assertEqual(run.returncode, 2, run.stdout)
+        self.assertIn("could not be loaded", run.stderr)
+        self.assertNotIn("Traceback", run.stderr)
+
+    def test_network_and_local_files_are_blocked(self):
+        from PIL import Image
+        hits = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                hits.append(self.path)
+                self.send_response(200); self.send_header("Content-Type", "image/png"); self.end_headers()
+                self.wfile.write((self.server.red).read_bytes())
+
+            def log_message(self, *args):
+                pass
+
+        Image.new("RGB", (60, 60), (255, 0, 0)).save(self.dir / "red.png")
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        server.red = self.dir / "red.png"
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            url = f"http://127.0.0.1:{server.server_address[1]}"
+            run = self.html(
+                html=(f'<img src="{url}/x.png" width="60" height="60"><link rel="stylesheet" href="{url}/s.css">'
+                      f'<iframe src="{url}/f"></iframe><img src="{(self.dir / "red.png").as_uri()}" width="60" height="60">'
+                      f'<div style="width:60px;height:60px;background:url({url}/bg.png)"></div>'),
+                css=f'@import url("{url}/a.css"); body{{background-image:url({url}/b.png)}} img,iframe{{border:0}}',
+                overflow="clip")
+        finally:
+            server.shutdown()
+            server.server_close()
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(hits, [])
+        with Image.open(self.dir / "out.png") as out:
+            reds = sum(1 for p in out.convert("RGB").getdata() if p == (255, 0, 0))
+        self.assertEqual(reds, 0)
+
+    def test_same_input_gives_identical_png_bytes(self):
+        css = "div{color:#F5C542;font:700 36px serif;padding:8px;text-shadow:0 0 4px #000}"
+        self.assertEqual(self.html(css=css).returncode, 0)
+        first = (self.dir / "out.png").read_bytes()
+        self.assertEqual(self.html(css=css).returncode, 0)
+        self.assertEqual((self.dir / "out.png").read_bytes(), first)
+
+    def test_overflow_exits_2_unless_clip(self):
+        css = "div{color:#fff;font-size:80px;white-space:nowrap}"
+        run = self.html(html="<div>5000+ followers</div>", css=css)
+        self.assertEqual(run.returncode, 2, run.stdout)
+        self.assertIn("html layer does not fit its box", run.stderr)
+        self.assertNotIn("Traceback", run.stderr)
+        run = self.html(html="<div>5000+ followers</div>", css=css, overflow="clip")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(self.outside_box_pixels((100, 50, 300, 150)), 0)
+
+    def test_text_outside_its_element_box_is_caught(self):
+        cases = {"text-indent": ("<div>Hello</div>", "div{color:#fff;font-size:30px;text-indent:-60px}"),
+                 "negative letter-spacing": ("<div>Hello</div>", "div{color:#fff;font-size:40px;letter-spacing:-40px}"),
+                 "::before": ("<div class=t></div>", ".t{color:#fff;font-size:30px;text-indent:-60px}.t::before{content:'Hello'}"),
+                 "text-shadow": ("<div>Hello</div>", "div{color:#fff;font-size:30px;text-align:right;text-shadow:30px 0 0 #fff}")}
+        for case, (html, css) in cases.items():
+            run = self.html(html=html, css=css)
+            self.assertEqual(run.returncode, 2, (case, run.stdout))
+            self.assertIn("html layer does not fit its box", run.stderr, case)
+            self.assertNotIn("Traceback", run.stderr)
+
+    def test_overflow_error_reports_the_left_and_top_offset(self):
+        run = self.html(html="<div>Hello</div>", css="div{color:#fff;font-size:20px;margin:-30px 0 0 -40px}")
+        self.assertEqual(run.returncode, 2, run.stdout)
+        self.assertIn("starting at left -40 px, top -30 px", run.stderr)
+
+    def test_full_height_image_fits_without_a_baseline_gap(self):
+        svg = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='100'/%3E"
+        run = self.html(html=f'<img src="{svg}">')
+        self.assertEqual(run.returncode, 0, run.stderr)
+
+    def test_script_and_handlers_never_run(self):
+        run = self.html(html='<img src="data:image/png;base64,AAAA" onerror="document.body.style.background=\'red\'"><div style="color:#fff">x</div>')
+        self.assertEqual(run.returncode, 0, run.stderr)
+        from PIL import Image
+        with Image.open(self.dir / "out.png") as out:
+            self.assertNotEqual(out.convert("RGB").getpixel((290, 140)), (255, 0, 0))
 
 
 if __name__ == "__main__":
