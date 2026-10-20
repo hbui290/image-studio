@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.20.0-local.1 (2026-10-20)
+
+Lessons from nine similar projects on GitHub (credits in NOTICE). No new dependency.
+
+- **`edit-check --mask M [--edge PX]`:** checks a masked edit pixel by pixel: share of mask pixels changed (over 12/255), noise outside (over 8/255, reported) and real changes outside (over 12/255, fail above 0.1%). A mask that changed under 0.5% fails as "no effect or inverted". `--edge` skips the feather band `blend` adds.
+- **`blend` measures the seam:** default feather is 3% of the mask box's short side (2-8 px, warning above 5%); prints CIEDE2000 between patch and base on the ring outside the mask and fails (exit 1, output still written) above mean 2.0 or p95 3.5; prints `seam_step` (mean lightness jump across the mask edge) next to the base's own value.
+- **`align-check --base --patch --out-dir D [--at X,Y] [--mask M]`:** writes `checker.png` and a 50/50 `overlay.png` to see misalignment before compositing, and refuses a patch whose aspect ratio is more than 1% off. Repair docs no longer force-stretch a patch with `-resize WxH!`.
+- **Gate:** a size mismatch says whether the aspect ratio is also off (over 0.025); a deliverable over 1 MB gets a warning.
+- **Reviewer:** starts fresh each round with no old scores, editor prompts or "it is better now"; names one concrete visible detail per image or the review does not count; answers each earlier finding as still serious / no longer prominent / gone, on the same crops.
+- **Hunter:** traces each arm from shoulder to exactly one hand, counts fingers hand by hand, transcribes text verbatim, reads product labels letter by letter ("unverified" when unreadable), judges each panel of a grid on its own, checks each reference for leaks, and flags copy that contradicts its chart.
+- **Install for other agents:** `npx skills add hbui290/image-studio --skill '*'`.
+
 ## 2.19.0-local.1 (2026-10-20)
 
 Lessons from the links and experiments in codejunkie99/image-loop: the prompt-lab experiment records, OpenAI's GPT Image 2.5 prompting and vision guides, and the papers it cites (M3 2602.06166, DSG 2310.18235, Attend-and-Excite, GenEval, T2I-CompBench).

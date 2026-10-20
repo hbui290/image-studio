@@ -30,3 +30,15 @@ image-inspect/references/diagnosis.md and the wording rules in
 image-create/references/prompt-blocks.md are adapted from
 codejunkie99/image-loop prompt-lab/image-prompting-guide-v2.md (commit 77a1b78).
 
+
+New in 2.20.0: review and hunt rules adapted from MIT-licensed projects:
+wanshuiyin/ALIGN-Agentic-Loop-Image-GeneratioN (fresh-context reviewer, proof of
+looking, three-state follow-up of earlier findings, fixed views), scenario-labs/skills
+(per-panel judging, per-reference leak check, letter-by-letter label reading),
+chchchadzilla/slop-cop (verbatim text transcription, copy that contradicts a chart),
+jiahuiqu17/paper-signal (aspect-ratio tolerance), and 42cc-hub/comfyui-agent-suite
+(masked edit-check thresholds, seam measurement). Each is MIT licensed; only ideas
+and rules were adapted, no code was copied. Ideas from repositories without a
+license (aimolodca/Frame-Patcher: registration check before compositing, adaptive
+feather; aeolo-ai/aeolo-image-fidelity: CIEDE2000 color limits;
+Melvin-88/manhwa-recap: arm tracing) were reimplemented from their descriptions.

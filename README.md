@@ -24,7 +24,7 @@ claude plugin install image-studio@image-studio
 
 Start a new chat afterwards. To update: `codex plugin marketplace upgrade image-studio && codex plugin add image-studio@image-studio`, or `claude plugin marketplace update image-studio && claude plugin update image-studio@image-studio`. Do not update while a task is running.
 
-Other agents that read a skills folder: clone this repository and run `python3 scripts/install.py --to <your-skills-directory>` (`--replace` to update; it deletes those skill folders first).
+Other agents (Cursor, OpenCode, Gemini CLI and others supported by [skills](https://github.com/vercel-labs/skills)): `npx skills add hbui290/image-studio --skill '*'`. Install every skill: the others call scripts in `image-verify`. Or clone this repository and run `python3 scripts/install.py --to <your-skills-directory>` (`--replace` to update; it deletes those skill folders first).
 
 ## Use it
 
@@ -50,7 +50,7 @@ Only the skill that matches is loaded; the others cost a line each.
 2. **Assets and copy first:** it uses your own logo, fonts, and icons, confirms every word and number once, and settles the style (for example 2D, not a 3D render) before the first full image.
 3. **Layers:** text, numbers, and logos are never drawn by the generator. `compose_layers.py` places them, and a cut-out subject, on the art, so changing a word or moving the logo takes one run, not a new generation.
 4. **Hunt:** a fresh reviewer agent checks the whole image once (AI slop, broken outlines, leftovers, seams, hands, your past complaints) and `map` draws every problem on one image, so you confirm them all at once.
-5. **Repair in one batch:** patches for all confirmed regions are generated in parallel and pasted through masks with `blend`, which matches each patch's color to its surroundings; `edit-check` proves nothing outside each region changed.
+5. **Repair in one batch:** patches for all confirmed regions are generated in parallel, resized without stretching and checked with `align-check` (checker and overlay views), then pasted through masks with `blend`, which matches each patch's color to its surroundings and reports the color difference (CIEDE2000) and seam step; `edit-check --mask` proves nothing outside each region changed and that the mask took effect.
 6. **Gate:** before the agent may say "done", every problem ever reported must be re-checked on a fresh crop. A hook blocks "done" while the gate has not passed.
 
 ## Speed and tokens

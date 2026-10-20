@@ -44,6 +44,7 @@ Purple or pink parts of the object would turn see-through, which is why the prom
 Attach the actual files and give each one a role: `Image 1 is the approved style reference: match its line weight, shading, and palette exactly. Image 2 fixes the product shape.` Use only files the user sent or the approved references in `brand show`.
 
 - A reference that shows other people or objects lends their traits (hair, smile) to the result even when the prompt assigns the role to one subject. Crop or cut out the wanted subject before attaching it.
+- After generating, check each reference for leaks: is its assigned role visible, and did anything else from it come in (a face from a pose reference, the subject of a style reference, colors outside the palette)?
 - A front photo does not show the back of an object. Ask for another view, or state the back as a design choice.
 - To keep a character the same across scenes, make one anchor image of the character, attach it to every new scene, and repeat the fixed trait list.
 

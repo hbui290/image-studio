@@ -1790,6 +1790,67 @@ class EditCheckTests(StudioBase):
         run = self.run_cli("edit-check", "--before", "a.png", "--after", "c.png", "--bbox", "1,1,5,5")
         self.assertEqual(run.returncode, 2); self.assertIn("size", run.stderr)
 
+    def mask(self, name="m.png", box=(60, 40, 121, 101), invert=False, mode="L"):
+        on, off = ((0, 255) if invert else (255, 0))
+        if mode == "RGBA":  # opaque white inside, transparent black outside
+            img = Image.new("RGBA", (200, 150), (0, 0, 0, 0)); img.paste((255, 255, 255, 255), box)
+        else:
+            img = Image.new("L", (200, 150), off); img.paste(on, box)
+        img.save(self.project / name)
+        return name
+
+    def mask_check(self, mask, *extra):
+        return self.run_cli("edit-check", "--before", "a.png", "--after", "b.png", "--mask", mask, "--out", "v.png", *extra)
+
+    def test_mask_reports_inside_and_outside_shares(self):
+        self.images()
+        run = self.mask_check(self.mask())
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertIn("Changed inside the mask (over 12/255): 100.00%", run.stdout)
+        self.assertIn("0.00% over 8/255", run.stdout)
+        self.assertIn("0.00% over 12/255", run.stdout)
+        run = self.mask_check(self.mask("rgba.png", mode="RGBA"))  # RGBA: transparent pixels are outside the mask
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+
+    def test_mask_change_outside_fails(self):
+        self.images(leak=True)
+        run = self.mask_check(self.mask())
+        self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+        self.assertIn("changes outside the mask", run.stdout)
+        self.assertIn("150,120,160,130", run.stdout)
+
+    def test_mask_noise_and_tiny_change_stay_under_the_limit(self):
+        self.images()
+        after = Image.open(self.project / "b.png").convert("RGB")
+        noisy = Image.eval(after, lambda v: min(255, v + 10))  # encoder-like noise: over 8/255, under 12/255
+        noisy.paste(after.crop((60, 40, 121, 101)), (60, 40))
+        noisy.paste((0, 0, 0), (0, 0, 4, 5))  # 20 px real change: under 0.1% of the outside pixels
+        noisy.save(self.project / "b.png")
+        run = self.mask_check(self.mask())
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertIn("outside the mask: 100.00% over 8/255", run.stdout)
+        self.assertIn("0.08% over 12/255", run.stdout)
+        noisy.paste((0, 0, 0), (0, 0, 20, 20)); noisy.save(self.project / "b.png")
+        self.assertEqual(self.mask_check(self.mask()).returncode, 1)
+
+    def test_mask_with_no_effect_or_inverted_fails(self):
+        self.images()
+        run = self.mask_check(self.mask("idle.png", box=(0, 0, 40, 30)))
+        self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+        self.assertIn("no effect or is inverted", run.stdout)
+        run = self.mask_check(self.mask("inv.png", invert=True))
+        self.assertEqual(run.returncode, 1)
+        self.assertIn("no effect or is inverted", run.stdout)
+
+    def test_mask_bad_input_exit_2(self):
+        self.images(); Image.new("L", (10, 10), 255).save(self.project / "tiny.png")
+        self.mask("empty.png", box=(0, 0, 0, 0))
+        for extra, words in ((["--mask", "tiny.png"], "must match the images 200x150"), (["--mask", "empty.png"], "--mask is empty"),
+                             ([], "--bbox x0,y0,x1,y1, --mask M, or both"), (["--bbox", "50,30,130,110", "--edge", "3"], "--edge needs --mask")):
+            run = self.run_cli("edit-check", "--before", "a.png", "--after", "b.png", *extra)
+            self.assertEqual(run.returncode, 2, (extra, run.stdout, run.stderr))
+            self.assertIn(words, run.stderr)
+
 
 class LongChatTests(StudioBase):
     """A chat that carried earlier tasks resends their whole history on every step; the card says so."""
@@ -1910,6 +1971,201 @@ class BlendTests(StudioBase):
             self.assertEqual(run.returncode, 2, (extra, run.stdout, run.stderr))
         run = self.run_cli("blend", "--base", "base.png", "--patch", "patch.png", "--mask", "mask.png", "--out", "base.png")
         self.assertEqual(run.returncode, 2)
+
+    def test_auto_feather_scales_with_the_mask_and_warns_when_wide(self):
+        run = self.ok("blend", "--base", "base.png", "--patch", "patch.png", "--mask", "mask.png", "--out", "out.png")
+        self.assertIn("Feather: 2 px (auto", run.stdout)  # 3% of the 60 px short side, at least 2
+        big = Image.new("L", (200, 160), 0); big.paste(255, (20, 20, 180, 140)); big.save(self.project / "big.png")
+        run = self.ok("blend", "--base", "base.png", "--patch", "patch.png", "--mask", "big.png", "--out", "out2.png")
+        self.assertIn("Feather: 4 px (auto", run.stdout)  # 3% of 120 px
+        self.assertNotIn("warning", run.stdout)
+        run = self.ok("blend", "--base", "base.png", "--patch", "patch.png", "--mask", "mask.png", "--out", "out3.png", "--feather", "8")
+        self.assertIn("warning: feather 8 px is over 5%", run.stdout)
+
+    def test_ring_color_difference_and_seam_step(self):
+        run = self.ok("blend", "--base", "base.png", "--patch", "patch.png", "--mask", "mask.png", "--out", "out.png")
+        self.assertIn("Ring dE2000", run.stdout); self.assertIn("mean 0.00", run.stdout)
+        self.assertIn("seam_step: 0.00", run.stdout)
+        run = self.ok("blend", "--base", "base.png", "--patch", "patch.png", "--mask", "mask.png", "--out", "hard.png",
+                      "--no-match", "--feather", "0")
+        self.assertIn("not enforced with --no-match", run.stdout)
+        self.assertNotIn("seam_step: 0.00", run.stdout)  # a hard 40-level edge is a measurable step
+        # a striped ring cannot be matched to a flat base: the output is still written, exit 1
+        striped = Image.new("RGB", (200, 160), (60, 60, 60))
+        for x in range(0, 200, 2): striped.paste((140, 140, 140), (x, 0, x + 1, 160))
+        striped.save(self.project / "striped.png")
+        run = self.run_cli("blend", "--base", "base.png", "--patch", "striped.png", "--mask", "mask.png", "--out", "bad.png")
+        self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+        self.assertIn("color mismatch", run.stdout)
+        self.assertTrue((self.project / "bad.png").is_file())
+
+    def test_blend_output_passes_edit_check_mask_with_its_edge(self):
+        Image.new("RGB", (200, 160), (0, 0, 0)).save(self.project / "dark.png")
+        Image.new("RGB", (200, 160), (255, 255, 255)).save(self.project / "white.png")
+        run = self.ok("blend", "--base", "dark.png", "--patch", "white.png", "--mask", "mask.png", "--out", "o.png",
+                      "--no-match", "--feather", "8")
+        self.assertIn("--mask mask.png --edge 8", run.stdout)
+        ok = self.run_cli("edit-check", "--before", "dark.png", "--after", "o.png", "--mask", "mask.png", "--edge", "8")
+        self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)
+        strict = self.run_cli("edit-check", "--before", "dark.png", "--after", "o.png", "--mask", "mask.png")
+        self.assertEqual(strict.returncode, 1)  # the feather band changes pixels just outside the mask
+
+    def test_ciede2000_matches_reference_pairs(self):
+        mod = load_module()
+        for lab1, lab2, expected in (((50, 2.6772, -79.7751), (50, 0, -82.7485), 2.0425),
+                                     ((50, 2.5, 0), (73, 25, -18), 27.1492),
+                                     ((50, 2.49, -0.001), (50, -2.49, 0.0009), 7.1792),
+                                     ((90.9257, -0.5406, -0.9208), (88.6381, -0.8985, -0.7239), 1.5381)):
+            self.assertAlmostEqual(mod.ciede2000(lab1, lab2), expected, places=3)
+        self.assertAlmostEqual(mod.srgb_to_lab((255, 255, 255))[0], 100.0, places=3)
+
+
+class AlignCheckTests(StudioBase):
+    """align-check: checker and overlay views of patch against base before compositing; never stretch a patch."""
+
+    def setUp(self):
+        super().setUp()
+        Image.new("RGB", (200, 160), (100, 100, 100)).save(self.project / "base.png")
+        mask = Image.new("L", (200, 160), 0); mask.paste(255, (60, 50, 140, 110)); mask.save(self.project / "mask.png")
+
+    def patch(self, size, name="patch.png"):
+        Image.new("RGB", size, (10, 200, 10)).save(self.project / name); return name
+
+    def test_writes_checker_and_overlay(self):
+        run = self.ok("align-check", "--base", "base.png", "--patch", self.patch((160, 120)), "--mask", "mask.png", "--out-dir", "al")
+        self.assertIn("60,50,140,110", run.stdout); self.assertIn("blend --at 60,50", run.stdout)
+        checker, overlay = Image.open(self.project / "al/checker.png"), Image.open(self.project / "al/overlay.png")
+        self.assertEqual(checker.size, (80, 60)); self.assertEqual(overlay.size, (80, 60))
+        self.assertEqual(checker.convert("RGB").getpixel((0, 0)), (100, 100, 100))  # squares of max(24, 60 // 12) px
+        self.assertEqual(checker.convert("RGB").getpixel((24, 0)), (10, 200, 10))
+        self.assertEqual(overlay.convert("RGB").getpixel((5, 5)), (55, 150, 55))
+        run = self.ok("align-check", "--base", "base.png", "--patch", self.patch((100, 80), "small.png"), "--at", "50,40",
+                      "--mask", "mask.png", "--out-dir", "al")
+        self.assertIn("50,40,150,120", run.stdout)
+        self.assertIn("align-check", subprocess.run([sys.executable, str(SCRIPT), "--help"], capture_output=True, text=True).stdout)
+
+    def test_refuses_stretch_and_bad_input(self):
+        Image.new("L", (10, 10), 255).save(self.project / "tiny.png")
+        cases = ((["--patch", self.patch((120, 120)), "--mask", "mask.png"], "never stretch"),
+                 (["--patch", self.patch((120, 120), "sq.png")], "never stretch"),
+                 (["--patch", self.patch((100, 80), "small.png"), "--at", "70,40", "--mask", "mask.png"], "outside the patch area"),
+                 (["--patch", "small.png", "--at", "150,100"], "does not fit"),
+                 (["--patch", "small.png", "--mask", "tiny.png"], "must match"))
+        for extra, words in cases:
+            run = self.run_cli("align-check", "--base", "base.png", "--out-dir", "al", *extra)
+            self.assertEqual(run.returncode, 2, (extra, run.stdout, run.stderr))
+            self.assertIn(words, run.stderr)
+        self.assertFalse((self.project / "al").exists())
+
+
+class ReviewFixTests(StudioBase):
+    """Independent review of 2.20: inputs never overwritten, 16-bit refused, palette transparency, quiet auto feather."""
+
+    def setUp(self):
+        super().setUp()
+        Image.new("RGB", (200, 150), (90, 120, 150)).save(self.project / "a.png")
+        mask = Image.new("L", (200, 150), 0); mask.paste(255, (60, 40, 121, 101)); mask.save(self.project / "m.png")
+
+    def test_align_check_refuses_to_overwrite_an_input(self):
+        (self.project / "al").mkdir()
+        shutil.copy(self.project / "a.png", self.project / "al/checker.png")
+        before = (self.project / "al/checker.png").read_bytes()
+        Image.new("RGB", (61, 61), (0, 200, 0)).save(self.project / "p.png")
+        run = self.run_cli("align-check", "--base", "al/checker.png", "--patch", "p.png", "--mask", "m.png", "--out-dir", "al")
+        self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+        self.assertIn("overwrite an input", run.stderr)
+        self.assertEqual((self.project / "al/checker.png").read_bytes(), before)
+
+    def test_edit_check_refuses_16_bit(self):
+        Image.new("I;16", (200, 150), 30000).save(self.project / "d1.png")
+        Image.new("I;16", (200, 150), 1000).save(self.project / "d2.png")
+        run = self.run_cli("edit-check", "--before", "d1.png", "--after", "d2.png", "--bbox", "1,1,50,50")
+        self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+        self.assertIn("16-bit", run.stderr)
+
+    def test_palette_transparency_is_outside_the_mask(self):
+        pal = Image.new("P", (200, 150), 0)
+        pal.putpalette([255, 255, 255] * 2 + [0, 0, 0] * 254)
+        pal.paste(1, (60, 40, 121, 101))
+        pal.save(self.project / "pm.png", transparency=0)  # index 0 is white but transparent
+        after = Image.open(self.project / "a.png").copy(); after.paste((200, 180, 40), (60, 40, 121, 101)); after.save(self.project / "b.png")
+        run = self.ok("edit-check", "--before", "a.png", "--after", "b.png", "--mask", "pm.png", "--out", "v.png")
+        self.assertIn("box 60,40,121,101", run.stdout)
+
+    def test_auto_feather_does_not_warn_on_a_small_mask(self):
+        Image.new("RGB", (200, 150), (100, 100, 100)).save(self.project / "base.png")
+        Image.new("RGB", (200, 150), (140, 140, 140)).save(self.project / "patch.png")
+        small = Image.new("L", (200, 150), 0); small.paste(255, (80, 60, 110, 90)); small.save(self.project / "s.png")
+        args = ["blend", "--base", "base.png", "--patch", "patch.png", "--mask", "s.png"]
+        run = self.ok(*args, "--out", "o1.png")
+        self.assertIn("Feather: 2 px (auto", run.stdout); self.assertNotIn("warning", run.stdout)
+        self.assertIn("warning: feather 2 px", self.ok(*args, "--out", "o2.png", "--feather", "2").stdout)
+
+    def test_epilog_shows_bbox_and_mask_together(self):
+        out = subprocess.run([sys.executable, str(SCRIPT), "--help"], capture_output=True, text=True).stdout
+        self.assertIn("[--bbox x0,y0,x1,y1] [--mask M [--edge PX]]", out)
+        self.assertIn("at least one of --bbox and --mask", out)
+
+    def test_one_noise_pixel_does_not_pass_a_small_mask(self):
+        tiny = Image.new("L", (200, 150), 0); tiny.paste(255, (10, 10, 20, 20)); tiny.save(self.project / "t.png")
+        after = Image.open(self.project / "a.png").copy(); after.putpixel((12, 12), (0, 0, 0)); after.save(self.project / "b.png")
+        run = self.run_cli("edit-check", "--before", "a.png", "--after", "b.png", "--mask", "t.png", "--out", "v.png")
+        self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+        self.assertIn("no effect or is inverted", run.stdout)
+
+    def test_color_match_skips_transparent_patch_pixels(self):
+        Image.new("RGB", (200, 160), (100, 100, 100)).save(self.project / "base.png")
+        patch = Image.new("RGBA", (200, 160), (255, 0, 0, 0))  # garbage color under alpha 0 around the mask
+        patch.paste((140, 140, 140, 255), (60, 50, 140, 110)); patch.save(self.project / "patch.png")
+        mask = Image.new("L", (200, 160), 0); mask.paste(255, (60, 50, 140, 110)); mask.save(self.project / "mask.png")
+        run = self.ok("blend", "--base", "base.png", "--patch", "patch.png", "--mask", "mask.png", "--out", "o.png")
+        self.assertIn("Color match: skipped", run.stdout)
+        self.assertEqual(Image.open(self.project / "o.png").convert("RGB").getpixel((75, 65)), (140, 140, 140))
+
+    def test_transparent_patch_pixels_inside_the_mask_keep_the_base(self):
+        Image.new("RGB", (200, 160), (100, 100, 100)).save(self.project / "base.png")
+        patch = Image.new("RGBA", (200, 160), (140, 140, 140, 255))
+        patch.paste((0, 0, 0, 0), (90, 70, 100, 80)); patch.save(self.project / "holed.png")  # a hole inside the mask
+        mask = Image.new("L", (200, 160), 0); mask.paste(255, (60, 50, 140, 110)); mask.save(self.project / "mask.png")
+        self.ok("blend", "--base", "base.png", "--patch", "holed.png", "--mask", "mask.png", "--out", "o.png", "--no-match")
+        out = Image.open(self.project / "o.png").convert("RGB")
+        self.assertEqual(out.getpixel((95, 75)), (100, 100, 100))
+        self.assertEqual(out.getpixel((75, 65)), (140, 140, 140))
+
+
+class DeliverableFileTests(StudioBase):
+    """gate: a wrong size says whether the aspect still matches; a heavy web image gets a warning, not a failure."""
+
+    def approve(self, path, width, height):
+        self.ok("approve", "deliverable", "--name", "poster", "--file", path, "--width", width, "--height", height, "--format", "PNG")
+
+    def test_wrong_size_reports_aspect(self):
+        self.init()
+        path = self.project / "wide.png"
+        Image.new("RGB", (300, 150), "white").save(path)
+        self.approve(path, 200, 150)
+        run = self.gate()
+        self.assertEqual(run.returncode, 1)
+        self.assertIn("aspect 2.000 vs spec 1.333", run.stdout)
+        Image.new("RGB", (400, 300), "white").save(path)
+        self.ok("approve", "deliverable", "--name", "poster", "--file", path)
+        run = self.gate()
+        self.assertEqual(run.returncode, 1)
+        self.assertIn("same aspect within 0.025", run.stdout)
+
+    def test_heavy_file_warns_but_passes(self):
+        self.init()
+        path = self.project / "noise.png"
+        Image.frombytes("RGB", (600, 600), os.urandom(600 * 600 * 3)).save(path)
+        self.assertGreater(path.stat().st_size, 1000000)
+        self.approve(path, 600, 600)
+        run = self.gate()
+        self.assertEqual(run.returncode, 0, run.stdout)
+        self.assertIn("over the 1 MB budget", run.stdout)
+        small = self.project / "small.png"
+        Image.new("RGB", (600, 600), "white").save(small)
+        self.ok("approve", "deliverable", "--name", "poster", "--file", small)
+        self.assertNotIn("MB budget", self.gate().stdout)
 
 
 class PrepareReviewTests(StudioBase):

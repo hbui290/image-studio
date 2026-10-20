@@ -57,7 +57,9 @@ For removal, describe what should appear behind the removed object (texture fill
 
 ## Masked composite
 
-Confirm the generated candidate matches the crop's aspect ratio and landmarks before resizing. The short path, once the patch is resized to its crop: `studio_state.py blend --base input.png --patch patch.png --at X,Y --mask mask.png --out candidate.png` (mask at full image size; pixels at 128 or brighter take the patch, and the feather softens only the band outside them; a transparent base keeps its alpha; 16-bit files are refused). It shifts the patch's color to match the ring of pixels around the mask, feathers the edge, and prints the changed area for `edit-check`. The manual equivalent in a POSIX shell with ImageMagick:
+Confirm the generated candidate matches the crop's aspect ratio and landmarks before resizing. Resize keeping aspect (`magick patch.png -resize "${w}x${h}" ...`, no `!`); if the aspect differs, crop or pad the patch to the crop's aspect first. Never force-stretch a patch: a stretched patch misaligns every edge it continues. Then look before compositing: `studio_state.py align-check --base input.png --patch patch.png --at X,Y --mask mask.png --out-dir align` writes `align/checker.png` (base and patch in alternating squares: lines that jump at square borders are misaligned) and `align/overlay.png` (50/50 mix: doubled edges are misaligned). Without `--at` it scales the patch into the mask box (or the whole base) for the preview and exits 2 when their aspects differ by more than 1%.
+
+The short path, once the patch is resized to its crop: `studio_state.py blend --base input.png --patch patch.png --at X,Y --mask mask.png --out candidate.png` (mask at full image size; pixels at 128 or brighter take the patch, transparent mask pixels (alpha, or a palette/RGB transparent color) never do, and the feather softens only the band outside them; a transparent base keeps its alpha; 16-bit files are refused). It shifts the patch's color to match the ring of pixels around the mask and feathers the edge (default 3% of the mask box short side, 2 to 8 px; a `--feather` you pass warns above 5%). It prints the ring CIEDE2000 between patch and base (mean and p95; exit 1 "color mismatch" above 2.0 or 3.5, output still written; report only with `--no-match`), `seam_step` (mean |dL*| across the mask edge, next to the base's own value), and the changed area. Check it with `edit-check --before input.png --after candidate.png --mask mask.png --edge <feather>`: fewer than max(4, 0.5% of the mask) changed pixels fails as no effect or inverted (16-bit inputs are refused), and more than 0.1% of the pixels outside the mask and its feather band changed by over 12/255 fails. The manual equivalent in a POSIX shell with ImageMagick:
 
 ```bash
 src='input.png'
@@ -69,7 +71,8 @@ w=600
 h=500
 
 magick "$src" -crop "${w}x${h}+${x}+${y}" +repage crop.png
-magick "$candidate" -resize "${w}x${h}!" candidate-sized.png
+# Keep aspect (no "!"): crop or pad the candidate to the crop's aspect first, then run align-check.
+magick "$candidate" -resize "${w}x${h}" candidate-sized.png
 
 # Acceptance mask in crop coordinates: white polygon accepted, black kept, edge softened inward only.
 magick -size "${w}x${h}" xc:black -fill white \

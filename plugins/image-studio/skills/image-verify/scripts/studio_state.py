@@ -10,8 +10,8 @@ a verdict that names a crop made in the same gate run.
 `hook session-start` and `hook stop` are thin wrappers for Claude Code and Codex plugin
 hooks; they always exit 0 and print nothing on errors.
 
-Exit codes: 0 success or gate pass, 1 gate fail, edit-check found changes outside the box, or
-axis-check found a bend, 2 bad input or missing store.
+Exit codes: 0 success or gate pass, 1 gate fail, edit-check found changes outside the box or mask
+(or a mask with no effect), axis-check found a bend, or blend wrote a color-mismatched result, 2 bad input or missing store.
 """
 
 import argparse
@@ -43,6 +43,14 @@ MIN_BOX = 16           # smallest defect box side (px) without a user quote
 MIN_BOX_SHARE = 0.001  # smallest defect box area (share of the image) without a user quote
 WIDE_BOX_SHARE = 0.25  # largest agent defect box (share of the image) without --wide
 CHANGE_LEVEL = 8       # per-channel difference that counts as a changed pixel
+REAL_CHANGE_LEVEL = 12  # edit-check --mask: per-channel difference that counts as a real (not encoder noise) change
+MASK_OUTSIDE_LIMIT = 0.001  # edit-check --mask: share of outside pixels allowed a real change (re-encode noise)
+MASK_EFFECT_MIN = 0.005     # edit-check --mask: below this share of changed mask pixels the mask did nothing or is inverted
+DE_SAMPLES = 5000      # blend: most ring pixels sampled for CIEDE2000
+DE_MEAN_LIMIT, DE_P95_LIMIT = 2.0, 3.5  # blend: ring color difference (CIEDE2000) above either is a color mismatch
+ALIGN_ASPECT_LIMIT = 0.01   # align-check: largest relative aspect difference between patch and target area
+ASPECT_LIMIT = 0.025   # gate: largest absolute w/h difference that a resize keeping aspect can fix
+FILE_BUDGET = 1000000  # gate: PNG/JPEG/WebP deliverables above this many bytes get a warning
 CARD_LIMIT = 2400
 LESSONS_SHOWN = 5      # lessons printed in the session card and brief
 TASTE_SHOWN = 6        # taste notes printed in the session card and brief
@@ -367,8 +375,15 @@ def alpha_problem(img, rule):
 
 def image_problems(img, spec, label):
     problems = []
-    if img.size != (spec.get("width"), spec.get("height")):
-        problems.append(f"{label}: size {img.size[0]}x{img.size[1]}, spec {spec.get('width')}x{spec.get('height')}")
+    sw, sh = spec.get("width"), spec.get("height")
+    if img.size != (sw, sh):
+        text = f"{label}: size {img.size[0]}x{img.size[1]}, spec {sw}x{sh}"
+        if isinstance(sw, int) and isinstance(sh, int) and sh > 0 and img.size[1] > 0:
+            got, want = img.size[0] / img.size[1], sw / sh
+            if abs(got - want) > ASPECT_LIMIT:
+                text += f"; aspect {got:.3f} vs spec {want:.3f} (more than {ASPECT_LIMIT} apart: crop or pad, never stretch)"
+            else: text += f"; same aspect within {ASPECT_LIMIT} (a resize keeping aspect fits)"
+        problems.append(text)
     issue = alpha_problem(img, spec.get("alpha", "any"))
     if issue: problems.append(f"{label}: {issue}")
     return problems
@@ -1030,6 +1045,10 @@ def spec_checks(path, spec, report):
     problems = image_problems(img, spec, path.name)
     for p in problems: report.fail(p)
     if img.format == fmt and not problems: report.ok(f"spec: {spec['width']}x{spec['height']} {fmt}, alpha {spec['alpha']}")
+    size = path.stat().st_size
+    if fmt in ("PNG", "JPEG", "WEBP") and size > FILE_BUDGET:
+        report.ok(f"file size: warning, {size / 1e6:.1f} MB is over the {FILE_BUDGET // 1000000} MB budget for PNG/JPEG/WebP "
+                  "(not a failure; compress it if it is for the web)")
 
 
 def render_crops(image, defect_id, crop_box, nonce):
@@ -1509,13 +1528,128 @@ def run_hook(argv):
 
 # ---------------------------------------------------------------- defect map and edit check
 
-def changed_mask(before, after):
-    """255 where any channel differs by more than CHANGE_LEVEL."""
+def changed_mask(before, after, level=CHANGE_LEVEL):
+    """255 where any channel differs by more than level."""
     P = pil()
     bands = P.ImageChops.difference(before.convert("RGBA"), after.convert("RGBA")).split()
     peak = bands[0]
     for band in bands[1:]: peak = P.ImageChops.lighter(peak, band)
-    return peak.point(lambda v: 255 if v > CHANGE_LEVEL else 0)
+    return peak.point(lambda v: 255 if v > level else 0)
+
+
+def open_8bit(path, label):
+    img = open_image(path)
+    if img.mode in ("I", "F") or img.mode.startswith("I;"):
+        raise UsageError(f"{label} is a 16-bit or float image ({img.mode}); save an 8-bit copy first")
+    return img
+
+
+def hard_mask(mask_img, size, label, against):
+    """0/255 mask: pixels at 128 or brighter are in; transparent pixels are out. blend, edit-check and align-check share it."""
+    P = pil()
+    if mask_img.size != size:
+        raise UsageError(f"{label} is {mask_img.size[0]}x{mask_img.size[1]}; it must match {against} {size[0]}x{size[1]}")
+    if "transparency" in mask_img.info: mask_img = mask_img.convert("RGBA")  # P/RGB masks with a transparent color
+    mask = mask_img.convert("L")
+    if "A" in mask_img.getbands(): mask = P.ImageChops.darker(mask, mask_img.getchannel("A"))
+    hard = mask.point(lambda v: 255 if v >= 128 else 0)
+    if not hard.getbbox(): raise UsageError(f"{label} is empty (no pixel at 128 or brighter)")
+    return hard
+
+
+def grow(mask, px):
+    """Dilate a 0/255 mask by px pixels (square), working only around its box."""
+    P = pil()
+    box = mask.getbbox()
+    if not px or not box: return mask
+    W, H = mask.size
+    work = (max(0, box[0] - px), max(0, box[1] - px), min(W, box[2] + px), min(H, box[3] + px))
+    part = mask.crop(work)
+    for _ in range(px // 2): part = part.filter(P.ImageFilter.MaxFilter(5))
+    if px % 2: part = part.filter(P.ImageFilter.MaxFilter(3))
+    out = mask.copy(); out.paste(part, work[:2])
+    return out
+
+
+def parse_at(value, label="--at"):
+    try: x, y = (int(v) for v in value.split(","))
+    except ValueError: raise UsageError(f"{label} takes x,y, got {value!r}") from None
+    return x, y
+
+
+def on_indices(mask, limit):
+    """Indices of the mask's on pixels, evenly thinned to at most limit."""
+    idx = [i for i, v in enumerate(mask.tobytes()) if v]
+    return idx[::max(1, -(-len(idx) // limit))]
+
+
+_LINEAR = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in (v / 255 for v in range(256))]
+
+
+def srgb_to_lab(rgb):
+    """8-bit sRGB to CIELAB, D65 white."""
+    r, g, b = (_LINEAR[c] for c in rgb)
+    xyz = ((0.4124564 * r + 0.3575761 * g + 0.1804375 * b) / 0.95047,
+           0.2126729 * r + 0.7151522 * g + 0.0721750 * b,
+           (0.0193339 * r + 0.1191920 * g + 0.9503041 * b) / 1.08883)
+    fx, fy, fz = (t ** (1 / 3) if t > 216 / 24389 else (24389 / 27 * t + 16) / 116 for t in xyz)
+    return 116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)
+
+
+def ciede2000(lab1, lab2):
+    """CIEDE2000 color difference (Sharma, Wu and Dalal 2005), kL = kC = kH = 1."""
+    import math
+    (L1, a1, b1), (L2, a2, b2) = lab1, lab2
+    cm7 = ((math.hypot(a1, b1) + math.hypot(a2, b2)) / 2) ** 7
+    g = 0.5 * (1 - math.sqrt(cm7 / (cm7 + 25 ** 7)))
+    a1, a2 = a1 * (1 + g), a2 * (1 + g)
+    c1, c2 = math.hypot(a1, b1), math.hypot(a2, b2)
+    h1 = math.degrees(math.atan2(b1, a1)) % 360 if c1 else 0.0
+    h2 = math.degrees(math.atan2(b2, a2)) % 360 if c2 else 0.0
+    dh = 0.0
+    if c1 * c2:
+        dh = h2 - h1
+        if dh > 180: dh -= 360
+        elif dh < -180: dh += 360
+    dH = 2 * math.sqrt(c1 * c2) * math.sin(math.radians(dh / 2))
+    lm, cm = (L1 + L2) / 2, (c1 + c2) / 2
+    if not c1 * c2: hm = h1 + h2
+    elif abs(h1 - h2) <= 180: hm = (h1 + h2) / 2
+    else: hm = (h1 + h2 + 360) / 2 if h1 + h2 < 360 else (h1 + h2 - 360) / 2
+    t = (1 - 0.17 * math.cos(math.radians(hm - 30)) + 0.24 * math.cos(math.radians(2 * hm))
+         + 0.32 * math.cos(math.radians(3 * hm + 6)) - 0.20 * math.cos(math.radians(4 * hm - 63)))
+    rt = -2 * math.sqrt(cm ** 7 / (cm ** 7 + 25 ** 7)) * math.sin(math.radians(60 * math.exp(-((hm - 275) / 25) ** 2)))
+    sl = 1 + 0.015 * (lm - 50) ** 2 / math.sqrt(20 + (lm - 50) ** 2)
+    sc, sh = 1 + 0.045 * cm, 1 + 0.015 * cm * t
+    dl, dc, dh_ = (L2 - L1) / sl, (c2 - c1) / sc, dH / sh
+    return math.sqrt(max(0.0, dl * dl + dc * dc + dh_ * dh_ + rt * dc * dh_))
+
+
+def ring_color_difference(patch_rgb, base_rgb, region):
+    """(mean, p95, samples) CIEDE2000 between patch and base at the same pixels of region, or None."""
+    import math
+    idx = on_indices(region, DE_SAMPLES)
+    if not idx: return None
+    pa, ba = patch_rgb.tobytes(), base_rgb.tobytes()
+    des = sorted(ciede2000(srgb_to_lab(pa[3 * i:3 * i + 3]), srgb_to_lab(ba[3 * i:3 * i + 3])) for i in idx)
+    return sum(des) / len(des), des[max(0, math.ceil(0.95 * len(des)) - 1)], len(des)
+
+
+def seam_steps(hard, out_rgb, base_rgb):
+    """(output, base) mean |dL*| between each mask edge pixel and its 4-neighbors outside the mask, or None."""
+    P = pil()
+    W, H = hard.size
+    m = hard.tobytes()
+    pairs = []
+    for i in on_indices(P.ImageChops.subtract(hard, hard.filter(P.ImageFilter.MinFilter(3))), DE_SAMPLES):
+        x, y = i % W, i // W
+        pairs += [(i, ny * W + nx) for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1))
+                  if 0 <= nx < W and 0 <= ny < H and not m[ny * W + nx]]
+    if not pairs: return None
+    def mean_step(data):
+        L = lambda i: srgb_to_lab(data[3 * i:3 * i + 3])[0]
+        return sum(abs(L(i) - L(j)) for i, j in pairs) / len(pairs)
+    return mean_step(out_rgb.tobytes()), mean_step(base_rgb.tobytes())
 
 
 def outline(draw, box, color, width):
@@ -1726,38 +1860,34 @@ def cmd_blend(args):
     if out.resolve() in (base_path.resolve(), patch_path.resolve(), mask_path.resolve()): raise UsageError("--out must be a new file, not an input")
     if out.is_dir() or not out.parent.is_dir(): raise UsageError(f"--out {args.out}: not a file path in an existing folder")
     if out.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"): raise UsageError("--out must end in .png, .jpg, .jpeg, or .webp")
-    if not 0 <= args.feather <= 64: raise UsageError("--feather must be 0 to 64 pixels")
-    images = {}
-    for label, path in (("--base", base_path), ("--patch", patch_path), ("--mask", mask_path)):
-        img = open_image(path)
-        if img.mode in ("I", "F") or img.mode.startswith("I;"):
-            raise UsageError(f"{label} is a 16-bit or float image ({img.mode}); save an 8-bit copy first")
-        images[label] = img
-    base, patch, mask_img = images["--base"], images["--patch"], images["--mask"]
+    if args.feather is not None and not 0 <= args.feather <= 64: raise UsageError("--feather must be 0 to 64 pixels")
+    base, patch, mask_img = (open_8bit(p, k) for p, k in ((base_path, "--base"), (patch_path, "--patch"), (mask_path, "--mask")))
     alpha_out = base.mode in ("RGBA", "LA", "PA") or "transparency" in base.info
     base, patch = base.convert("RGBA"), patch.convert("RGBA")
     W, H = base.size
-    if mask_img.size != base.size: raise UsageError(f"--mask is {mask_img.size[0]}x{mask_img.size[1]}; it must match --base {W}x{H}")
-    mask = mask_img.convert("L")
-    if "A" in mask_img.getbands(): mask = P.ImageChops.darker(mask, mask_img.getchannel("A"))  # transparent = not part of the mask
-    x0, y0 = 0, 0
-    if args.at:
-        try: x0, y0 = (int(v) for v in args.at.split(","))
-        except ValueError: raise UsageError(f"--at takes x,y, got {args.at!r}") from None
+    hard = hard_mask(mask_img, base.size, "--mask", "--base")
+    x0, y0 = parse_at(args.at) if args.at else (0, 0)
     if x0 < 0 or y0 < 0 or x0 + patch.size[0] > W or y0 + patch.size[1] > H:
         raise UsageError(f"the patch ({patch.size[0]}x{patch.size[1]} at {x0},{y0}) does not fit inside --base {W}x{H}; "
                          "resize it or pass --at")
-    hard = mask.point(lambda v: 255 if v >= 128 else 0)
     box = hard.getbbox()
-    if not box: raise UsageError("--mask is empty (no pixel at 128 or brighter)")
+    short = min(box[2] - box[0], box[3] - box[1])
+    feather = args.feather
+    if feather is None:
+        feather = min(8, max(2, round(0.03 * short)))
+        print(f"Feather: {feather} px (auto: 3% of the mask box short side {short} px, kept within 2-8)")
+    elif feather > 0.05 * short:  # the automatic feather never warns about itself
+        print(f"warning: feather {feather} px is over 5% of the mask box short side ({short} px); the soft band may show as a halo")
     placed = base.copy(); placed.paste(patch, (x0, y0))
     covered = P.Image.new("L", (W, H), 0); covered.paste(255, (x0, y0, x0 + patch.size[0], y0 + patch.size[1]))
     # work on the mask box plus a margin: the ring is the band just outside the mask that the patch also covers
-    r = max(8, 2 * args.feather)
-    m = r + args.feather * 2 + 2
+    r = max(8, 2 * feather)
+    m = r + feather * 2 + 2
     work = (max(0, box[0] - m), max(0, box[1] - m), min(W, box[2] + m), min(H, box[3] + m))
     hm, cw = hard.crop(work), covered.crop(work)
     ring = P.ImageChops.darker(P.ImageChops.subtract(hm.filter(P.ImageFilter.MaxFilter(2 * (r // 2) + 1)), hm), cw)
+    # fully transparent patch pixels carry no color the result will show: keep them out of the color statistics
+    ring = P.ImageChops.darker(ring, placed.crop(work).getchannel("A").point(lambda v: 255 if v else 0))
     pw, bw = placed.crop(work), base.crop(work)
     rgb_p, rgb_b = pw.convert("RGB"), bw.convert("RGB")
     def delta(img):
@@ -1775,35 +1905,63 @@ def cmd_blend(args):
         print(f"Color match: ring difference {before:.1f} -> {delta(rgb_p):.1f} (largest channel mean, 0-255)")
     else:
         print("Color match: skipped (the patch does not cover any pixels around the mask)")
+    # how well the (matched) patch agrees with the base where the feather mixes them: opaque ring pixels only
+    opaque = P.ImageChops.darker(pw.getchannel("A"), bw.getchannel("A")).point(lambda v: 255 if v == 255 else 0)
+    stats = ring_color_difference(rgb_p, rgb_b, P.ImageChops.darker(ring, opaque))
+    mismatch = False
+    if stats:
+        mean, p95, n = stats
+        mismatch = mean > DE_MEAN_LIMIT or p95 > DE_P95_LIMIT
+        print(f"Ring dE2000 (patch vs base, {n} pixels): mean {mean:.2f}, p95 {p95:.2f} "
+              f"(limits {DE_MEAN_LIMIT} and {DE_P95_LIMIT}" + (", not enforced with --no-match)" if args.no_match else ")"))
+    else: print("Ring dE2000: skipped (no opaque pixels around the mask that the patch covers)")
     pw = P.Image.merge("RGBA", rgb_p.split() + (pw.getchannel("A"),))
     # the mask itself stays fully replaced; the feather only softens the band just outside it
-    alpha = P.ImageChops.lighter(hm, hm.filter(P.ImageFilter.GaussianBlur(args.feather / 2))) if args.feather else hm
-    alpha = P.ImageChops.darker(alpha, cw)
+    alpha = P.ImageChops.lighter(hm, hm.filter(P.ImageFilter.GaussianBlur(feather / 2))) if feather else hm
+    alpha = P.ImageChops.darker(P.ImageChops.darker(alpha, cw), pw.getchannel("A"))  # a transparent patch pixel keeps the base
     result = base.copy(); result.paste(P.Image.composite(pw, bw, alpha), work[:2])
     if not alpha_out or out.suffix.lower() in (".jpg", ".jpeg"): result = result.convert("RGB")
     result.save(out)
+    steps = seam_steps(hm, result.crop(work).convert("RGB"), rgb_b)
+    if steps: print(f"seam_step: {steps[0]:.2f} mean |dL*| across the mask edge (base {steps[1]:.2f} at the same pixels)")
+    else: print("seam_step: skipped (the mask has no edge inside the image)")
     span = changed_mask(base, result).getbbox()
-    print(f"Wrote {out}" + (f"; changed area {','.join(map(str, span))} (use as edit-check --bbox)" if span else "; nothing changed"))
+    print(f"Wrote {out}" + (f"; changed area {','.join(map(str, span))} (use as edit-check --bbox, or edit-check --mask "
+                            f"{shlex.quote(str(mask_path))} --edge {feather})" if span else "; nothing changed"))
+    if mismatch and not args.no_match:
+        print(f"color mismatch: the patch differs from the base around the mask (dE2000 mean over {DE_MEAN_LIMIT} or p95 over "
+              f"{DE_P95_LIMIT}); the output was written, but check the edge at 100% or regenerate the patch")
+        return 1
     return 0
 
 
 def cmd_edit_check(args):
     before_path, after_path = existing_file(args.before, "--before"), existing_file(args.after, "--after")
-    before, after = open_image(before_path), open_image(after_path)
+    before, after = open_8bit(before_path, "--before"), open_8bit(after_path, "--after")
     if before.size != after.size:
         raise UsageError(f"size differs: {before.size[0]}x{before.size[1]} vs {after.size[0]}x{after.size[1]}")
-    box = parse_bbox(args.bbox)
+    if not args.bbox and not args.mask: raise UsageError("give --bbox x0,y0,x1,y1, --mask M, or both")
+    if args.edge and not args.mask: raise UsageError("--edge needs --mask")
+    if not 0 <= args.edge <= 64: raise UsageError("--edge must be 0 to 64 pixels")
     w, h = before.size
-    if box[2] > w or box[3] > h: raise UsageError(f"--bbox {box} is outside the image size {w}x{h}")
+    box = parse_bbox(args.bbox) if args.bbox else None
+    if box and (box[2] > w or box[3] > h): raise UsageError(f"--bbox {box} is outside the image size {w}x{h}")
     if args.ring < 0: raise UsageError("--ring must be 0 or more")
     P = pil()
+    hard = hard_mask(open_8bit(existing_file(args.mask, "--mask"), "--mask"), before.size, "--mask", "the images") if args.mask else None
     changed = changed_mask(before, after)
-    inside = P.Image.new("L", before.size, 0)
-    inside.paste(255, tuple(box))
-    outside = P.ImageChops.darker(changed, P.ImageChops.invert(inside))
-    count_out, span = count_on(outside), outside.getbbox()
-    print(f"Changed pixels inside the box: {count_on(P.ImageChops.darker(changed, inside))}")
-    print(f"Changed pixels outside the box: {count_out}" + (f" (span {','.join(map(str, span))})" if span else ""))
+    failed = False
+    if box:
+        inside = P.Image.new("L", before.size, 0)
+        inside.paste(255, tuple(box))
+        outside = P.ImageChops.darker(changed, P.ImageChops.invert(inside))
+        count_out, span = count_on(outside), outside.getbbox()
+        print(f"Changed pixels inside the box: {count_on(P.ImageChops.darker(changed, inside))}")
+        print(f"Changed pixels outside the box: {count_out}" + (f" (span {','.join(map(str, span))})" if span else ""))
+        failed = count_out > 0
+    if hard is not None:
+        failed = mask_report(hard, changed, changed_mask(before, after, REAL_CHANGE_LEVEL), args.edge) or failed
+        if not box: box = list(hard.getbbox())
     r = args.ring
     view = (max(0, box[0] - r), max(0, box[1] - r), min(w, box[2] + r), min(h, box[3] + r))
     panels = [before.crop(view).convert("RGB"), after.crop(view).convert("RGB"), changed.crop(view).convert("RGB")]
@@ -1816,7 +1974,89 @@ def cmd_edit_check(args):
     sheet.save(args.out, "PNG")
     print(f"View: {args.out} (before | after | changed pixels, box + {r} px ring, 100%). Look at the ring for "
           "leftover fragments, seams, and halos.")
-    return 1 if count_out else 0
+    return 1 if failed else 0
+
+
+def mask_report(hard, noise, real, edge):
+    """Print edit-check --mask results; True when the edit fails (changes outside, or a mask that did nothing)."""
+    P = pil()
+    pct = lambda n, d: 100.0 * n / d if d else 0.0
+    n_in = count_on(hard)
+    band = grow(hard, edge)
+    outside = P.ImageChops.invert(band)
+    n_out = count_on(outside)
+    in_real = count_on(P.ImageChops.darker(real, hard))
+    out_noise, out_real_mask = count_on(P.ImageChops.darker(noise, outside)), P.ImageChops.darker(real, outside)
+    out_real, span = count_on(out_real_mask), out_real_mask.getbbox()
+    print(f"Mask: {n_in} px, box {','.join(map(str, hard.getbbox()))}")
+    print(f"Changed inside the mask (over {REAL_CHANGE_LEVEL}/255): {pct(in_real, n_in):.2f}% ({in_real} px)")
+    if edge:
+        edge_only = P.ImageChops.subtract(band, hard)
+        print(f"Edge band ({edge} px outside the mask, not checked): {pct(count_on(P.ImageChops.darker(real, edge_only)), count_on(edge_only)):.2f}% changed")
+    print(f"Changed outside the mask: {pct(out_noise, n_out):.2f}% over {CHANGE_LEVEL}/255 (noise level, {out_noise} px), "
+          f"{pct(out_real, n_out):.2f}% over {REAL_CHANGE_LEVEL}/255 ({out_real} px, limit {MASK_OUTSIDE_LIMIT * 100:.1f}%)"
+          + (f" (span {','.join(map(str, span))})" if span else ""))
+    problems = []
+    if out_real > MASK_OUTSIDE_LIMIT * n_out:
+        problems.append(f"changes outside the mask: {pct(out_real, n_out):.2f}% of outside pixels changed by more than "
+                        f"{REAL_CHANGE_LEVEL}/255 (limit {MASK_OUTSIDE_LIMIT * 100:.1f}%)")
+    need = min(n_in, max(4, MASK_EFFECT_MIN * n_in))  # at least 4 pixels, so one noise pixel never passes a small mask
+    if in_real < need:
+        problems.append(f"mask had no effect or is inverted: only {pct(in_real, n_in):.2f}% of mask pixels changed "
+                        f"({in_real} px; need max(4, {MASK_EFFECT_MIN * 100:.1f}% of the mask))")
+    for p in problems: print(f"FAIL: {p}")
+    return bool(problems)
+
+
+def cmd_align_check(args):
+    P = pil()
+    base_path, patch_path = existing_file(args.base, "--base"), existing_file(args.patch, "--patch")
+    out_dir = Path(args.out_dir).expanduser()
+    if out_dir.exists() and not out_dir.is_dir(): raise UsageError(f"--out-dir {args.out_dir} is a file, not a folder")
+    if not out_dir.resolve().parent.is_dir(): raise UsageError(f"--out-dir {args.out_dir}: its parent folder does not exist")
+    base, patch = open_8bit(base_path, "--base").convert("RGB"), open_8bit(patch_path, "--patch").convert("RGB")
+    W, H = base.size
+    pw, ph = patch.size
+    hard = hard_mask(open_8bit(existing_file(args.mask, "--mask"), "--mask"), base.size, "--mask", "--base") if args.mask else None
+    if args.at:
+        x0, y0 = parse_at(args.at)
+        if x0 < 0 or y0 < 0 or x0 + pw > W or y0 + ph > H:
+            raise UsageError(f"the patch ({pw}x{ph} at {x0},{y0}) does not fit inside --base {W}x{H}")
+        area, source = (x0, y0, x0 + pw, y0 + ph), f"--at {x0},{y0} and the patch size"
+        mb = hard.getbbox() if hard is not None else None
+        if mb and (mb[0] < area[0] or mb[1] < area[1] or mb[2] > area[2] or mb[3] > area[3]):
+            raise UsageError(f"the mask box {','.join(map(str, mb))} reaches outside the patch area {','.join(map(str, area))}; "
+                             "the patch would not cover the whole mask")
+    else:
+        area, source = (hard.getbbox(), "the mask box") if hard is not None else ((0, 0, W, H), "the whole base")
+    aw, ah = area[2] - area[0], area[3] - area[1]
+    diff = abs((pw / ph) / (aw / ah) - 1)
+    if diff > ALIGN_ASPECT_LIMIT:
+        raise UsageError(f"patch aspect {pw}x{ph} ({pw / ph:.3f}) differs from {source} {aw}x{ah} ({aw / ah:.3f}) by "
+                         f"{diff * 100:.1f}% (limit {ALIGN_ASPECT_LIMIT * 100:.0f}%): crop or pad the patch to that aspect, "
+                         "then resize keeping aspect; never stretch it")
+    print(f"Area: {','.join(map(str, area))} ({aw}x{ah}, from {source})")
+    if (pw, ph) != (aw, ah):
+        patch = patch.resize((aw, ah), P.BILINEAR)
+        print(f"Patch scaled {pw}x{ph} -> {aw}x{ah} for the preview (aspect within {ALIGN_ASPECT_LIMIT * 100:.0f}%); "
+              f"resize it the same way, then blend --at {area[0]},{area[1]}")
+    region = base.crop(area)
+    s = max(24, min(aw, ah) // 12)
+    cells = P.Image.new("L", (aw, ah), 0)
+    draw = P.ImageDraw.Draw(cells)
+    for gy in range(0, ah, s):
+        for gx in range(0, aw, s):
+            if (gx // s + gy // s) % 2: draw.rectangle((gx, gy, gx + s - 1, gy + s - 1), fill=255)
+    out_dir.mkdir(exist_ok=True)
+    checker, overlay = out_dir / "checker.png", out_dir / "overlay.png"
+    inputs = {p.resolve() for p in (base_path, patch_path) + ((Path(args.mask).expanduser(),) if args.mask else ())}
+    if checker.resolve() in inputs or overlay.resolve() in inputs:
+        raise UsageError(f"--out-dir {args.out_dir} would overwrite an input (checker.png or overlay.png); choose another folder")
+    P.Image.composite(patch, region, cells).save(checker, "PNG")
+    P.Image.blend(region, patch, 0.5).save(overlay, "PNG")
+    print(f"Checker: {checker} (base and patch in alternating {s} px squares; lines that jump at square borders are misaligned)")
+    print(f"Overlay: {overlay} (50/50 mix; doubled or ghosted edges are misaligned)")
+    return 0
 
 
 EPILOG = """\
@@ -1853,18 +2093,30 @@ subcommands:
                                          points from pommel (first) to tip (last); the red pommel-to-tip line is the axis, the blade spine is traced
                                          from the pixels between the last two points; exit 1 when a point or the spine leaves the line
                                          example: python3 studio_state.py axis-check --image hero.png --points 25,355 230,540 250,573 850,1570 --guide guide.png
-  blend --base B --patch P --mask M --out F [--at X,Y] [--feather 8] [--no-match]
-                                         paste a repair patch through a mask: matches its color to the ring around the mask, feathers the edge,
-                                         and prints the changed area for edit-check
+  align-check --base B --patch P --out-dir D [--at X,Y] [--mask M]
+                                         before blend: writes D/checker.png (base and patch in alternating squares) and D/overlay.png
+                                         (50/50 mix) over the patch area (--at, else the mask box, else the whole base); exit 2 when the
+                                         patch must be scaled into an area whose aspect differs by more than 1% (never stretch a patch)
+                                         example: python3 studio_state.py align-check --base v6.png --patch patch.png --at 1200,400 --out-dir align
+  blend --base B --patch P --mask M --out F [--at X,Y] [--feather PX] [--no-match]
+                                         paste a repair patch through a mask: matches its color to the ring around the mask, feathers the edge
+                                         (default 3% of the mask box short side, 2-8 px; a passed --feather warns over 5%), prints ring dE2000 mean/p95,
+                                         seam_step (mean |dL*| across the mask edge) and the changed area for edit-check; always writes the
+                                         output, exit 1 "color mismatch" when dE2000 mean > 2.0 or p95 > 3.5 (report only with --no-match)
                                          example: python3 studio_state.py blend --base v6.png --patch patch.png --mask mask.png --out v7.png
-  edit-check --before A --after B --bbox x0,y0,x1,y1 [--ring 24] [--out F]
-                                         changed pixels outside the edit box (exit 1 if any) and one before|after|changes view
-                                         example: python3 studio_state.py edit-check --before v7.png --after v8.png --bbox 280,320,370,410
+  edit-check --before A --after B [--bbox x0,y0,x1,y1] [--mask M [--edge PX]] [--ring 24] [--out F]
+                                         at least one of --bbox and --mask (both run both checks); 16-bit inputs are refused. --bbox: changed pixels outside the box (exit 1 if any). --mask (same rule as blend: 128+ is in,
+                                         transparent is out): % of mask pixels changed over 12/255; outside it, % over 8/255 (noise) and
+                                         over 12/255 (exit 1 above 0.1%); exit 1 when under max(4 px, 0.5% of the mask) changed (no effect or inverted);
+                                         --edge skips the blend feather band. Writes one before|after|changes view
+                                         example: python3 studio_state.py edit-check --before v7.png --after v8.png --mask mask.png --edge 2
   hook session-start | hook stop         example: python3 studio_state.py hook session-start < payload.json
 
 approve, defect, brief, gate and verdict find the store by walking up from --project or the current folder.
 init creates it; pref add does not use the project store; lessons (lessons.jsonl) and taste notes (brands/<brand>/taste.jsonl, taste.jsonl) live in ${IMAGE_STUDIO_HOME:-~/.image-studio}, shared by every task; hooks use the cwd from the hook input.
-exit codes: 0 ok / gate pass, 1 gate fail, edit-check found changes outside the box, or axis-check found a bend, 2 bad input or no store
+gate fails a wrong size and says whether the aspect matches (w/h within 0.025); a PNG/JPEG/WebP over 1 MB gets a warning, not a fail.
+exit codes: 0 ok / gate pass, 1 gate fail, edit-check found changes outside the box or mask (or a mask with no effect), axis-check found a bend,
+or blend found a color mismatch (output still written), 2 bad input or no store
 """
 
 
@@ -1931,15 +2183,20 @@ def build_parser():
 
     p = sub.add_parser("blend")
     p.add_argument("--base", required=True); p.add_argument("--patch", required=True); p.add_argument("--mask", required=True)
-    p.add_argument("--out", required=True); p.add_argument("--at"); p.add_argument("--feather", type=int, default=8)
+    p.add_argument("--out", required=True); p.add_argument("--at"); p.add_argument("--feather", type=int)
     p.add_argument("--no-match", action="store_true")
     p.set_defaults(func=cmd_blend)
 
     p = sub.add_parser("edit-check")
     p.add_argument("--before", required=True); p.add_argument("--after", required=True)
-    p.add_argument("--bbox", required=True, nargs="+"); p.add_argument("--ring", type=int, default=24)
-    p.add_argument("--out", default="edit-check.png")
+    p.add_argument("--bbox", nargs="+"); p.add_argument("--mask"); p.add_argument("--edge", type=int, default=0)
+    p.add_argument("--ring", type=int, default=24); p.add_argument("--out", default="edit-check.png")
     p.set_defaults(func=cmd_edit_check)
+
+    p = sub.add_parser("align-check")
+    p.add_argument("--base", required=True); p.add_argument("--patch", required=True); p.add_argument("--at"); p.add_argument("--mask")
+    p.add_argument("--out-dir", required=True)
+    p.set_defaults(func=cmd_align_check)
 
     pref = sub.add_parser("pref").add_subparsers(dest="what", metavar="add", required=True)
     p = pref.add_parser("add")
