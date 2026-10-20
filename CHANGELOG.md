@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.23.1-local.1 (2026-10-20)
+
+- `image-repair/references/tool-readiness.md` lists the optional numpy + OpenCV engine and Playwright + Chromium, with their install commands, matching the README Tools table.
+
 ## 2.23.0-local.1 (2026-10-20)
 
 Optional HTML/CSS text layers in `compose_layers.py`. Pillow and jsonschema stay the only required dependencies.
