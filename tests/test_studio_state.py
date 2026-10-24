@@ -98,7 +98,7 @@ class StudioBase(unittest.TestCase):
     def defect(self, bbox, kind="scope", note="x", source="user"):
         args = ["defect", "add", "--deliverable", "poster", "--bbox", ",".join(map(str, bbox)),
                 "--kind", kind, "--source", source, "--note", note]
-        return self.ok(*args).stdout.strip().split()[-1]
+        return self.ok(*args).stdout.split("Added defect ", 1)[1].split()[0]
 
     def gate(self, *extra):
         return self.run_cli("gate", "--deliverable", "poster", *extra)
@@ -2483,6 +2483,260 @@ class CropCheckTests(StudioBase):
             self.assertEqual(run.returncode, 2, (extra, run.stdout, run.stderr))
         help_text = subprocess.run([sys.executable, str(SCRIPT), "--help"], capture_output=True, text=True).stdout
         for name in ("crop-check", "shape-check", "--no-align-check", "--accept"): self.assertIn(name, help_text)
+
+
+class ConstructionTests(StudioBase):
+    """The user pointing at the same region again means stroke patching failed: research how the object is built."""
+
+    RULE = "torn top strip stays attached at one end; its length equals the tear edge"
+
+    def setUp(self):
+        super().setUp()
+        self.init()
+        self.approve_poster(self.poster())
+
+    def add(self, bbox, *extra):
+        return self.ok("defect", "add", "--deliverable", "poster", "--bbox", ",".join(map(str, bbox)),
+                       "--kind", "artifact", "--note", "torn pack edge", *extra).stdout
+
+    def construction(self, *extra):
+        return self.run_cli("construction", "add", "--defect", "D2", "--object", "booster pack", "--rule", self.RULE, *extra)
+
+    def test_user_repeat_on_the_same_region_needs_construction_and_a_lesson(self):
+        self.add([10, 10, 60, 60])
+        out = self.add([20, 20, 70, 70])  # IoU 0.47
+        d2 = self.defects()[1]
+        self.assertEqual(d2["repeat_of"], ["D1"])
+        self.assertTrue(d2["needs_construction"])
+        self.assertTrue(d2["needs_lesson"])
+        for text in ("already reported (D1)", "construction-reference.md", "construction add --defect D2", "lesson add --defect D2"):
+            self.assertIn(text, out)
+        self.add([10, 10, 90, 90])    # D3 (21% of the image) overlaps D1 and D2
+        self.assertEqual(self.defects()[2]["repeat_of"], ["D1", "D2"])
+        self.add([55, 55, 75, 75])    # D4: IoU under 0.1 with D2 and D3, but its center is inside both; D1 is missed
+        self.assertEqual(self.defects()[3]["repeat_of"], ["D2", "D3"])
+
+    def test_no_repeat_for_other_regions_agent_defects_or_scope_requests(self):
+        self.add([10, 10, 60, 60])
+        self.add([120, 80, 180, 140])
+        self.add([10, 10, 60, 60], "--source", "agent")
+        out = self.add([10, 10, 60, 60], "--kind", "scope", "--quote", "make the tear longer")
+        self.assertNotIn("already reported", out)
+        self.add([120, 80, 180, 140])  # control: a user defect on D2's region is the only repeat
+        defects = self.defects()
+        for d in defects[:4]:
+            self.assertNotIn("repeat_of", d)
+            self.assertNotIn("needs_construction", d)
+            self.assertNotIn("needs_lesson", d)
+        self.assertEqual(defects[4]["repeat_of"], ["D2"])
+
+    def test_gate_fails_until_the_construction_rule_is_recorded(self):
+        self.add([10, 10, 60, 60])
+        self.add([20, 20, 70, 70])
+        for did in ("D1", "D2"):
+            self.ok("defect", "close", "--id", did, "--status", "wontfix", "--note", "ok", "--quote", "leave it")
+        self.ok("lesson", "add", "--defect", "D2", "--mistake", "patched one stroke at a time", "--cause", "never worked out the tear",
+                "--check", "state the construction before editing")
+        run = self.gate()
+        self.assertEqual(run.returncode, 1)
+        self.assertIn("D2 repeats D1 and has no construction rule", run.stdout)
+        self.assertIn("construction add --defect D2", run.stdout)
+        self.assertEqual(self.construction("--quote", "the strip hangs from the left end").returncode, 0)
+        run = self.gate()
+        self.assertEqual(run.returncode, 0, run.stdout)
+        card = lambda: self.run_cli("hook", "session-start", stdin=json.dumps({"cwd": str(self.project)})).stdout
+        self.assertIn("gate passed", card())
+        (self.store / "construction.jsonl").write_text("")
+        self.assertIn("gate not passed", card())
+
+    def test_construction_add_bad_input_exits_2(self):
+        self.add([10, 10, 60, 60])
+        self.add([20, 20, 70, 70])
+        (self.project / "notes.png").write_text("not an image")
+        for extra in ((), ("--ref", "notes.png"), ("--ref", "missing.png"), ("--quote", " ")):
+            run = self.construction(*extra)
+            self.assertEqual(run.returncode, 2, (extra, run.stdout, run.stderr))
+            self.assertIn("error:", run.stderr)
+        run = self.run_cli("construction", "add", "--defect", "D9", "--object", "pack", "--rule", self.RULE, "--quote", "x")
+        self.assertEqual(run.returncode, 2)
+        self.assertIn("unknown defect", run.stderr)
+        self.assertFalse((self.store / "construction.jsonl").exists())
+
+    def test_rule_with_refs_is_stored_and_shown_in_brief_and_card(self):
+        self.add([10, 10, 60, 60])
+        self.add([20, 20, 70, 70])
+        refs = self.project / "refs"
+        refs.mkdir()
+        Image.new("RGB", (40, 30), (90, 90, 90)).save(refs / "tear-1.jpg")
+        self.assertEqual(self.construction("--ref", "refs/tear-1.jpg").returncode, 0)
+        record = json.loads((self.store / "construction.jsonl").read_text().splitlines()[0])
+        self.assertEqual(record["defect"], "D2")
+        self.assertEqual(record["refs"][0]["path"], "refs/tear-1.jpg")
+        self.assertEqual(len(record["refs"][0]["sha256"]), 64)
+        self.assertIn(self.RULE, self.ok("construction", "list").stdout)
+        self.assertIn(self.RULE, self.ok("brief").stdout)
+        card = self.run_cli("hook", "session-start", stdin=json.dumps({"cwd": str(self.project)})).stdout
+        self.assertIn("booster pack", card)
+        self.assertIn("torn top strip", card)
+
+
+class RepeatMatchTests(StudioBase):
+    """Which earlier reports count, across renamed, re-approved, and rescaled copies of the same artwork."""
+
+    BOX = [100, 80, 150, 130]  # on a 200x150 image
+
+    def setUp(self):
+        super().setUp()
+        self.init()
+
+    def deliverable(self, name, w, h, quote=None, color=None):
+        """One artwork (a ramp with a disc) at any size, or a flat single-color image when color is given."""
+        path = self.project / f"{name}-{w}x{h}.png"
+        img = Image.new("RGB", (200, 150), color or (0, 0, 0))
+        if color is None:
+            draw = ImageDraw.Draw(img)
+            for x in range(200):
+                draw.line([(x, 0), (x, 149)], fill=(x * 255 // 199, 90, 255 - x * 255 // 199))
+            draw.ellipse((120, 20, 180, 80), fill=(250, 220, 40))
+        img.resize((w, h), Image.LANCZOS).save(path)
+        extra = ["--quote", quote] if quote else []
+        self.ok("approve", "deliverable", "--name", name, "--file", path, "--width", w, "--height", h, "--format", "PNG", *extra)
+
+    def add(self, name, box, *extra):
+        out = self.ok("defect", "add", "--deliverable", name, "--bbox", ",".join(map(str, box)), "--kind", "artifact",
+                      "--note", "torn edge", *extra).stdout
+        return self.defects()[-1], out
+
+    def test_size_at_report_time_survives_a_re_approval(self):
+        self.deliverable("illus", 200, 150)
+        d1, _ = self.add("illus", self.BOX)
+        self.assertEqual(d1["image_size"], [200, 150])
+        self.deliverable("illus", 400, 300, quote="make it 400 wide")
+        self.deliverable("other", 400, 300)
+        unrelated, _ = self.add("other", self.BOX)  # same pixels, a different part of a 2x image
+        self.assertNotIn("repeat_of", unrelated)
+        self.deliverable("v9", 200, 150)
+        again, _ = self.add("v9", self.BOX)
+        self.assertEqual(again["repeat_of"], ["D1"])
+
+    def test_renamed_copy_at_the_same_size_ignores_agent_findings(self):
+        self.deliverable("poster", 200, 150)
+        self.add("poster", self.BOX)
+        self.add("poster", self.BOX, "--source", "agent")
+        self.deliverable("poster-v2", 200, 150)
+        again, _ = self.add("poster-v2", self.BOX)
+        self.assertEqual(again["repeat_of"], ["D1"])
+
+    def test_scaled_or_cropped_copy_is_matched_by_fractions_but_not_another_aspect(self):
+        self.deliverable("small", 200, 150)
+        self.add("small", self.BOX)
+        self.deliverable("big", 400, 300)
+        self.assertEqual(self.add("big", [200, 160, 300, 260])[0]["repeat_of"], ["D1"])
+        self.deliverable("crop", 200, 149)  # aspect within 1%
+        self.assertEqual(self.add("crop", self.BOX)[0]["repeat_of"], ["D1", "D2"])
+        self.deliverable("square", 150, 150)
+        self.assertNotIn("repeat_of", self.add("square", self.BOX)[0])
+
+    def test_scope_request_is_not_an_earlier_complaint(self):
+        self.deliverable("poster", 200, 150)
+        self.add("poster", self.BOX, "--kind", "scope", "--quote", "make the strip longer")
+        first, out = self.add("poster", self.BOX)
+        self.assertNotIn("repeat_of", first)
+        self.assertNotIn("already reported", out)
+        self.assertEqual(self.add("poster", self.BOX)[0]["repeat_of"], ["D2"])
+
+    def test_wide_box_around_an_earlier_small_box_is_a_repeat(self):
+        self.deliverable("poster", 200, 150)
+        self.add("poster", [100, 80, 116, 96])
+        wide, _ = self.add("poster", [60, 60, 140, 140])  # 21% of the image; IoU 0.04, center outside, old box fully inside
+        self.assertEqual(wide["repeat_of"], ["D1"])
+
+    def artwork(self, name, size, flip=False, edit=False):
+        """Two different artworks: a dark-to-light ramp with a disc, or its mirror. edit paints a small local patch."""
+        img = Image.new("RGB", (200, 200))
+        draw = ImageDraw.Draw(img)
+        for x in range(200):
+            v = (199 - x if flip else x) * 255 // 199
+            draw.line([(x, 0), (x, 199)], fill=(v, v // 2, 255 - v))
+        draw.ellipse((20, 120, 80, 180) if flip else (120, 20, 180, 80), fill=(250, 220, 40))
+        if edit: draw.rectangle((90, 90, 110, 110), fill=(0, 0, 0))
+        img = img.resize(size, Image.LANCZOS)
+        path = self.project / f"{name}.png"
+        img.save(path)
+        self.ok("approve", "deliverable", "--name", name, "--file", path, "--width", size[0], "--height", size[1], "--format", "PNG")
+
+    def test_different_artworks_of_the_same_aspect_never_match(self):
+        self.artwork("illus", (200, 200))
+        self.add("illus", [100, 80, 150, 130])
+        self.artwork("icon", (100, 100), flip=True)  # another artwork, another size, same region
+        self.assertNotIn("repeat_of", self.add("icon", [50, 40, 75, 65])[0])
+        self.artwork("other", (200, 200), flip=True)  # the icon's artwork at the illustration's size
+        self.assertEqual(self.add("other", [100, 80, 150, 130])[0]["repeat_of"], ["D2"])
+
+    def test_same_artwork_renamed_scaled_or_locally_edited_still_matches(self):
+        self.artwork("illus", (200, 200))
+        self.add("illus", [100, 80, 150, 130])
+        self.artwork("illus-v2", (200, 200), edit=True)
+        self.assertEqual(self.add("illus-v2", [100, 80, 150, 130])[0]["repeat_of"], ["D1"])
+        self.artwork("illus-2x", (400, 400), edit=True)
+        self.assertEqual(self.add("illus-2x", [200, 160, 300, 260])[0]["repeat_of"], ["D1", "D2"])
+        # A record from before fingerprints: the earlier deliverable's current file stands in for it.
+        lines = [json.loads(l) for l in (self.store / "defects.jsonl").read_text().splitlines()]
+        for d in lines: d.pop("fingerprint")
+        (self.store / "defects.jsonl").write_text("".join(json.dumps(d) + "\n" for d in lines))
+        self.artwork("illus-v3", (200, 200))
+        self.assertEqual(self.add("illus-v3", [100, 80, 150, 130])[0]["repeat_of"], ["D1", "D2", "D3"])
+        self.artwork("stranger", (200, 200), flip=True)
+        self.assertNotIn("repeat_of", self.add("stranger", [100, 80, 150, 130])[0])
+
+    def test_whole_image_box_is_not_a_repeat_of_every_earlier_defect(self):
+        self.deliverable("poster", 200, 150)
+        self.add("poster", self.BOX)
+        self.add("poster", [10, 10, 40, 40])
+        whole, _ = self.add("poster", [0, 0, 200, 150])
+        self.assertNotIn("repeat_of", whole)
+
+    def test_an_earlier_whole_image_complaint_does_not_swallow_later_ones(self):
+        self.deliverable("poster", 200, 150)
+        self.add("poster", [0, 0, 200, 150], "--kind", "color")  # "the whole poster is too warm"
+        hand, _ = self.add("poster", [20, 20, 60, 60])
+        self.assertNotIn("repeat_of", hand)
+        self.deliverable("poster-v2", 200, 150)
+        copy, _ = self.add("poster-v2", [120, 80, 170, 130])
+        self.assertNotIn("repeat_of", copy)
+        self.assertEqual(self.add("poster-v2", [125, 85, 165, 125])[0]["repeat_of"], ["D3"])
+
+    def test_flat_images_are_not_the_same_artwork_across_deliverables(self):
+        self.deliverable("white", 200, 150, color=(255, 255, 255))
+        self.add("white", self.BOX)
+        self.deliverable("grey", 200, 150, color=(128, 128, 128))
+        self.assertNotIn("repeat_of", self.add("grey", self.BOX)[0])
+        self.assertEqual(self.add("white", self.BOX)[0]["repeat_of"], ["D1"])  # the same deliverable still matches
+        module = load_module()
+        flat = module.fingerprint(Image.new("RGB", (50, 50), (40, 40, 40)))
+        self.assertGreater(module.fingerprint_distance(flat, flat), module.ARTWORK_DISTANCE)
+
+    def test_a_local_edit_keeps_the_fingerprint_within_the_threshold(self):
+        module = load_module()
+        self.artwork("a", (200, 200))
+        self.artwork("a-edit", (200, 200), edit=True)
+        self.artwork("b", (200, 200), flip=True)
+        fp = {n: module.fingerprint(Image.open(self.project / f"{n}.png")) for n in ("a", "a-edit", "b")}
+        self.assertLess(module.fingerprint_distance(fp["a"], fp["a-edit"]), module.ARTWORK_DISTANCE)
+        self.assertGreater(module.fingerprint_distance(fp["a"], fp["b"]), module.ARTWORK_DISTANCE)
+
+    def test_repeat_has_its_own_wording_on_a_never_gated_deliverable(self):
+        self.deliverable("poster", 200, 150)
+        self.add("poster", self.BOX)
+        _, out = self.add("poster", self.BOX)
+        self.assertNotIn("after delivery", out)
+        self.assertIn("pointed at the same region again", out)
+        for did in ("D1", "D2"):
+            self.ok("defect", "close", "--id", did, "--status", "wontfix", "--note", "ok", "--quote", "leave it")
+        run = self.run_cli("gate", "--deliverable", "poster")
+        self.assertEqual(run.returncode, 1)
+        self.assertNotIn("reported after delivery", run.stdout)
+        self.assertIn("D2 repeats D1 (the user pointed at the same region again) and has no lesson", run.stdout)
 
 
 if __name__ == "__main__":
