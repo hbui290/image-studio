@@ -80,6 +80,8 @@ LESSONS_SHOWN = 5      # lessons printed in the session card and brief
 TASTE_SHOWN = 6        # taste notes printed in the session card and brief
 CONSTRUCTION_SHOWN = 3  # construction rules printed in the session card and brief
 REPEAT_IOU = 0.1       # defect add: a user box this close to an earlier one (or centered in it) is a repeat (bench/score.py's rule)
+REPEAT_INSIDE = 0.6    # defect add: ... or this share of the earlier box lies inside the new one (a wider box around it)
+REPEAT_ASPECT = 0.02   # defect add: images whose w/h differ by at most this share are copies of one artwork (compared as fractions)
 BRAND_CAP = 4000        # characters in one brand.json
 LONG_CHAT_BYTES = 25 << 20  # a transcript this large resends a long history on every step
 HEX_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -507,23 +509,40 @@ def parse_bbox(values, label="--bbox"):
 
 
 def same_region(new, old):
-    """bench/score.py's hit rule: IoU >= 0.1, or the new box's center lies inside the old box."""
+    """bench/score.py's hit rule (IoU >= 0.1, or the new box's center inside the old box), plus an old box lying
+    mostly inside a wider new box. Boxes may be fractions of the image."""
     w, h = min(new[2], old[2]) - max(new[0], old[0]), min(new[3], old[3]) - max(new[1], old[1])
     inter = w * h if w > 0 and h > 0 else 0
-    union = (new[2] - new[0]) * (new[3] - new[1]) + (old[2] - old[0]) * (old[3] - old[1]) - inter
+    old_area = (old[2] - old[0]) * (old[3] - old[1])
+    union = (new[2] - new[0]) * (new[3] - new[1]) + old_area - inter
     cx, cy = (new[0] + new[2]) / 2, (new[1] + new[3]) / 2
-    return (union > 0 and inter / union >= REPEAT_IOU) or (old[0] <= cx <= old[2] and old[1] <= cy <= old[3])
+    return ((union > 0 and inter / union >= REPEAT_IOU) or (old[0] <= cx <= old[2] and old[1] <= cy <= old[3])
+            or (old_area > 0 and inter / old_area >= REPEAT_INSIDE))
 
 
-def repeated(store, spec, box, defects):
-    """IDs of earlier defects (any status) on a deliverable of the same size whose box covers the same region."""
-    size = (spec.get("width"), spec.get("height"))
+def defect_size(store, d):
+    """The image size a defect was reported on; older records fall back to their deliverable's current spec."""
+    size = d.get("image_size")
+    if not isinstance(size, list) or len(size) != 2:
+        spec = (store.state["deliverables"].get(d.get("deliverable")) or {}).get("spec") or {}
+        size = [spec.get("width"), spec.get("height")]
+    return size if all(isinstance(v, int) and v > 0 for v in size) else None
+
+
+def repeated(store, size, box, defects):
+    """IDs of earlier user complaints (any status) on the same region of the same artwork: the same size, or a copy
+    whose aspect is within 2% (an upscale or a small crop), compared as fractions of the image. Agent findings and
+    scope requests with the user's words are not complaints."""
+    w, h = size
+    new = [box[0] / w, box[1] / h, box[2] / w, box[3] / h]
     out = []
     for d in defects:
-        other = (store.state["deliverables"].get(d.get("deliverable")) or {}).get("spec") or {}
-        old = d.get("bbox")
-        if (other.get("width"), other.get("height")) != size or not isinstance(old, list) or len(old) != 4: continue
-        if all(isinstance(v, int) for v in old) and same_region(box, old): out.append(d["id"])
+        if d.get("source") == "agent" or (d.get("kind") == "scope" and d.get("quote")): continue
+        old, old_size = d.get("bbox"), defect_size(store, d)
+        if old_size is None or not isinstance(old, list) or len(old) != 4 or not all(isinstance(v, int) for v in old): continue
+        ow, oh = old_size
+        if abs(ow / oh - w / h) > REPEAT_ASPECT * (w / h): continue
+        if same_region(new, [old[0] / ow, old[1] / oh, old[2] / ow, old[3] / oh]): out.append(d["id"])
     return out
 
 
@@ -549,6 +568,7 @@ def cmd_defect_add(args):
     try:
         image = target_image(path, spec, record)
         record["region_hash"] = region_hash(image, box)
+        record["image_size"] = [image.size[0], image.size[1]]
         reported = region_crop(image, box)
     except UsageError: raise
     except Exception as exc: raise UsageError(f"cannot read the defect region from {path.name}: {exc}") from None
@@ -571,7 +591,7 @@ def cmd_defect_add(args):
     after_delivery = args.source == "user" and not request and gate_is_valid(store, args.deliverable, defects)
     if after_delivery: record["needs_lesson"] = True
     # The user pointing at a region again means patching strokes failed: work out how the object is built.
-    repeat = repeated(store, spec, box, defects) if args.source == "user" and not request else []
+    repeat = repeated(store, image.size, box, defects) if args.source == "user" and not request else []
     if repeat: record.update(repeat_of=repeat, needs_construction=True, needs_lesson=True)
     numbers = [int(m.group(1)) for m in (DEFECT_ID_RE.match(d["id"]) for d in defects) if m]
     record["id"] = f"D{max(numbers, default=0) + 1}"
@@ -591,9 +611,10 @@ def cmd_defect_add(args):
               "photos of the same action, confirm them with the user, then rebuild the whole part from that rule. Record it:\n"
               f"{SCRIPT_HINT} construction add --defect {record['id']} --object \"...\" --rule \"...\" --ref FILE   "
               "(or --quote \"the user's words explaining it\")")
+        print(f"The user pointed at the same region again, so this is a miss. Record what to do differently:\n{lesson_cmd}")
     if after_delivery:
-        print(f"{args.deliverable} had passed the gate, so this is a miss after delivery. Record what to do differently:\n{lesson_cmd}")
-    elif repeat: print(f"The user had to point at it again, so this is a miss. Record what to do differently:\n{lesson_cmd}")
+        print(f"{args.deliverable} had passed the gate, so this is a miss after delivery. Record what to do differently"
+              + (" (the lesson above covers it)." if repeat else f":\n{lesson_cmd}"))
     return 0
 
 
@@ -1405,7 +1426,9 @@ def cmd_gate(args):
     lessons = read_lessons()
     for defect in defects:
         if defect.get("needs_lesson") and not lesson_linked(lessons, store.root, defect["id"]):
-            report.fail(f"{defect['id']} was reported after delivery and has no lesson: run lesson add --defect {defect['id']} "
+            why = (f"repeats {', '.join(map(str, defect['repeat_of']))} (the user pointed at the same region again)"
+                   if defect.get("repeat_of") else "was reported after delivery")
+            report.fail(f"{defect['id']} {why} and has no lesson: run lesson add --defect {defect['id']} "
                         "--mistake ... --cause ... --check ...")
     constructions = store.constructions() if any(d.get("needs_construction") for d in defects) else []
     for defect in defects:
@@ -2646,9 +2669,10 @@ subcommands:
   approve deliverable --name N --file F [--width W --height H --format PNG|JPEG|WEBP|ZIP] [--alpha required|forbidden|any] [--quote T]
                                          example: python3 studio_state.py approve deliverable --name poster --file poster.png --width 1200 --height 800 --format PNG
   defect add --deliverable N --bbox x0,y0,x1,y1 --kind logo|seam|artifact|scope|color|other --note T [--source user|agent] [--quote T] [--wide]
-                                         a user box on the region of an earlier defect (any status, same-size deliverable; IoU >= 0.1 or its
-                                         center inside) is a repeat: it records repeat_of and needs a lesson and a construction rule
-                                         (scope requests with --quote and agent defects never are)
+                                         records image_size; a user box on the region of an earlier user complaint (any status; same
+                                         image size, or w/h within 2% compared as fractions; IoU >= 0.1, its center inside the old box,
+                                         or 60% of the old box inside it) is a repeat: it records repeat_of and needs a lesson and a
+                                         construction rule (agent defects and scope requests with --quote never are, nor match)
                                          example: python3 studio_state.py defect add --deliverable poster --bbox 100,50,200,150 --kind seam --note "visible seam"
   defect close --id D1 --status resolved|wontfix --note T [--quote T]
                                          example: python3 studio_state.py defect close --id D1 --status resolved --note "feathered seam"

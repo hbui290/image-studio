@@ -2580,5 +2580,83 @@ class ConstructionTests(StudioBase):
         self.assertIn("torn top strip", card)
 
 
+class RepeatMatchTests(StudioBase):
+    """Which earlier reports count, across renamed, re-approved, and rescaled copies of the same artwork."""
+
+    BOX = [100, 80, 150, 130]  # on a 200x150 image
+
+    def setUp(self):
+        super().setUp()
+        self.init()
+
+    def deliverable(self, name, w, h, quote=None):
+        path = self.project / f"{name}-{w}x{h}.png"
+        Image.new("RGB", (w, h), (255, 255, 255)).save(path)
+        extra = ["--quote", quote] if quote else []
+        self.ok("approve", "deliverable", "--name", name, "--file", path, "--width", w, "--height", h, "--format", "PNG", *extra)
+
+    def add(self, name, box, *extra):
+        out = self.ok("defect", "add", "--deliverable", name, "--bbox", ",".join(map(str, box)), "--kind", "artifact",
+                      "--note", "torn edge", *extra).stdout
+        return self.defects()[-1], out
+
+    def test_size_at_report_time_survives_a_re_approval(self):
+        self.deliverable("illus", 200, 150)
+        d1, _ = self.add("illus", self.BOX)
+        self.assertEqual(d1["image_size"], [200, 150])
+        self.deliverable("illus", 400, 300, quote="make it 400 wide")
+        self.deliverable("other", 400, 300)
+        unrelated, _ = self.add("other", self.BOX)  # same pixels, a different part of a 2x image
+        self.assertNotIn("repeat_of", unrelated)
+        self.deliverable("v9", 200, 150)
+        again, _ = self.add("v9", self.BOX)
+        self.assertEqual(again["repeat_of"], ["D1"])
+
+    def test_renamed_copy_at_the_same_size_ignores_agent_findings(self):
+        self.deliverable("poster", 200, 150)
+        self.add("poster", self.BOX)
+        self.add("poster", self.BOX, "--source", "agent")
+        self.deliverable("poster-v2", 200, 150)
+        again, _ = self.add("poster-v2", self.BOX)
+        self.assertEqual(again["repeat_of"], ["D1"])
+
+    def test_scaled_or_cropped_copy_is_matched_by_fractions_but_not_another_aspect(self):
+        self.deliverable("small", 200, 150)
+        self.add("small", self.BOX)
+        self.deliverable("big", 400, 300)
+        self.assertEqual(self.add("big", [200, 160, 300, 260])[0]["repeat_of"], ["D1"])
+        self.deliverable("crop", 200, 149)  # aspect within 1%
+        self.assertEqual(self.add("crop", self.BOX)[0]["repeat_of"], ["D1", "D2"])
+        self.deliverable("square", 150, 150)
+        self.assertNotIn("repeat_of", self.add("square", self.BOX)[0])
+
+    def test_scope_request_is_not_an_earlier_complaint(self):
+        self.deliverable("poster", 200, 150)
+        self.add("poster", self.BOX, "--kind", "scope", "--quote", "make the strip longer")
+        first, out = self.add("poster", self.BOX)
+        self.assertNotIn("repeat_of", first)
+        self.assertNotIn("already reported", out)
+        self.assertEqual(self.add("poster", self.BOX)[0]["repeat_of"], ["D2"])
+
+    def test_wide_box_around_an_earlier_small_box_is_a_repeat(self):
+        self.deliverable("poster", 200, 150)
+        self.add("poster", [100, 80, 130, 110])
+        wide, _ = self.add("poster", [10, 10, 190, 140])  # IoU 0.04, center outside, old box fully inside
+        self.assertEqual(wide["repeat_of"], ["D1"])
+
+    def test_repeat_has_its_own_wording_on_a_never_gated_deliverable(self):
+        self.deliverable("poster", 200, 150)
+        self.add("poster", self.BOX)
+        _, out = self.add("poster", self.BOX)
+        self.assertNotIn("after delivery", out)
+        self.assertIn("pointed at the same region again", out)
+        for did in ("D1", "D2"):
+            self.ok("defect", "close", "--id", did, "--status", "wontfix", "--note", "ok", "--quote", "leave it")
+        run = self.run_cli("gate", "--deliverable", "poster")
+        self.assertEqual(run.returncode, 1)
+        self.assertNotIn("reported after delivery", run.stdout)
+        self.assertIn("D2 repeats D1 (the user pointed at the same region again) and has no lesson", run.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
