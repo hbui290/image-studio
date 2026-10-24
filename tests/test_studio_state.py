@@ -2640,9 +2640,63 @@ class RepeatMatchTests(StudioBase):
 
     def test_wide_box_around_an_earlier_small_box_is_a_repeat(self):
         self.deliverable("poster", 200, 150)
-        self.add("poster", [100, 80, 130, 110])
-        wide, _ = self.add("poster", [10, 10, 190, 140])  # IoU 0.04, center outside, old box fully inside
+        self.add("poster", [100, 80, 116, 96])
+        wide, _ = self.add("poster", [60, 60, 140, 140])  # 21% of the image; IoU 0.04, center outside, old box fully inside
         self.assertEqual(wide["repeat_of"], ["D1"])
+
+    def artwork(self, name, size, flip=False, edit=False):
+        """Two different artworks: a dark-to-light ramp with a disc, or its mirror. edit paints a small local patch."""
+        img = Image.new("RGB", (200, 200))
+        draw = ImageDraw.Draw(img)
+        for x in range(200):
+            v = (199 - x if flip else x) * 255 // 199
+            draw.line([(x, 0), (x, 199)], fill=(v, v // 2, 255 - v))
+        draw.ellipse((20, 120, 80, 180) if flip else (120, 20, 180, 80), fill=(250, 220, 40))
+        if edit: draw.rectangle((90, 90, 110, 110), fill=(0, 0, 0))
+        img = img.resize(size, Image.LANCZOS)
+        path = self.project / f"{name}.png"
+        img.save(path)
+        self.ok("approve", "deliverable", "--name", name, "--file", path, "--width", size[0], "--height", size[1], "--format", "PNG")
+
+    def test_different_artworks_of_the_same_aspect_never_match(self):
+        self.artwork("illus", (200, 200))
+        self.add("illus", [100, 80, 150, 130])
+        self.artwork("icon", (100, 100), flip=True)  # another artwork, another size, same region
+        self.assertNotIn("repeat_of", self.add("icon", [50, 40, 75, 65])[0])
+        self.artwork("other", (200, 200), flip=True)  # the icon's artwork at the illustration's size
+        self.assertEqual(self.add("other", [100, 80, 150, 130])[0]["repeat_of"], ["D2"])
+
+    def test_same_artwork_renamed_scaled_or_locally_edited_still_matches(self):
+        self.artwork("illus", (200, 200))
+        self.add("illus", [100, 80, 150, 130])
+        self.artwork("illus-v2", (200, 200), edit=True)
+        self.assertEqual(self.add("illus-v2", [100, 80, 150, 130])[0]["repeat_of"], ["D1"])
+        self.artwork("illus-2x", (400, 400), edit=True)
+        self.assertEqual(self.add("illus-2x", [200, 160, 300, 260])[0]["repeat_of"], ["D1", "D2"])
+        # A record from before fingerprints: the earlier deliverable's current file stands in for it.
+        lines = [json.loads(l) for l in (self.store / "defects.jsonl").read_text().splitlines()]
+        for d in lines: d.pop("fingerprint")
+        (self.store / "defects.jsonl").write_text("".join(json.dumps(d) + "\n" for d in lines))
+        self.artwork("illus-v3", (200, 200))
+        self.assertEqual(self.add("illus-v3", [100, 80, 150, 130])[0]["repeat_of"], ["D1", "D2", "D3"])
+        self.artwork("stranger", (200, 200), flip=True)
+        self.assertNotIn("repeat_of", self.add("stranger", [100, 80, 150, 130])[0])
+
+    def test_whole_image_box_is_not_a_repeat_of_every_earlier_defect(self):
+        self.deliverable("poster", 200, 150)
+        self.add("poster", self.BOX)
+        self.add("poster", [10, 10, 40, 40])
+        whole, _ = self.add("poster", [0, 0, 200, 150])
+        self.assertNotIn("repeat_of", whole)
+
+    def test_a_local_edit_keeps_the_fingerprint_within_the_threshold(self):
+        module = load_module()
+        self.artwork("a", (200, 200))
+        self.artwork("a-edit", (200, 200), edit=True)
+        self.artwork("b", (200, 200), flip=True)
+        fp = {n: module.fingerprint(Image.open(self.project / f"{n}.png")) for n in ("a", "a-edit", "b")}
+        self.assertLess(module.fingerprint_distance(fp["a"], fp["a-edit"]), module.ARTWORK_DISTANCE)
+        self.assertGreater(module.fingerprint_distance(fp["a"], fp["b"]), module.ARTWORK_DISTANCE)
 
     def test_repeat_has_its_own_wording_on_a_never_gated_deliverable(self):
         self.deliverable("poster", 200, 150)

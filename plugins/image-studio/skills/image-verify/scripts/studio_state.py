@@ -18,6 +18,7 @@ numpy and OpenCV are optional (see accel.py); --engine pillow|fast or IMAGE_STUD
 """
 
 import argparse
+import base64
 import hashlib
 import io
 import json
@@ -81,7 +82,12 @@ TASTE_SHOWN = 6        # taste notes printed in the session card and brief
 CONSTRUCTION_SHOWN = 3  # construction rules printed in the session card and brief
 REPEAT_IOU = 0.1       # defect add: a user box this close to an earlier one (or centered in it) is a repeat (bench/score.py's rule)
 REPEAT_INSIDE = 0.6    # defect add: ... or this share of the earlier box lies inside the new one (a wider box around it)
-REPEAT_ASPECT = 0.02   # defect add: images whose w/h differ by at most this share are copies of one artwork (compared as fractions)
+REPEAT_ASPECT = 0.02   # defect add: images whose w/h differ by at most this share can be copies of one artwork (compared as fractions)
+FINGERPRINT_SIDE = 16  # defect add: whole-image grayscale thumbnail (side x side, aspect squashed) stored on each defect
+# Fingerprint distance (mean |difference| after normalizing mean and contrast, 0-255 scale) at or under which two images are
+# one artwork. Calibrated on real data: 8 versions of one 1254x1254 illustration after many local repairs plus 2x, 512 px
+# and 1254x1250 copies scored 0.0-9.8; 12 unrelated square artworks (shared banner template included) scored 34.5-87.5.
+ARTWORK_DISTANCE = 18
 BRAND_CAP = 4000        # characters in one brand.json
 LONG_CHAT_BYTES = 25 << 20  # a transcript this large resends a long history on every step
 HEX_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -249,7 +255,7 @@ def pil():
         raise UsageError("Pillow is required: uv run --with pillow python3 ... (or pip install pillow)") from None
     res = getattr(Image, "Resampling", Image)
     return types.SimpleNamespace(Image=Image, ImageChops=ImageChops, ImageDraw=ImageDraw, ImageFilter=ImageFilter, ImageStat=ImageStat,
-                                 PngImagePlugin=PngImagePlugin, NEAREST=res.NEAREST, BILINEAR=res.BILINEAR)
+                                 PngImagePlugin=PngImagePlugin, NEAREST=res.NEAREST, BILINEAR=res.BILINEAR, BOX=res.BOX)
 
 
 # ---------------------------------------------------------------- store
@@ -510,14 +516,32 @@ def parse_bbox(values, label="--bbox"):
 
 def same_region(new, old):
     """bench/score.py's hit rule (IoU >= 0.1, or the new box's center inside the old box), plus an old box lying
-    mostly inside a wider new box. Boxes may be fractions of the image."""
+    mostly inside a wider new box that still covers at most a quarter of the image. Boxes are fractions of the image."""
     w, h = min(new[2], old[2]) - max(new[0], old[0]), min(new[3], old[3]) - max(new[1], old[1])
     inter = w * h if w > 0 and h > 0 else 0
-    old_area = (old[2] - old[0]) * (old[3] - old[1])
-    union = (new[2] - new[0]) * (new[3] - new[1]) + old_area - inter
+    new_area, old_area = (new[2] - new[0]) * (new[3] - new[1]), (old[2] - old[0]) * (old[3] - old[1])
+    union = new_area + old_area - inter
     cx, cy = (new[0] + new[2]) / 2, (new[1] + new[3]) / 2
     return ((union > 0 and inter / union >= REPEAT_IOU) or (old[0] <= cx <= old[2] and old[1] <= cy <= old[3])
-            or (old_area > 0 and inter / old_area >= REPEAT_INSIDE))
+            or (new_area <= WIDE_BOX_SHARE and old_area > 0 and inter / old_area >= REPEAT_INSIDE))
+
+
+def fingerprint(img):
+    """Whole-image grayscale thumbnail as base64 bytes: tells copies of one artwork from different artworks."""
+    small = img.convert("L").resize((FINGERPRINT_SIDE, FINGERPRINT_SIDE), pil().BOX)
+    return base64.b64encode(small.tobytes()).decode("ascii")
+
+
+def fingerprint_distance(a, b):
+    """Mean |difference| of two fingerprints after normalizing each to mean 128 and standard deviation 64."""
+    def normal(text):
+        values = list(base64.b64decode(text))
+        mean = sum(values) / len(values)
+        std = (sum((v - mean) ** 2 for v in values) / len(values)) ** 0.5 or 1.0
+        return [(v - mean) / std * 64 for v in values]
+    x, y = normal(a), normal(b)
+    if len(x) != len(y): return float("inf")
+    return sum(abs(p - q) for p, q in zip(x, y)) / len(x)
 
 
 def defect_size(store, d):
@@ -529,20 +553,38 @@ def defect_size(store, d):
     return size if all(isinstance(v, int) and v > 0 for v in size) else None
 
 
-def repeated(store, size, box, defects):
-    """IDs of earlier user complaints (any status) on the same region of the same artwork: the same size, or a copy
-    whose aspect is within 2% (an upscale or a small crop), compared as fractions of the image. Agent findings and
-    scope requests with the user's words are not complaints."""
+def defect_fingerprint(store, d, cache):
+    """The fingerprint a defect was reported with; older records use their deliverable's current file, else None."""
+    if isinstance(d.get("fingerprint"), str): return d["fingerprint"]
+    name = d.get("deliverable")
+    if name not in cache:
+        item = store.state["deliverables"].get(name) or {}
+        try: cache[name] = fingerprint(target_image(store.resolve(item.get("path", "")), item.get("spec") or {}, d))
+        except UsageError: raise
+        except Exception: cache[name] = None
+    return cache[name]
+
+
+def repeated(store, name, size, print_, box, defects):
+    """IDs of earlier user complaints (any status) on the same region of the same artwork, compared as fractions of the
+    image. Same artwork: the same deliverable, or another one whose aspect is within 2% (an upscale or a small crop) and
+    whose fingerprint is within ARTWORK_DISTANCE. Agent findings and scope requests with the user's words are not complaints."""
     w, h = size
     new = [box[0] / w, box[1] / h, box[2] / w, box[3] / h]
-    out = []
+    out, cache = [], {}
     for d in defects:
         if d.get("source") == "agent" or (d.get("kind") == "scope" and d.get("quote")): continue
         old, old_size = d.get("bbox"), defect_size(store, d)
         if old_size is None or not isinstance(old, list) or len(old) != 4 or not all(isinstance(v, int) for v in old): continue
         ow, oh = old_size
         if abs(ow / oh - w / h) > REPEAT_ASPECT * (w / h): continue
-        if same_region(new, [old[0] / ow, old[1] / oh, old[2] / ow, old[3] / oh]): out.append(d["id"])
+        if not same_region(new, [old[0] / ow, old[1] / oh, old[2] / ow, old[3] / oh]): continue
+        if d.get("deliverable") != name:
+            old_print = defect_fingerprint(store, d, cache)
+            try: close = old_print is not None and fingerprint_distance(print_, old_print) <= ARTWORK_DISTANCE
+            except ValueError: close = False  # a hand-edited fingerprint that is not base64
+            if not close: continue
+        out.append(d["id"])
     return out
 
 
@@ -569,6 +611,7 @@ def cmd_defect_add(args):
         image = target_image(path, spec, record)
         record["region_hash"] = region_hash(image, box)
         record["image_size"] = [image.size[0], image.size[1]]
+        record["fingerprint"] = fingerprint(image)
         reported = region_crop(image, box)
     except UsageError: raise
     except Exception as exc: raise UsageError(f"cannot read the defect region from {path.name}: {exc}") from None
@@ -591,7 +634,7 @@ def cmd_defect_add(args):
     after_delivery = args.source == "user" and not request and gate_is_valid(store, args.deliverable, defects)
     if after_delivery: record["needs_lesson"] = True
     # The user pointing at a region again means patching strokes failed: work out how the object is built.
-    repeat = repeated(store, image.size, box, defects) if args.source == "user" and not request else []
+    repeat = repeated(store, args.deliverable, image.size, record["fingerprint"], box, defects) if args.source == "user" and not request else []
     if repeat: record.update(repeat_of=repeat, needs_construction=True, needs_lesson=True)
     numbers = [int(m.group(1)) for m in (DEFECT_ID_RE.match(d["id"]) for d in defects) if m]
     record["id"] = f"D{max(numbers, default=0) + 1}"
@@ -2669,10 +2712,12 @@ subcommands:
   approve deliverable --name N --file F [--width W --height H --format PNG|JPEG|WEBP|ZIP] [--alpha required|forbidden|any] [--quote T]
                                          example: python3 studio_state.py approve deliverable --name poster --file poster.png --width 1200 --height 800 --format PNG
   defect add --deliverable N --bbox x0,y0,x1,y1 --kind logo|seam|artifact|scope|color|other --note T [--source user|agent] [--quote T] [--wide]
-                                         records image_size; a user box on the region of an earlier user complaint (any status; same
-                                         image size, or w/h within 2% compared as fractions; IoU >= 0.1, its center inside the old box,
-                                         or 60% of the old box inside it) is a repeat: it records repeat_of and needs a lesson and a
-                                         construction rule (agent defects and scope requests with --quote never are, nor match)
+                                         records image_size and a 16x16 gray fingerprint; a user box on the region of an earlier user
+                                         complaint (any status) on the same artwork is a repeat: it records repeat_of and needs a lesson and
+                                         a construction rule. Same artwork: the same deliverable, or w/h within 2% and fingerprints within 18.
+                                         Same region, as fractions of the image: IoU >= 0.1, its center inside the old box, or (new box
+                                         at most 25% of the image) 60% of the old box inside it. Agent defects and scope requests with
+                                         --quote never are repeats, nor earlier complaints
                                          example: python3 studio_state.py defect add --deliverable poster --bbox 100,50,200,150 --kind seam --note "visible seam"
   defect close --id D1 --status resolved|wontfix --note T [--quote T]
                                          example: python3 studio_state.py defect close --id D1 --status resolved --note "feathered seam"
