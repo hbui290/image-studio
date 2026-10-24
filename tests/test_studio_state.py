@@ -2511,7 +2511,7 @@ class ConstructionTests(StudioBase):
         self.assertTrue(d2["needs_lesson"])
         for text in ("already reported (D1)", "construction-reference.md", "construction add --defect D2", "lesson add --defect D2"):
             self.assertIn(text, out)
-        self.add([10, 10, 110, 110])  # D3 overlaps D1 and D2
+        self.add([10, 10, 90, 90])    # D3 (21% of the image) overlaps D1 and D2
         self.assertEqual(self.defects()[2]["repeat_of"], ["D1", "D2"])
         self.add([55, 55, 75, 75])    # D4: IoU under 0.1 with D2 and D3, but its center is inside both; D1 is missed
         self.assertEqual(self.defects()[3]["repeat_of"], ["D2", "D3"])
@@ -2589,9 +2589,16 @@ class RepeatMatchTests(StudioBase):
         super().setUp()
         self.init()
 
-    def deliverable(self, name, w, h, quote=None):
+    def deliverable(self, name, w, h, quote=None, color=None):
+        """One artwork (a ramp with a disc) at any size, or a flat single-color image when color is given."""
         path = self.project / f"{name}-{w}x{h}.png"
-        Image.new("RGB", (w, h), (255, 255, 255)).save(path)
+        img = Image.new("RGB", (200, 150), color or (0, 0, 0))
+        if color is None:
+            draw = ImageDraw.Draw(img)
+            for x in range(200):
+                draw.line([(x, 0), (x, 149)], fill=(x * 255 // 199, 90, 255 - x * 255 // 199))
+            draw.ellipse((120, 20, 180, 80), fill=(250, 220, 40))
+        img.resize((w, h), Image.LANCZOS).save(path)
         extra = ["--quote", quote] if quote else []
         self.ok("approve", "deliverable", "--name", name, "--file", path, "--width", w, "--height", h, "--format", "PNG", *extra)
 
@@ -2688,6 +2695,26 @@ class RepeatMatchTests(StudioBase):
         self.add("poster", [10, 10, 40, 40])
         whole, _ = self.add("poster", [0, 0, 200, 150])
         self.assertNotIn("repeat_of", whole)
+
+    def test_an_earlier_whole_image_complaint_does_not_swallow_later_ones(self):
+        self.deliverable("poster", 200, 150)
+        self.add("poster", [0, 0, 200, 150], "--kind", "color")  # "the whole poster is too warm"
+        hand, _ = self.add("poster", [20, 20, 60, 60])
+        self.assertNotIn("repeat_of", hand)
+        self.deliverable("poster-v2", 200, 150)
+        copy, _ = self.add("poster-v2", [120, 80, 170, 130])
+        self.assertNotIn("repeat_of", copy)
+        self.assertEqual(self.add("poster-v2", [125, 85, 165, 125])[0]["repeat_of"], ["D3"])
+
+    def test_flat_images_are_not_the_same_artwork_across_deliverables(self):
+        self.deliverable("white", 200, 150, color=(255, 255, 255))
+        self.add("white", self.BOX)
+        self.deliverable("grey", 200, 150, color=(128, 128, 128))
+        self.assertNotIn("repeat_of", self.add("grey", self.BOX)[0])
+        self.assertEqual(self.add("white", self.BOX)[0]["repeat_of"], ["D1"])  # the same deliverable still matches
+        module = load_module()
+        flat = module.fingerprint(Image.new("RGB", (50, 50), (40, 40, 40)))
+        self.assertGreater(module.fingerprint_distance(flat, flat), module.ARTWORK_DISTANCE)
 
     def test_a_local_edit_keeps_the_fingerprint_within_the_threshold(self):
         module = load_module()

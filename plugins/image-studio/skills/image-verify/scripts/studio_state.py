@@ -84,6 +84,7 @@ REPEAT_IOU = 0.1       # defect add: a user box this close to an earlier one (or
 REPEAT_INSIDE = 0.6    # defect add: ... or this share of the earlier box lies inside the new one (a wider box around it)
 REPEAT_ASPECT = 0.02   # defect add: images whose w/h differ by at most this share can be copies of one artwork (compared as fractions)
 FINGERPRINT_SIDE = 16  # defect add: whole-image grayscale thumbnail (side x side, aspect squashed) stored on each defect
+FINGERPRINT_FLAT_STD = 2.0  # a fingerprint whose gray values spread less than this (std, 0-255) is flat: artwork unknown
 # Fingerprint distance (mean |difference| after normalizing mean and contrast, 0-255 scale) at or under which two images are
 # one artwork. Calibrated on real data: 8 versions of one 1254x1254 illustration after many local repairs plus 2x, 512 px
 # and 1254x1250 copies scored 0.0-9.8; 12 unrelated square artworks (shared banner template included) scored 34.5-87.5.
@@ -515,14 +516,16 @@ def parse_bbox(values, label="--bbox"):
 
 
 def same_region(new, old):
-    """bench/score.py's hit rule (IoU >= 0.1, or the new box's center inside the old box), plus an old box lying
-    mostly inside a wider new box that still covers at most a quarter of the image. Boxes are fractions of the image."""
+    """IoU >= 0.1; or the new box's center inside an old box that covers at most a quarter of the image (bench/score.py's
+    rule, minus whole-image complaints, which would swallow every later one); or an old box lying mostly inside a wider
+    new box that covers at most a quarter of the image. Boxes are fractions of the image."""
     w, h = min(new[2], old[2]) - max(new[0], old[0]), min(new[3], old[3]) - max(new[1], old[1])
     inter = w * h if w > 0 and h > 0 else 0
     new_area, old_area = (new[2] - new[0]) * (new[3] - new[1]), (old[2] - old[0]) * (old[3] - old[1])
     union = new_area + old_area - inter
     cx, cy = (new[0] + new[2]) / 2, (new[1] + new[3]) / 2
-    return ((union > 0 and inter / union >= REPEAT_IOU) or (old[0] <= cx <= old[2] and old[1] <= cy <= old[3])
+    return ((union > 0 and inter / union >= REPEAT_IOU)
+            or (old_area <= WIDE_BOX_SHARE and old[0] <= cx <= old[2] and old[1] <= cy <= old[3])
             or (new_area <= WIDE_BOX_SHARE and old_area > 0 and inter / old_area >= REPEAT_INSIDE))
 
 
@@ -533,14 +536,15 @@ def fingerprint(img):
 
 
 def fingerprint_distance(a, b):
-    """Mean |difference| of two fingerprints after normalizing each to mean 128 and standard deviation 64."""
+    """Mean |difference| of two fingerprints after normalizing each to mean 128 and standard deviation 64. A flat
+    fingerprint (spread under FINGERPRINT_FLAT_STD gray levels) has no shape to compare: the distance is infinite."""
     def normal(text):
         values = list(base64.b64decode(text))
-        mean = sum(values) / len(values)
-        std = (sum((v - mean) ** 2 for v in values) / len(values)) ** 0.5 or 1.0
-        return [(v - mean) / std * 64 for v in values]
+        mean = sum(values) / len(values) if values else 0
+        std = (sum((v - mean) ** 2 for v in values) / len(values)) ** 0.5 if values else 0
+        return [(v - mean) / std * 64 for v in values] if std >= FINGERPRINT_FLAT_STD else None
     x, y = normal(a), normal(b)
-    if len(x) != len(y): return float("inf")
+    if x is None or y is None or len(x) != len(y): return float("inf")
     return sum(abs(p - q) for p, q in zip(x, y)) / len(x)
 
 
@@ -2714,9 +2718,10 @@ subcommands:
   defect add --deliverable N --bbox x0,y0,x1,y1 --kind logo|seam|artifact|scope|color|other --note T [--source user|agent] [--quote T] [--wide]
                                          records image_size and a 16x16 gray fingerprint; a user box on the region of an earlier user
                                          complaint (any status) on the same artwork is a repeat: it records repeat_of and needs a lesson and
-                                         a construction rule. Same artwork: the same deliverable, or w/h within 2% and fingerprints within 18.
-                                         Same region, as fractions of the image: IoU >= 0.1, its center inside the old box, or (new box
-                                         at most 25% of the image) 60% of the old box inside it. Agent defects and scope requests with
+                                         a construction rule. Same artwork: the same deliverable, or w/h within 2% and fingerprints within 18
+                                         (a flat, single-color fingerprint matches nothing). Same region, as fractions of the image:
+                                         IoU >= 0.1, its center inside an old box of at most 25% of the image, or (new box at most 25%
+                                         of the image) 60% of the old box inside it. Agent defects and scope requests with
                                          --quote never are repeats, nor earlier complaints
                                          example: python3 studio_state.py defect add --deliverable poster --bbox 100,50,200,150 --kind seam --note "visible seam"
   defect close --id D1 --status resolved|wontfix --note T [--quote T]
