@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.24.0-local.1 (2026-10-24)
+
+Repeat-region escalation and construction rules. In a real session the user pointed at the same torn booster pack about ten times while the agent patched one stroke at a time, misread how the tear works, looked for reference photos only when asked, and recorded no defect or lesson. No new dependency.
+
+- **Repeat in `defect add`:** a `--source user` box on the region of an earlier defect (any status, on a deliverable of the same width and height; IoU >= 0.1 or the new box's center inside the old one, the hit rule of `bench/score.py`) records `repeat_of`, `needs_construction` and `needs_lesson`, and prints "Repeat: this region was already reported (D<n>)" with the `construction add` and `lesson add` commands. Agent defects and `scope` requests with the user's words never count.
+- **`construction add --defect D<n> --object T --rule T (--ref FILE ... | --quote T)` and `construction list`:** how an object is physically built, stored in the store's `construction.jsonl` with each reference's path and sha256. Each `--ref` must be a readable image; an unknown defect, no reference and no quote, or an unreadable reference exits 2. The session-start card and `brief` show the 3 newest rules.
+- **Gate:** a repeat defect without a construction rule fails `gate` (and counts as not passed in the card and the stop hook), like a missing lesson.
+- **`image-verify/references/construction-reference.md`:** when to research a mechanism (tear, fold, grip, stacked cards, straps, hinges, cloth, liquids; a second rejection of a region; "did you research references?"), how (hypothesis sentence, 3-5 real photos of the same action, a reference board the user confirms, `construction add`, rebuild the whole part and check every clause), references never used as pixels, and a stop after two failed rebuilds. Linked from image-repair, image-loop, image-create and project-memory.
+- **Fresh reviewers on Codex:** designer-review and independent-review say how to run the hunter and reviewer as a fresh `spawn_agent` sub-agent from `agents/image-hunter.md` and `agents/image-reviewer.md`, and to label a same-context review a self-review.
+
 ## 2.23.1-local.1 (2026-10-20)
 
 - `image-repair/references/tool-readiness.md` lists the optional numpy + OpenCV engine and Playwright + Chromium, with their install commands, matching the README Tools table.

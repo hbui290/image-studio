@@ -2,7 +2,7 @@
 """Project memory and evidence gate for image-studio.
 
 Keeps a per-project store in `<project>/.image-studio/` (approved deliverables,
-user decisions, and every defect ever reported) and a bounded user preference
+user decisions, every defect ever reported, and construction rules) and a bounded user preference
 file in `${IMAGE_STUDIO_HOME:-~/.image-studio}`. The `gate` subcommand is the only way
 to prove a deliverable is done: the file must be the approved one, match its spec,
 every resolved defect must show changed pixels, and every recorded defect needs
@@ -78,6 +78,8 @@ FILE_BUDGET = 1000000  # gate: PNG/JPEG/WebP deliverables above this many bytes 
 CARD_LIMIT = 2400
 LESSONS_SHOWN = 5      # lessons printed in the session card and brief
 TASTE_SHOWN = 6        # taste notes printed in the session card and brief
+CONSTRUCTION_SHOWN = 3  # construction rules printed in the session card and brief
+REPEAT_IOU = 0.1       # defect add: a user box this close to an earlier one (or centered in it) is a repeat (bench/score.py's rule)
 BRAND_CAP = 4000        # characters in one brand.json
 LONG_CHAT_BYTES = 25 << 20  # a transcript this large resends a long history on every step
 HEX_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -256,6 +258,7 @@ class Store:
         self.project = self.root.parent
         self.state_path = self.root / "state.json"
         self.defects_path = self.root / "defects.jsonl"
+        self.construction_path = self.root / "construction.jsonl"
         self.state = self._load_state()
 
     def _load_state(self):
@@ -282,6 +285,21 @@ class Store:
 
     def save_defects(self, items):
         atomic_write(self.defects_path, "".join(json.dumps(i, sort_keys=True, ensure_ascii=False) + "\n" for i in items))
+
+    def constructions(self):
+        if not self.construction_path.exists(): return []
+        items = []
+        for n, line in enumerate(self.construction_path.read_text(encoding="utf-8").splitlines(), 1):
+            if not line.strip(): continue
+            try: item = json.loads(line)
+            except ValueError: raise UsageError(f"{self.construction_path}:{n}: not valid JSON") from None
+            if not isinstance(item, dict) or not isinstance(item.get("defect"), str):
+                raise UsageError(f"{self.construction_path}:{n}: construction record must be an object with a defect")
+            items.append(item)
+        return items
+
+    def save_constructions(self, items):
+        atomic_write(self.construction_path, "".join(json.dumps(i, sort_keys=True, ensure_ascii=False) + "\n" for i in items))
 
     def resolve(self, stored):
         path = Path(stored)
@@ -488,6 +506,27 @@ def parse_bbox(values, label="--bbox"):
     return box
 
 
+def same_region(new, old):
+    """bench/score.py's hit rule: IoU >= 0.1, or the new box's center lies inside the old box."""
+    w, h = min(new[2], old[2]) - max(new[0], old[0]), min(new[3], old[3]) - max(new[1], old[1])
+    inter = w * h if w > 0 and h > 0 else 0
+    union = (new[2] - new[0]) * (new[3] - new[1]) + (old[2] - old[0]) * (old[3] - old[1]) - inter
+    cx, cy = (new[0] + new[2]) / 2, (new[1] + new[3]) / 2
+    return (union > 0 and inter / union >= REPEAT_IOU) or (old[0] <= cx <= old[2] and old[1] <= cy <= old[3])
+
+
+def repeated(store, spec, box, defects):
+    """IDs of earlier defects (any status) on a deliverable of the same size whose box covers the same region."""
+    size = (spec.get("width"), spec.get("height"))
+    out = []
+    for d in defects:
+        other = (store.state["deliverables"].get(d.get("deliverable")) or {}).get("spec") or {}
+        old = d.get("bbox")
+        if (other.get("width"), other.get("height")) != size or not isinstance(old, list) or len(old) != 4: continue
+        if all(isinstance(v, int) for v in old) and same_region(box, old): out.append(d["id"])
+    return out
+
+
 def cmd_defect_add(args):
     store = open_store(args.project)
     item = store.deliverable(args.deliverable)
@@ -531,6 +570,9 @@ def cmd_defect_add(args):
     request = args.kind == "scope" and bool(quote)
     after_delivery = args.source == "user" and not request and gate_is_valid(store, args.deliverable, defects)
     if after_delivery: record["needs_lesson"] = True
+    # The user pointing at a region again means patching strokes failed: work out how the object is built.
+    repeat = repeated(store, spec, box, defects) if args.source == "user" and not request else []
+    if repeat: record.update(repeat_of=repeat, needs_construction=True, needs_lesson=True)
     numbers = [int(m.group(1)) for m in (DEFECT_ID_RE.match(d["id"]) for d in defects) if m]
     record["id"] = f"D{max(numbers, default=0) + 1}"
     (store.root / "defects").mkdir(exist_ok=True)
@@ -542,9 +584,16 @@ def cmd_defect_add(args):
     defects.append(record)
     store.save_defects(defects)
     print(f"Added defect {record['id']}")
+    lesson_cmd = f"{SCRIPT_HINT} lesson add --defect {record['id']} --mistake \"...\" --cause \"...\" --check \"...\""
+    if repeat:
+        print(f"Repeat: this region was already reported ({', '.join(repeat)}). Stop patching single strokes. "
+              "Follow image-verify/references/construction-reference.md: state how the object is built, find real reference "
+              "photos of the same action, confirm them with the user, then rebuild the whole part from that rule. Record it:\n"
+              f"{SCRIPT_HINT} construction add --defect {record['id']} --object \"...\" --rule \"...\" --ref FILE   "
+              "(or --quote \"the user's words explaining it\")")
     if after_delivery:
-        print(f"{args.deliverable} had passed the gate, so this is a miss after delivery. Record what to do differently:\n"
-              f"{SCRIPT_HINT} lesson add --defect {record['id']} --mistake \"...\" --cause \"...\" --check \"...\"")
+        print(f"{args.deliverable} had passed the gate, so this is a miss after delivery. Record what to do differently:\n{lesson_cmd}")
+    elif repeat: print(f"The user had to point at it again, so this is a miss. Record what to do differently:\n{lesson_cmd}")
     return 0
 
 
@@ -698,6 +747,52 @@ def cmd_lesson_list(args):
     lessons = [l for l in read_lessons() if args.brand is None or l.get("brand") == args.brand]
     if not lessons: print("No lessons recorded."); return 0
     for item in lessons: print(lesson_line(item) + f" (cause: {short(item.get('cause', ''), 90)})")
+    return 0
+
+
+# ---------------------------------------------------------------- construction rules
+
+def construction_line(item, limit=110):
+    basis = [f"{len(item['refs'])} ref" + ("s" if len(item["refs"]) > 1 else "")] if isinstance(item.get("refs"), list) and item["refs"] else []
+    if isinstance(item.get("quote"), str): basis.append(f'user: "{short(item["quote"], 60)}"')
+    return f"- {item.get('defect')} {short(item.get('object'), 40)}: {short(item.get('rule'), limit)}" + (f" ({'; '.join(basis)})" if basis else "")
+
+
+def construction_linked(constructions, defect_id):
+    return any(c.get("defect") == defect_id for c in constructions)
+
+
+def cmd_construction_add(args):
+    store = open_store(args.project)
+    obj, rule = text_arg(args.object, "--object"), text_arg(args.rule, "--rule")
+    quote = text_arg(args.quote, "--quote", False)
+    defect = next((d for d in store.defects() if d.get("id") == args.defect), None)
+    if defect is None: raise UsageError(f"unknown defect id {args.defect!r}")
+    if not args.ref and not quote:
+        raise UsageError("construction add needs at least one --ref FILE (a real reference photo of the same action) "
+                         "or --quote with the user's own words explaining how it is built")
+    refs = []
+    for value in args.ref or []:
+        path = existing_file(value, "--ref")
+        try:
+            with pil().Image.open(path) as img: img.verify()
+        except UsageError: raise
+        except Exception as exc: raise UsageError(f"--ref {value} is not a readable image ({exc})") from None
+        refs.append({"path": store.relative(path), "sha256": sha256_file(path)})
+    record = {"defect": args.defect, "deliverable": defect.get("deliverable"), "object": obj, "rule": rule, "refs": refs, "time": now()}
+    if quote: record["quote"] = quote
+    store.save_constructions(store.constructions() + [record])
+    print(f"Recorded construction for {args.defect} ({obj}): {rule}")
+    print("Rebuild the whole part from this rule, then check every clause of it on the final pixels before delivery.")
+    return 0
+
+
+def cmd_construction_list(args):
+    items = open_store(args.project).constructions()
+    if not items: print("No construction rules recorded."); return 0
+    for item in items:
+        refs = ", ".join(r.get("path", "") for r in item.get("refs") or [] if isinstance(r, dict))
+        print(construction_line(item, 400) + f" {item.get('time', '')}" + (f"\n  refs: {refs}" if refs else ""))
     return 0
 
 
@@ -916,6 +1011,10 @@ def gate_is_valid(store, name, defects):
     if any(d.get("needs_lesson") for d in mine):
         lessons = read_lessons()
         if any(d.get("needs_lesson") and not lesson_linked(lessons, store.root, d["id"]) for d in mine): return False
+    if any(d.get("needs_construction") for d in mine):
+        try: constructions = store.constructions()
+        except UsageError: return False
+        if any(d.get("needs_construction") and not construction_linked(constructions, d["id"]) for d in mine): return False
     needed = [d for d in mine if d.get("status") != "wontfix"]
     if needed and (verdicts.get("run_id") != checklist.get("run_id") or verdicts.get("nonce") != checklist.get("nonce")):
         return False
@@ -968,7 +1067,11 @@ def shared_sections(store, defects):
     kinds = {d.get("kind") for d in defects if d.get("status") == "open"}
     lessons = [lesson_line(l) for l in relevant_lessons(read_lessons(), state.get("brand"), kinds)]
     taste = brand_card_line(state.get("brand")) + [taste_line(t) for t in newest_taste(state.get("brand"))]
-    return delivs, decs, prefs, conf, lessons, taste
+    built = [construction_line(c) for c in store.constructions()[-CONSTRUCTION_SHOWN:][::-1]]
+    return delivs, decs, prefs, conf, lessons, taste, built
+
+
+BUILT_TITLE = "How these objects are built (rebuild from the rule, never patch single strokes):"
 
 
 def build_brief(store, max_lines):
@@ -983,10 +1086,10 @@ def build_brief(store, max_lines):
     open_items = [d for d in defects if d.get("status") == "open"]
     head.append(f"Open defects ({len(open_items)}, all listed; gate cannot pass while any is open):" if open_items else "Open defects: none")
     if open_items: head += [f"- {defect_line(d)}" for d in open_items]
-    delivs, decs, prefs, conf, lessons, taste = shared_sections(store, defects)
+    delivs, decs, prefs, conf, lessons, taste, built = shared_sections(store, defects)
     prop = sum(1 for st, _ in prefs if st == "proposed")
     if prop: head.append(f"Preferences: {prop} proposed, ask the user to confirm (pref add ... --confirmed).")
-    sections = [("Deliverables:", delivs)]
+    sections = [("Deliverables:", delivs), (BUILT_TITLE, built)]
     sections += [("Your taste (match it):", taste), ("Lessons from earlier tasks (check these):", lessons), ("Confirmed preferences:", conf), ("Recent decisions:", decs), ("Closed defects (resolved ones are re-checked by the gate):", [f"- {defect_line(d)}" for d in [d for d in defects if d.get("status") != "open"][::-1]])]
     lines = list(head)
     budget = max(0, max_lines - len(lines))
@@ -1014,13 +1117,14 @@ def format_session_start_card(store):
     defects = store.defects()
     open_items = [d for d in defects if d.get("status") == "open"]
     resolved_items = [d for d in defects if d.get("status") == "resolved"]
-    delivs, decs, _, conf, lessons, taste = shared_sections(store, defects)
+    delivs, decs, _, conf, lessons, taste, built = shared_sections(store, defects)
 
     for limit in (100, 80, 60, 40, 20, 10, 5, 0):
         lines = [f"image-studio project memory (brand: {state.get('brand')} | store: {store.root}):"]
         lines.append(f"Open defects ({len(open_items)}, all listed; gate cannot pass while any is open):" if open_items else "Open defects: none")
         lines.extend(f"- {defect_line(d, limit=limit)}" for d in open_items)
         if delivs: lines.append("Deliverables:"); lines.extend(delivs)
+        if built: lines.append(BUILT_TITLE); lines.extend(built)
         if decs: lines.append("Recent decisions:"); lines.extend(decs)
         if taste: lines.append("Your taste (match it):"); lines.extend(taste)
         if lessons: lines.append("Lessons from earlier tasks (check these):"); lines.extend(lessons)
@@ -1303,6 +1407,12 @@ def cmd_gate(args):
         if defect.get("needs_lesson") and not lesson_linked(lessons, store.root, defect["id"]):
             report.fail(f"{defect['id']} was reported after delivery and has no lesson: run lesson add --defect {defect['id']} "
                         "--mistake ... --cause ... --check ...")
+    constructions = store.constructions() if any(d.get("needs_construction") for d in defects) else []
+    for defect in defects:
+        if defect.get("needs_construction") and not construction_linked(constructions, defect["id"]):
+            report.fail(f"{defect['id']} repeats {', '.join(map(str, defect.get('repeat_of') or []))} and has no construction rule: "
+                        "research how the object is built (image-verify/references/construction-reference.md), then run "
+                        f"construction add --defect {defect['id']} --object ... --rule ... --ref FILE (or --quote ...)")
 
     passed = report.passed()
     print(f"Gate: {name} ({store.relative(path)})")
@@ -2536,6 +2646,9 @@ subcommands:
   approve deliverable --name N --file F [--width W --height H --format PNG|JPEG|WEBP|ZIP] [--alpha required|forbidden|any] [--quote T]
                                          example: python3 studio_state.py approve deliverable --name poster --file poster.png --width 1200 --height 800 --format PNG
   defect add --deliverable N --bbox x0,y0,x1,y1 --kind logo|seam|artifact|scope|color|other --note T [--source user|agent] [--quote T] [--wide]
+                                         a user box on the region of an earlier defect (any status, same-size deliverable; IoU >= 0.1 or its
+                                         center inside) is a repeat: it records repeat_of and needs a lesson and a construction rule
+                                         (scope requests with --quote and agent defects never are)
                                          example: python3 studio_state.py defect add --deliverable poster --bbox 100,50,200,150 --kind seam --note "visible seam"
   defect close --id D1 --status resolved|wontfix --note T [--quote T]
                                          example: python3 studio_state.py defect close --id D1 --status resolved --note "feathered seam"
@@ -2549,6 +2662,11 @@ subcommands:
   lesson add --mistake T --cause T --check T [--worked T] [--defect D1] [--kind K] [--brand B]
                                          example: python3 studio_state.py lesson add --defect D4 --mistake "delivered a soft poster" --cause "upscaled a generated patch" --check "compare at 100% before delivery"
   lesson list [--brand B]                example: python3 studio_state.py lesson list --brand acme
+  construction add --defect D1 --object T --rule T (--ref FILE [--ref FILE ...] | --quote T)
+                                         how an object is physically built, from real reference photos or the user's words; stored in the
+                                         store's construction.jsonl with each ref's path and sha256; the gate fails a repeat defect without one
+                                         example: python3 studio_state.py construction add --defect D7 --object "booster pack" --rule "torn top strip stays attached at one end; its length equals the tear edge" --ref refs/tear-1.jpg --ref refs/tear-2.jpg
+  construction list                      example: python3 studio_state.py construction list
   taste add --note T [--aspect color|line|composition|detail|lighting|text|style|other] [--quote T] [--deliverable N] [--brand B]
                                          example: python3 studio_state.py taste add --aspect color --note "deep blue night palette with warm gold accents" --quote "love this palette"
   taste list [--brand B]                 example: python3 studio_state.py taste list --brand acme
@@ -2617,7 +2735,7 @@ subcommands:
                                          example: python3 studio_state.py crop-check --image hero.png --focus 820,300,1240,900 --display 1440x810 --out-dir crops
   hook session-start | hook stop         example: python3 studio_state.py hook session-start < payload.json
 
-approve, defect, brief, gate and verdict find the store by walking up from --project or the current folder.
+approve, defect, construction, brief, gate and verdict find the store by walking up from --project or the current folder.
 init creates it; pref add does not use the project store; lessons (lessons.jsonl) and taste notes (brands/<brand>/taste.jsonl, taste.jsonl) live in ${IMAGE_STUDIO_HOME:-~/.image-studio}, shared by every task; hooks use the cwd from the hook input.
 gate fails a wrong size and says whether the aspect matches (w/h within 0.025); a PNG/JPEG/WebP over 1 MB gets a warning, not a fail.
 engine (axis-check, blend, edit-check, shape-check, mask-from-diff): --engine auto|pillow|fast, else IMAGE_STUDIO_ENGINE, else auto.
@@ -2750,6 +2868,15 @@ def build_parser():
     p.add_argument("--brand")
     p.set_defaults(func=cmd_lesson_list)
 
+    construction = sub.add_parser("construction").add_subparsers(dest="what", metavar="add|list", required=True)
+    p = construction.add_parser("add", parents=[common])
+    p.add_argument("--defect", required=True); p.add_argument("--object", required=True); p.add_argument("--rule", required=True)
+    p.add_argument("--ref", action="append", help="a real reference photo of the same action (repeat for more)")
+    p.add_argument("--quote", help="the user's own words explaining how the object is built")
+    p.set_defaults(func=cmd_construction_add)
+    p = construction.add_parser("list", parents=[common])
+    p.set_defaults(func=cmd_construction_list)
+
     taste = sub.add_parser("taste").add_subparsers(dest="what", metavar="add|list", required=True)
     p = taste.add_parser("add", parents=[common])
     p.add_argument("--note", required=True); p.add_argument("--aspect", choices=ASPECTS, default="other")
@@ -2778,7 +2905,7 @@ def build_parser():
 
 def store_lock(args):
     """Serialize commands that rewrite one store, so parallel agents do not overwrite each other's defects or verdicts."""
-    if fcntl is None or getattr(args, "command", None) not in ("approve", "defect", "gate", "verdict"): return None
+    if fcntl is None or getattr(args, "command", None) not in ("approve", "defect", "gate", "verdict", "construction"): return None
     try:
         root = find_store(getattr(args, "project", None) or os.getcwd())
         if root is None: return None

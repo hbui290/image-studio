@@ -62,7 +62,7 @@ Only the skill that matches is loaded; the others cost a line each.
 | Part | Count | Role |
 | --- | --- | --- |
 | Skills (`SKILL.md`) | 10 | One workflow each; only the matching one is loaded |
-| References | 30 | Detailed rules, opened only when a step needs them |
+| References | 31 | Detailed rules, opened only when a step needs them |
 | Scripts (Python, one Swift helper) | 14 | Measurements the agent runs instead of guessing: `studio_state.py` (memory, gate, defects, `axis-check`, `align-check` with `--auto`, `blend`, `edit-check`, `mask-from-diff`, `shape-check`, `crop-check`), `accel.py` (optional numpy/OpenCV engine), `review.py` and `controller.py` (review rounds), `audit_candidate.py` (pixel audit), `mac_vision.py` (Apple Vision), `compose_layers.py` (text and logo layers) |
 | Agents | 2 | `image-hunter` finds problems, `image-reviewer` judges results; neither is the agent that made the image |
 | Hooks | 2 | Memory card at session start; block "done" until the gate passes |

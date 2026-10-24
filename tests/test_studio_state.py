@@ -98,7 +98,7 @@ class StudioBase(unittest.TestCase):
     def defect(self, bbox, kind="scope", note="x", source="user"):
         args = ["defect", "add", "--deliverable", "poster", "--bbox", ",".join(map(str, bbox)),
                 "--kind", kind, "--source", source, "--note", note]
-        return self.ok(*args).stdout.strip().split()[-1]
+        return self.ok(*args).stdout.split("Added defect ", 1)[1].split()[0]
 
     def gate(self, *extra):
         return self.run_cli("gate", "--deliverable", "poster", *extra)
@@ -2483,6 +2483,101 @@ class CropCheckTests(StudioBase):
             self.assertEqual(run.returncode, 2, (extra, run.stdout, run.stderr))
         help_text = subprocess.run([sys.executable, str(SCRIPT), "--help"], capture_output=True, text=True).stdout
         for name in ("crop-check", "shape-check", "--no-align-check", "--accept"): self.assertIn(name, help_text)
+
+
+class ConstructionTests(StudioBase):
+    """The user pointing at the same region again means stroke patching failed: research how the object is built."""
+
+    RULE = "torn top strip stays attached at one end; its length equals the tear edge"
+
+    def setUp(self):
+        super().setUp()
+        self.init()
+        self.approve_poster(self.poster())
+
+    def add(self, bbox, *extra):
+        return self.ok("defect", "add", "--deliverable", "poster", "--bbox", ",".join(map(str, bbox)),
+                       "--kind", "artifact", "--note", "torn pack edge", *extra).stdout
+
+    def construction(self, *extra):
+        return self.run_cli("construction", "add", "--defect", "D2", "--object", "booster pack", "--rule", self.RULE, *extra)
+
+    def test_user_repeat_on_the_same_region_needs_construction_and_a_lesson(self):
+        self.add([10, 10, 60, 60])
+        out = self.add([20, 20, 70, 70])  # IoU 0.47
+        d2 = self.defects()[1]
+        self.assertEqual(d2["repeat_of"], ["D1"])
+        self.assertTrue(d2["needs_construction"])
+        self.assertTrue(d2["needs_lesson"])
+        for text in ("already reported (D1)", "construction-reference.md", "construction add --defect D2", "lesson add --defect D2"):
+            self.assertIn(text, out)
+        self.add([10, 10, 110, 110])  # D3 overlaps D1 and D2
+        self.assertEqual(self.defects()[2]["repeat_of"], ["D1", "D2"])
+        self.add([55, 55, 75, 75])    # D4: IoU under 0.1 with D2 and D3, but its center is inside both; D1 is missed
+        self.assertEqual(self.defects()[3]["repeat_of"], ["D2", "D3"])
+
+    def test_no_repeat_for_other_regions_agent_defects_or_scope_requests(self):
+        self.add([10, 10, 60, 60])
+        self.add([120, 80, 180, 140])
+        self.add([10, 10, 60, 60], "--source", "agent")
+        out = self.add([10, 10, 60, 60], "--kind", "scope", "--quote", "make the tear longer")
+        self.assertNotIn("already reported", out)
+        self.add([120, 80, 180, 140])  # control: a user defect on D2's region is the only repeat
+        defects = self.defects()
+        for d in defects[:4]:
+            self.assertNotIn("repeat_of", d)
+            self.assertNotIn("needs_construction", d)
+            self.assertNotIn("needs_lesson", d)
+        self.assertEqual(defects[4]["repeat_of"], ["D2"])
+
+    def test_gate_fails_until_the_construction_rule_is_recorded(self):
+        self.add([10, 10, 60, 60])
+        self.add([20, 20, 70, 70])
+        for did in ("D1", "D2"):
+            self.ok("defect", "close", "--id", did, "--status", "wontfix", "--note", "ok", "--quote", "leave it")
+        self.ok("lesson", "add", "--defect", "D2", "--mistake", "patched one stroke at a time", "--cause", "never worked out the tear",
+                "--check", "state the construction before editing")
+        run = self.gate()
+        self.assertEqual(run.returncode, 1)
+        self.assertIn("D2 repeats D1 and has no construction rule", run.stdout)
+        self.assertIn("construction add --defect D2", run.stdout)
+        self.assertEqual(self.construction("--quote", "the strip hangs from the left end").returncode, 0)
+        run = self.gate()
+        self.assertEqual(run.returncode, 0, run.stdout)
+        card = lambda: self.run_cli("hook", "session-start", stdin=json.dumps({"cwd": str(self.project)})).stdout
+        self.assertIn("gate passed", card())
+        (self.store / "construction.jsonl").write_text("")
+        self.assertIn("gate not passed", card())
+
+    def test_construction_add_bad_input_exits_2(self):
+        self.add([10, 10, 60, 60])
+        self.add([20, 20, 70, 70])
+        (self.project / "notes.png").write_text("not an image")
+        for extra in ((), ("--ref", "notes.png"), ("--ref", "missing.png"), ("--quote", " ")):
+            run = self.construction(*extra)
+            self.assertEqual(run.returncode, 2, (extra, run.stdout, run.stderr))
+            self.assertIn("error:", run.stderr)
+        run = self.run_cli("construction", "add", "--defect", "D9", "--object", "pack", "--rule", self.RULE, "--quote", "x")
+        self.assertEqual(run.returncode, 2)
+        self.assertIn("unknown defect", run.stderr)
+        self.assertFalse((self.store / "construction.jsonl").exists())
+
+    def test_rule_with_refs_is_stored_and_shown_in_brief_and_card(self):
+        self.add([10, 10, 60, 60])
+        self.add([20, 20, 70, 70])
+        refs = self.project / "refs"
+        refs.mkdir()
+        Image.new("RGB", (40, 30), (90, 90, 90)).save(refs / "tear-1.jpg")
+        self.assertEqual(self.construction("--ref", "refs/tear-1.jpg").returncode, 0)
+        record = json.loads((self.store / "construction.jsonl").read_text().splitlines()[0])
+        self.assertEqual(record["defect"], "D2")
+        self.assertEqual(record["refs"][0]["path"], "refs/tear-1.jpg")
+        self.assertEqual(len(record["refs"][0]["sha256"]), 64)
+        self.assertIn(self.RULE, self.ok("construction", "list").stdout)
+        self.assertIn(self.RULE, self.ok("brief").stdout)
+        card = self.run_cli("hook", "session-start", stdin=json.dumps({"cwd": str(self.project)})).stdout
+        self.assertIn("booster pack", card)
+        self.assertIn("torn top strip", card)
 
 
 if __name__ == "__main__":
