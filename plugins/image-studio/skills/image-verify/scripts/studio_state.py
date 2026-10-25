@@ -141,24 +141,45 @@ COMPLETION_PAT = re.compile(
 )
 
 
-# While the user's complaint is unrecorded or a user defect is open, "đã sửa X" anywhere is a delivery claim
-# ("Boss, đã sửa giáp tay và cụm card." was a real reply); otherwise only a bare "đã sửa." ending the sentence is.
+# Strict branch (the user's complaint is unrecorded or a user defect is open): "đã <edit verb> X" anywhere in a
+# sentence is a delivery claim. Real replies: "Boss, đã sửa giáp tay và cụm card.", "Boss, đã **kéo dài và dựng
+# nghiêng dải bạc lên**", "Đã bỏ phần bạc nhọn ... còn dính". Outside it only a bare "đã sửa." ending the sentence is.
 STRICT_CLAIM_PAT = re.compile(
-    r"\bđã\s+(?:sửa|chỉnh|làm\s+lại|xử\s+lý|thay|cập\s+nhật|đồng\s+bộ)\b"
-    r"|\bda\s+(?:sua|chinh|lam\s+lai|xu\s+ly|thay|cap\s+nhat|dong\s+bo)\b",
+    r"\bđã\s+(?:sửa|chỉnh|làm\s+lại|xử\s+lý|thay|cập\s+nhật|đồng\s+bộ|kéo\s+dài|kéo|bỏ|đổi|làm\s+gọn|làm\s+mới|xóa|xoá|"
+    r"thêm|dời|di\s+chuyển|nâng|hạ|rút|thu\s+gọn|thu\s+nhỏ|nối|vẽ\s+lại|vẽ|tô|dựng|gập|cắt|ghép|chèn|căn|xoay|phóng|tách|"
+    r"gỡ|bổ\s+sung|tăng|giảm|uốn|nắn|đẩy|làm\s+(?:mờ|nét|sáng|tối|dày|mỏng|ngắn|dài|thẳng|cong))\b"
+    r"|\bda\s+(?:sua|chinh|lam\s+lai|xu\s+ly|thay|cap\s+nhat|dong\s+bo|keo\s+dai|keo|bo|doi|lam\s+gon|lam\s+moi|xoa|"
+    r"them|di\s+chuyen|nang|ha|rut|thu\s+gon|thu\s+nho|noi|ve\s+lai|ve|to|dung|gap|cat|ghep|chen|can|xoay|phong|tach|"
+    r"go|bo\s+sung|tang|giam|uon|nan|day|lam\s+(?:mo|net|sang|toi|day|mong|ngan|dai|thang|cong))\b",
     re.I,
 )
+# In the strict branch "còn", "vẫn", "still", "then" describe the result ("giữ điểm còn dính"), not unfinished work.
+STRICT_PROGRESS_PAT = re.compile(r"\b(?:đang|sẽ|tiếp|sau\s+đó|chờ|will|next|working\s+on|in\s+progress)\b", re.I)
+MARKDOWN_EMPHASIS = re.compile(r"\*\*|\*|__|`")
+SHOW_IMAGE_PAT = re.compile(r"\bmở\s+(?:bản|ảnh|file)\b", re.I)
 
 
-def claims_completion(text, strict=False):
+def shows_image(text):
+    """The reply hands over an image file (a link or a path), other than a reference under refs/ or the user's paste."""
+    for token in text.split():
+        name = token.strip("\"'()[]<>,;:!?.").lower()
+        if name.endswith(IMAGE_SUFFIXES) and "refs/" not in name and "codex-clipboard-" not in name: return True
+    return False
+
+
+def claims_completion(text, strict=False, pending=False):
     """True when any sentence claims the work is done. A question ("Is it done?") claims nothing,
-    but a claim followed by a question ("Done. Anything else?") still counts. strict also counts STRICT_CLAIM_PAT."""
+    but a claim followed by a question ("Done. Anything else?") still counts. strict (a complaint pending or a user
+    defect open) also counts "đã <edit verb>" with markdown emphasis removed; pending also counts showing an image."""
     text = unicodedata.normalize("NFC", text or "")
+    strict = strict or pending
+    if strict: text = MARKDOWN_EMPHASIS.sub("", text)
+    if pending and (SHOW_IMAGE_PAT.search(text) or shows_image(text)): return True
     for sentence in re.findall(r"[^.!?？\n]+[.!?？\n]?", text):
         if sentence.rstrip().endswith(("?", "？")): continue
         masked = NEGATION_PAT.sub(" ", sentence)
-        claim = COMPLETION_PAT.search(masked) or (strict and STRICT_CLAIM_PAT.search(masked))
-        if claim and not PROGRESS_PAT.search(masked): return True
+        if COMPLETION_PAT.search(masked) and not PROGRESS_PAT.search(masked): return True
+        if strict and STRICT_CLAIM_PAT.search(masked) and not STRICT_PROGRESS_PAT.search(masked): return True
     return False
 
 
@@ -645,6 +666,7 @@ def cmd_defect_add(args):
                          "--wide for a whole-image problem (overall softness, color cast)")
     if args.wide: record["wide"] = True
     if quote: record["quote"] = quote
+    if host_session(): record["session"] = host_session()  # ties a user defect to the chat whose complaint it records
     defects = store.defects()
     # A requested change (kind scope with the user's words: new text, a removed element) is not a miss, so it needs no lesson.
     request = args.kind == "scope" and bool(quote)
@@ -1694,7 +1716,8 @@ COMPLAINT_VI = re.compile(
     r"chưa\s+(?:đúng|đạt|ổn|tương\s+ứng|khớp|giống|chuẩn|đẹp|tự\s+nhiên)|"
     r"(?:không|ko|k|hông|hok)\s+(?:đúng|tự\s+nhiên|giống|khớp|ổn|đẹp|hợp|chuẩn)|"
     r"nhìn\s+(?:kì|kỳ|lạ|xấu|giả)|bị\s+(?:mất|cắt|dính|thừa|thiếu|vỡ|mờ))\b"
-    r"|\bnên\b[^.!?\n]{0,100}\bhơn\b",  # "nên nghiêng lên ... chân thật hơn": a correction, not a question
+    r"|\bnên\b[^.!?\n]{0,100}\bhơn\b"  # "nên nghiêng lên ... chân thật hơn": a correction, not a question
+    r"|\bmà\s*[.!…]*\s*$",  # a message ending in "mà" corrects the agent: "ảnh pack bài bị xé còn dính ở mép mà"
     re.I)
 COMPLAINT_PLAIN = re.compile(
     r"\b(?:loi|sai|xau|gom\s+giec|lech|meo\s+mo|bi\s+(?:loi|meo|lech|gay|hong|cat|mat)|van\s+con|"
@@ -1773,42 +1796,66 @@ def save_pending(root, marker):
 
 
 def age_pending(root, session_id):
-    """Count one more prompt for this session's marker; it expires on the second prompt after the complaint."""
+    """Count one more prompt for this session's marker; it expires on the second prompt after the complaint.
+    The entry stays (expired) so a later text-only complaint in the session is known to be about the image."""
     marker = load_pending(root)
     item = marker.get(session_id)
-    if not isinstance(item, dict): return
-    item["prompts"] = int(item.get("prompts") or 0) + 1 if isinstance(item.get("prompts"), int) else 1
-    if item["prompts"] >= PENDING_TURNS: del marker[session_id]
+    if not isinstance(item, dict) or item.get("expired"): return
+    item["prompts"] = item["prompts"] + 1 if isinstance(item.get("prompts"), int) else 1
+    if item["prompts"] >= PENDING_TURNS: item["expired"] = True
     save_pending(root, marker)
 
 
-def record_pending(root, session_id, turn_id, quote):
-    """Remember that the user complained in this session and turn. Satisfied by a user defect added after it."""
+def session_had_image_complaint(root, session_id):
+    item = load_pending(root).get(session_id)
+    return isinstance(item, dict) and item.get("had_image") is True
+
+
+def record_pending(root, session_id, turn_id, quote, image):
+    """Remember that the user complained in this session and turn. Satisfied by a user defect from this session."""
     marker = load_pending(root)
+    old = marker.get(session_id) if isinstance(marker.get(session_id), dict) else {}
     marker[session_id] = {"time": now(), "quote": quote, "session_id": session_id, "prompts": 0,
-                          "turn_id": turn_id if isinstance(turn_id, str) else None}
+                          "turn_id": turn_id if isinstance(turn_id, str) else None,
+                          "had_image": bool(image or old.get("had_image"))}
     keep = sorted(marker.items(), key=lambda kv: str(kv[1].get("time", "") if isinstance(kv[1], dict) else ""))[-20:]
     save_pending(root, dict(keep))
 
 
+def host_session():
+    """The id of the host session running this command, when the host exports one."""
+    for name in SESSION_ENV:
+        value = os.environ.get(name)
+        if valid_session_id(value): return value
+    return None
+
+
 def clear_pending_for_host_session(root):
-    """defect add --source user: drop the marker of the session running it (its id from the host's environment).
-    Other sessions keep theirs; any marker is also satisfied by a user defect added after it."""
+    """defect add --source user: mark the marker of the session running it done (its id from the host's environment).
+    Other sessions keep theirs."""
     marker = load_pending(root)
     ids = {os.environ.get(name) for name in SESSION_ENV} - {None, ""}
-    if ids & set(marker):
-        save_pending(root, {k: v for k, v in marker.items() if k not in ids})
+    hit = [k for k in ids if isinstance(marker.get(k), dict)]
+    for k in hit: marker[k]["done"] = True
+    if hit: save_pending(root, marker)
 
 
 def pending_complaint(root, session_id, defects):
-    """This session's live complaint marker when no user defect was added at or after it, else None."""
+    """This session's live complaint marker, else None. A user defect added at or after it satisfies it when it was
+    recorded by the same session (the host's session id); a defect recorded without a session id satisfies any marker."""
     if not valid_session_id(session_id): return None
     item = load_pending(root).get(session_id)
-    if not isinstance(item, dict) or not isinstance(item.get("time"), str): return None
+    if not isinstance(item, dict) or not isinstance(item.get("time"), str) or item.get("expired") or item.get("done"): return None
     for d in defects:
         added = next((h.get("time") for h in d.get("history") or [] if isinstance(h, dict) and h.get("action") == "add"), "")
-        if d.get("source") != "agent" and isinstance(added, str) and added >= item["time"]: return None
+        same = not isinstance(d.get("session"), str) or d["session"] == session_id
+        if d.get("source") != "agent" and isinstance(added, str) and added >= item["time"] and same: return None
     return item
+
+
+def open_user_defect(root):
+    try: return any(d.get("status") == "open" and d.get("source") != "agent" for d in Store(root).defects())
+    except UsageError: return False
 
 
 def hook_prompt(payload):
@@ -1822,12 +1869,17 @@ def hook_prompt(payload):
     quote = short(words.replace('"', "'"), 200) if words else "(image only)"
     add = (f'{SCRIPT_HINT} defect add --deliverable N --bbox x0,y0,x1,y1 --kind artifact|seam|color|logo|other '
            f'--source user --note "..." --quote "{quote}"')
-    if root is not None and complaint and not only_image and not attached_image(prompt) and not about_an_image(root, words):
+    image = only_image or attached_image(prompt)
+    # A text-only complaint is about the image when it names something visual, follows an image complaint in this
+    # session ("k thấy sai nặng à?" after a screenshot), or comes while a user defect is open.
+    visual = root is not None and (image or about_an_image(root, words)
+                                   or (session_id and session_had_image_complaint(root, session_id)) or open_user_defect(root))
+    if root is not None and complaint and not visual:
         # Text-only and about nothing visual ("fix the typo in README"): a reminder, no marker, nothing blocks.
         text = (f'image-studio: if the user\'s message ("{quote}") is about an image in this project, record it before '
                 f"editing: {add} (never --source agent). Otherwise ignore this note.")
     elif root is not None and (complaint or only_image):
-        if session_id: record_pending(root, session_id, payload.get("turn_id"), quote)
+        if session_id: record_pending(root, session_id, payload.get("turn_id"), quote, image)
         text = (f'image-studio: the user is reporting a problem with the image ("{quote}"). Before you edit anything:\n'
                 + ("- They sent an image without words (image only): the region it shows is the complaint; box that region.\n"
                    if only_image and not complaint else "")
@@ -1835,8 +1887,8 @@ def hook_prompt(payload):
                 "(first time: --width W --height H --format PNG).\n"
                 f"- Record the complaint in their words: {add}\n"
                 "- never file the user's complaint as --source agent.\n"
-                '- If defect add prints "Repeat", stop patching strokes and follow image-verify/references/construction-reference.md.\n'
-                "The stop hook blocks any claim that the work is done until this complaint is recorded.")
+                '- If defect add prints "Repeat", stop patching strokes and follow image-verify/references/construction-reference.md.'
+                + ("\nThe stop hook blocks any claim that the work is done until this complaint is recorded." if session_id else ""))
     elif root is None and complaint and attached_image(prompt):
         text = (f'image-studio: the user is reporting a problem with an image ("{quote}") and no project store tracks it. '
                 f"Before editing: {SCRIPT_HINT} init --project <the image's folder> --brand <brand>; then approve deliverable "
@@ -1868,7 +1920,7 @@ def hook_stop(payload):
     pending = pending_complaint(root, payload.get("session_id"), defects)
     open_defects = [d for d in defects if d.get("status") == "open"]
     strict = bool(pending) or any(d.get("source") != "agent" for d in open_defects)
-    if not claims_completion(message, strict): return ""
+    if not claims_completion(message, strict, pending=bool(pending)): return ""
     try:
         missing = ungated(store)
         fingerprint = store_fingerprint(store)

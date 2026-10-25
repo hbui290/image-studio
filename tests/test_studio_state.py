@@ -2937,7 +2937,76 @@ class PromptHookTests(StudioBase):
         self.prompt("giáp tay lệch", session="sB")
         self.run_cli("defect", "add", "--deliverable", "poster", "--bbox", "10,10,60,60", "--kind", "artifact",
                      "--note", "gloves", env_extra={"CODEX_THREAD_ID": "sB"})
-        self.assertEqual(sorted(json.loads(path.read_text(encoding="utf-8"))), ["sA"])
+        marker = json.loads(path.read_text(encoding="utf-8"))
+        self.assertFalse(marker["sA"].get("done"))
+        self.assertTrue("sB" not in marker or marker["sB"].get("done"))  # dropped or marked done; sA untouched
+
+    # Verifier round on e82232b.
+
+    PENDING_DELIVERIES = [
+        "Boss, đã sửa giáp tay và cụm card.", "Boss, đã kéo dài dải bạc.", "Đã bỏ phần nhọn.", "Boss, đã đổi màu đai lưng.",
+        "Đã làm gọn nếp gấp.", "Boss, đã xóa mẩu tam giác.", "Boss, bản mới ở v20.png.",
+        "Boss, em đã sửa giáp tay và cụm card, xem file v19.png.",
+        # real replies 1, 7, 8, 9 of 2026-10-22 (bold and "còn" kept as sent)
+        "Bản này đã đổi sang dải đầu bao tách rời, nằm sát bàn; phần thân không còn bị ngoác hay rách sâu.",
+        "Boss, đã làm lại: **đầu bao xé ngang, dải bạc gập sang trái và còn dính ở mép**, giữ nguyên thân pack.",
+        "Boss, đã **kéo dài và dựng nghiêng dải bạc lên**, giữ điểm còn dính ở góc trái theo ảnh mẫu.",
+        "Boss, đã bỏ phần bạc nhọn và làm gọn nếp nối còn dính; giữ dải xé dài, nghiêng lên.",
+        "Boss, xem bản mới:\n\n![Cận cảnh điểm nối](/Users/b/work/pov/unbound_pov_five_cards_v9_joint.png)",
+    ]
+    PROBES = [
+        "Em đã xem ảnh, lỗi nằm ở mép trái.", "Em đã ghi lỗi D3, giờ sửa tiếp.", "Đã hiểu, em sẽ làm lại phần xé.",
+        "Boss, đã ghi lỗi D3. Em cần Boss xác nhận vùng này.", "Đã tìm 4 ảnh tham khảo xé bao, Boss xem bảng dưới.",
+        "Em đã tái hiện lỗi: dải bạc bị gãy ở góc trái.", "Đã rõ: Boss muốn dải bạc dính ở góc trái.", "Đã ghi nhận.",
+        "Em đã đọc lại yêu cầu; vùng lỗi là mép xé.", "Boss, em đã khoanh vùng lỗi ở mép trái (D3) và chờ Boss xác nhận.",
+        "Đã lưu ảnh tham khảo vào refs/tear-1.jpg và refs/tear-2.jpg; Boss xác nhận giúp em.",
+        "Boss, em đã so ảnh Boss gửi với bản v18: lệch ở cổ tay trái.", "Em đã xác định nguyên nhân: dải bạc gập sai chiều.",
+    ]
+
+    def test_7_pending_deliveries_block_and_non_delivery_probes_pass(self):
+        module = load_module()
+        for text in self.PENDING_DELIVERIES:
+            self.assertTrue(module.claims_completion(text, strict=True, pending=True), text)
+        for text in self.PROBES:
+            self.assertFalse(module.claims_completion(text, strict=True, pending=True), text)
+        self.assertFalse(module.claims_completion("Boss, bản mới ở v20.png.", strict=True))  # images count only while pending
+        self.assertFalse(module.claims_completion("Đã bỏ phần nhọn."))  # and edit verbs only in the strict branch
+        self.gated_store()
+        self.prompt(codex_prompt("cụm card lỗi kìa"))
+        self.assertIn("never recorded", self.stop(self.PENDING_DELIVERIES[10]))
+
+    def test_8_follow_up_text_complaints_after_an_image_complaint_get_a_marker(self):
+        module = load_module()
+        self.assertTrue(module.is_complaint("ảnh pack bài bị xé còn dính ở mép mà"))
+        self.gated_store()
+        path = self.store / "pending-complaints.json"
+        self.prompt(codex_prompt("cụm card lỗi kìa"), session="s1", turn="t1")
+        for n, text in enumerate(("k thấy sai nặng à?", "h thì dài 1 chút r cũng hơi ẩu", "ảnh pack bài bị xé còn dính ở mép mà"), 2):
+            out = self.prompt(text, session="s1", turn=f"t{n}")
+            self.assertFalse(out["additionalContext"].startswith("image-studio: if "), text)
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["s1"]["quote"], text)
+        out = self.prompt("h thì dài 1 chút r cũng hơi ẩu", session="s2")  # no earlier image complaint, no open defect
+        self.assertTrue(out["additionalContext"].startswith("image-studio: if "))
+        self.assertNotIn("s2", json.loads(path.read_text(encoding="utf-8")))
+        self.ok("defect", "add", "--deliverable", "poster", "--bbox", "10,10,60,60", "--kind", "artifact", "--note", "gloves")
+        self.prompt("k thấy sai nặng à?", session="s3")  # an open user defect makes it about the image
+        self.assertIn("s3", json.loads(path.read_text(encoding="utf-8")))
+
+    def test_9_a_complaint_is_satisfied_only_by_a_defect_from_its_own_session(self):
+        self.gated_store()
+        self.prompt("cụm card lỗi kìa", session="sA")
+        self.run_cli("defect", "add", "--deliverable", "poster", "--bbox", "10,10,60,60", "--kind", "artifact",
+                     "--note", "other chat", env_extra={"CODEX_THREAD_ID": "sB"})
+        self.assertIn("never recorded", self.stop("Boss, đã sửa cụm card.", session="sA"))
+        self.run_cli("defect", "add", "--deliverable", "poster", "--bbox", "70,10,120,60", "--kind", "artifact",
+                     "--note", "cards", env_extra={"CODEX_THREAD_ID": "sA"})
+        self.assertNotIn("never recorded", self.stop("Boss, đã sửa cụm card xong.", session="sA"))
+        self.assertEqual(self.defects()[-1].get("session"), "sA")
+
+    def test_10_context_promises_a_block_only_when_a_marker_was_written(self):
+        self.gated_store()
+        self.assertNotIn("stop hook blocks", self.prompt("cụm card lỗi kìa", session="../bad")["additionalContext"])
+        self.assertIn("stop hook blocks", self.prompt("cụm card lỗi kìa", session="ok1")["additionalContext"])
 
 
 if __name__ == "__main__":
