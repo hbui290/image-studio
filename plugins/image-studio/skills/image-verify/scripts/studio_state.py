@@ -132,7 +132,10 @@ COMPLETION_PAT = re.compile(
     r"(?:is|are|now)\s+ready|ready\s+(?:to|for)\s+(?:deliver|delivery|use|ship|download)|"
     r"final\s+(?:file|version|image|poster)|"
     r"xong|hoàn\s+thành|hoàn\s+tất|đã\s+fix|ổn\s+rồi|sẵn\s+sàng|bản\s+cuối|"
-    r"đã\s+giao|bàn\s+giao|giao\s+(?:ảnh|file|poster)"
+    r"đã\s+giao|bàn\s+giao|giao\s+(?:ảnh|file|poster)|"
+    # Delivery phrases from real Codex replies that slipped through: "Boss, mở bản v19 đã sửa.", "[mở bản v21](path)".
+    # A bare "đã sửa" ends the sentence; "Đã sửa giao diện của poster." describes a step and is not a claim.
+    r"đã\s+(?:sửa|chỉnh|làm\s+lại|đồng\s+bộ|xử\s+lý|kiểm\s+tra)(?=[\s.!…)\]]*$)|kiểm\s+tra\s+đạt|bản\s+hoàn\s+thiện|mở\s+bản\s+v\d+"
     r")\b",
     re.I,
 )
@@ -650,6 +653,9 @@ def cmd_defect_add(args):
     record["history"] = [{"time": now(), "action": "add", "status": "open", "note": note}]
     defects.append(record)
     store.save_defects(defects)
+    if args.source == "user":  # the user's complaint is now recorded: the stop hook stops asking for it
+        try: (store.root / PENDING_FILE).unlink()
+        except OSError: pass
     print(f"Added defect {record['id']}")
     lesson_cmd = f"{SCRIPT_HINT} lesson add --defect {record['id']} --mistake \"...\" --cause \"...\" --check \"...\""
     if repeat:
@@ -1671,6 +1677,102 @@ def discover_hook_store(payload):
     return None, None
 
 
+# ---------------------------------------------------------------- complaints (hook prompt)
+
+# Problem words in the user's message. Vietnamese is matched as typed, with diacritics and without (and with chat
+# abbreviations: ko, k, h, r); keep both spellings and the English list when editing.
+COMPLAINT_VI = re.compile(
+    r"\b(?:lỗi|sai|xấu|gớm|lệch|méo|gãy|ẩu|hỏng|kì\s+kì|kỳ\s+kỳ|kì\s+cục|kỳ\s+cục|vẫn\s+còn|lại\s+bị|"
+    r"chưa\s+(?:đúng|đạt|ổn|tương\s+ứng|khớp|giống|chuẩn|đẹp|tự\s+nhiên)|"
+    r"(?:không|ko|k|hông|hok)\s+(?:đúng|tự\s+nhiên|giống|khớp|ổn|đẹp|hợp|chuẩn)|"
+    r"nhìn\s+(?:kì|kỳ|lạ|xấu|giả)|bị\s+(?:mất|cắt|dính|thừa|thiếu|vỡ|mờ))\b"
+    r"|\bnên\b[^.!?\n]{0,100}\bhơn\b",  # "nên nghiêng lên ... chân thật hơn": a correction, not a question
+    re.I)
+COMPLAINT_PLAIN = re.compile(
+    r"\b(?:loi|sai|xau|gom\s+giec|lech|meo\s+mo|bi\s+(?:loi|meo|lech|gay|hong|cat|mat)|van\s+con|"
+    r"chua\s+(?:dung|dat|on|tuong\s+ung|khop|giong|chuan|dep|tu\s+nhien)|"
+    r"(?:khong|ko|k|hong|hok)\s+(?:dung|tu\s+nhien|giong|khop|on|dep|hop|chuan)|nhin\s+(?:ki|ky|la|xau|gia)|"
+    r"wrong|broken|buggy|bug|glitch\w*|artifacts?|ugly|weird|messed\s+up|not\s+right|doesn'?t\s+match|"
+    r"(?:looks?|is|are|seems?|still)\s+off|fix|still\s+(?:wrong|broken|there|bad|ugly|not|looks?)|same\s+(?:problem|issue))\b",
+    re.I)
+IMAGE_MARK = re.compile(r"codex-clipboard-[\w-]+\.(?:png|jpe?g|webp)|<image\b[^>]*>?|\[Image\s*#\d+\]|Image attachment:\s*true"
+                        r"|[^\s\"'<>]+\.(?:png|jpe?g|webp)\b", re.I)
+PENDING_FILE = "pending-complaints.json"
+
+
+def request_text(prompt):
+    """The user's own words: Codex wraps a pasted image in a "# Files mentioned by the user" block before "## My request:"."""
+    text = unicodedata.normalize("NFC", prompt or "")
+    if "## My request:" in text: text = text.split("## My request:", 1)[1]
+    elif text.lstrip().startswith("# Files mentioned by the user"): text = ""
+    return " ".join(IMAGE_MARK.sub(" ", text).split())
+
+
+def image_only(prompt):
+    """An attached image with (almost) no words: the user is pointing at something."""
+    return bool(IMAGE_MARK.search(prompt or "")) and len(re.sub(r"\W", "", request_text(prompt))) < 3
+
+
+def is_complaint(text):
+    text = unicodedata.normalize("NFC", text or "")
+    return bool(COMPLAINT_VI.search(text) or COMPLAINT_PLAIN.search(text))
+
+
+def record_pending(root, session_id, quote):
+    """Remember, per session, that the user complained; defect add --source user clears it."""
+    path = root / PENDING_FILE
+    try: marker = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError): marker = {}
+    if not isinstance(marker, dict): marker = {}
+    key = session_id if valid_session_id(session_id) else ""
+    marker[key] = {"time": now(), "quote": quote, "session_id": key}
+    keep = sorted(marker.items(), key=lambda kv: str(kv[1].get("time", "") if isinstance(kv[1], dict) else ""))[-20:]
+    try: atomic_write(path, dump_json(dict(keep)))
+    except OSError: pass
+
+
+def pending_complaint(root, session_id, defects):
+    """This session's complaint marker when no user defect was added at or after it, else None."""
+    try: marker = json.loads((root / PENDING_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError): return None
+    item = marker.get(session_id if valid_session_id(session_id) else "") if isinstance(marker, dict) else None
+    if not isinstance(item, dict) or not isinstance(item.get("time"), str): return None
+    for d in defects:
+        added = next((h.get("time") for h in d.get("history") or [] if isinstance(h, dict) and h.get("action") == "add"), "")
+        if d.get("source") != "agent" and isinstance(added, str) and added >= item["time"]: return None
+    return item
+
+
+def hook_prompt(payload):
+    if not isinstance(payload, dict) or not isinstance(payload.get("prompt"), str): return ""
+    prompt = payload["prompt"]
+    words = request_text(prompt)
+    complaint, only_image = is_complaint(words), image_only(prompt)
+    root, _ = discover_hook_store(payload)
+    quote = short(words.replace('"', "'"), 200) if words else "(image only)"
+    add = (f'{SCRIPT_HINT} defect add --deliverable N --bbox x0,y0,x1,y1 --kind artifact|seam|color|logo|other '
+           f'--source user --note "..." --quote "{quote}"')
+    if root is not None and (complaint or only_image):
+        record_pending(root, payload.get("session_id"), quote)
+        text = (f'image-studio: the user is reporting a problem with the image ("{quote}"). Before you edit anything:\n'
+                + ("- They sent an image without words (image only): the region it shows is the complaint; box that region.\n"
+                   if only_image and not complaint else "")
+                + f"- Approve the exact file the user is looking at: {SCRIPT_HINT} approve deliverable --name N --file F "
+                "(first time: --width W --height H --format PNG).\n"
+                f"- Record the complaint in their words: {add}\n"
+                "- never file the user's complaint as --source agent.\n"
+                '- If defect add prints "Repeat", stop patching strokes and follow image-verify/references/construction-reference.md.\n'
+                "The stop hook blocks any claim that the work is done until this complaint is recorded.")
+    elif root is None and complaint and IMAGE_MARK.search(prompt):
+        text = (f'image-studio: the user is reporting a problem with an image ("{quote}") and no project store tracks it. '
+                f"Before editing: {SCRIPT_HINT} init --project <the image's folder> --brand <brand>; then approve deliverable "
+                f"--name N --file F --width W --height H --format PNG; then {add}. "
+                "If defect add prints \"Repeat\", follow image-verify/references/construction-reference.md.")
+    else: return ""
+    # ASCII escapes keep the JSON valid whatever the hook's stdout encoding is.
+    return json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text}})
+
+
 def hook_stop(payload):
     if not isinstance(payload, dict) or payload.get("stop_hook_active") is True: return ""
     root, _ = discover_hook_store(payload)
@@ -1684,16 +1786,24 @@ def hook_stop(payload):
     try:
         store = Store(root)
         missing = ungated(store)
-        open_defects = [d for d in store.defects() if d.get("status") == "open"]
+        defects = store.defects()
+        open_defects = [d for d in defects if d.get("status") == "open"]
         fingerprint = store_fingerprint(store)
     except UsageError as exc:
         reason = (f"image-studio: project store is corrupt: {exc}. Repair or restore {root} (state.json, "
                   "defects.jsonl) before claiming anything; meanwhile tell the user plainly that the work is not verified.")
         return block_once(root, payload, message, "corrupt:" + str(exc), reason)
+    pending = pending_complaint(root, payload.get("session_id"), defects)
 
-    if not (missing or open_defects): return ""
+    if not (missing or open_defects or pending): return ""
 
-    problems = [f"{short(d.get('note', ''), limit=80)} ({d.get('id')})" for d in open_defects]
+    problems = []
+    if pending:
+        problems.append(f'the user\'s complaint "{short(pending.get("quote"), 80)}" was never recorded: approve the file they '
+                        f'are looking at and run {SCRIPT_HINT} defect add ... --source user --quote "their words" before '
+                        "editing or claiming anything")
+        fingerprint += ":pending:" + pending["time"]
+    problems += [f"{short(d.get('note', ''), limit=80)} ({d.get('id')})" for d in open_defects]
     problems += [f"{name} has not passed the final check" for name in missing if name not in {d.get('deliverable') for d in open_defects}]
     reason = ("image-studio: you said the work is done, but it is not yet: " + "; ".join(problems) + ". "
               "Tell the user in their language and plain words what is still wrong (defect IDs only in parentheses) "
@@ -1724,7 +1834,10 @@ def run_hook(argv):
         raw = "" if sys.stdin is None or sys.stdin.isatty() else sys.stdin.read()
         try: payload = json.loads(raw) if raw.strip() else {}
         except ValueError: payload = None
-        out = hook_stop(payload) if (mode == "stop" and payload is not None) else (hook_session_start(payload or {}) if mode == "session-start" else "")
+        if mode == "stop": out = hook_stop(payload) if payload is not None else ""
+        elif mode == "session-start": out = hook_session_start(payload or {})
+        elif mode == "prompt": out = hook_prompt(payload)
+        else: out = ""
         if out: sys.stdout.write(out + "\n"); sys.stdout.flush()
     except BaseException: pass
     return 0
@@ -2807,7 +2920,12 @@ subcommands:
                                          focus share of the crop, "focus does not fit", or "image too small for this ratio"; --display: the image must be 2x WxH on both axes;
                                          --out-dir writes crop-16x9.png, crop-4x5.png, crop-1x1.png, crop-9x16.png; exit 1 on any problem
                                          example: python3 studio_state.py crop-check --image hero.png --focus 820,300,1240,900 --display 1440x810 --out-dir crops
-  hook session-start | hook stop         example: python3 studio_state.py hook session-start < payload.json
+  hook session-start | hook prompt | hook stop
+                                         example: python3 studio_state.py hook session-start < payload.json
+                                         hook prompt (UserPromptSubmit): a complaint (Vietnamese or English problem words, or an image
+                                         with no words) where a store exists prints {"hookSpecificOutput": {"hookEventName":
+                                         "UserPromptSubmit", "additionalContext": ...}} and writes pending-complaints.json; hook stop
+                                         then blocks a completion claim until defect add --source user records it
 
 approve, defect, construction, brief, gate and verdict find the store by walking up from --project or the current folder.
 init creates it; pref add does not use the project store; lessons (lessons.jsonl) and taste notes (brands/<brand>/taste.jsonl, taste.jsonl) live in ${IMAGE_STUDIO_HOME:-~/.image-studio}, shared by every task; hooks use the cwd from the hook input.
@@ -2973,7 +3091,7 @@ def build_parser():
     p.set_defaults(func=cmd_brand_show)
 
     p = sub.add_parser("hook")
-    p.add_argument("mode", choices=("session-start", "stop"))
+    p.add_argument("mode", choices=("session-start", "prompt", "stop"))
     return parser
 
 

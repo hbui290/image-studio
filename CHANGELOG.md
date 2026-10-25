@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.25.0-local.1 (2026-10-25)
+
+The host can no longer skip the defect loop silently. On 2026-10-22 the user complained about 12 times in one Codex session with the store in the session's folder, and `defect add` was never called. No new dependency.
+
+- **`hook prompt` (UserPromptSubmit, new in `hooks/hooks.json`):** classifies each user message as a complaint: Vietnamese problem words typed with or without diacritics and chat shorthand ("lỗi"/"loi", "sai", "chưa đúng"/"chua dung", "ko"/"k"/"không" + "đúng"/"tự nhiên", "xấu", "gớm", "lệch", "méo", "gãy", "ẩu", "chưa tương ứng", "nhìn kì", "nên ... hơn"), English ("wrong", "broken", "looks off", "fix", "still ..."), or an image with no words. Codex's "# Files mentioned by the user ... ## My request:" image wrapper is stripped first, so only the user's own words are classified. With a store, it prints `{"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": ...}}` telling the agent to approve the file the user is looking at, run `defect add --source user --quote "<their words>"` before editing, never file it as `--source agent`, and follow construction-reference.md on "Repeat"; and it writes a pending-complaint marker (time, quote, session) to the store's `pending-complaints.json`. Without a store it speaks only for a complaint with an attached image, suggesting `init` and `approve deliverable`. Exit 0 and silent on any failure. Output format checked against the JSON schema embedded in codex-cli 0.163 (`user-prompt-submit.command.output`, the same shape Claude Code uses); in that build additionalContext is allowed for SessionStart, UserPromptSubmit, PreToolUse, PostToolUse and SubagentStart, not for Stop.
+- **Stop:** a completion claim is blocked while this session's complaint marker has no user defect added at or after it (once per message, through the existing block marker); `defect add --source user` clears the marker, an agent defect does not.
+- **Completion claims:** Vietnamese delivery phrases from real replies now count: "Boss, mở bản v19 đã sửa.", "đã xử lý lỗi và kiểm tra đạt", "bản hoàn thiện đã kiểm tra", "bản sửa đã xong", "mở bản v19" (also as the text of a Markdown link to the file), and a bare "đã sửa", "đã chỉnh", "đã làm lại", "đã đồng bộ", "đã xử lý", or "đã kiểm tra" that ends the sentence. "Đã sửa giao diện của poster." (a step with its object) still passes, as do progress updates, questions, "chưa đạt", and honest reports.
+- **Docs:** project-memory (hooks) and README describe the prompt hook; Codex asks the user to trust the hooks again after `hooks.json` changes.
+
 ## 2.24.0-local.1 (2026-10-24)
 
 Repeat-region escalation and construction rules. In a real session the user pointed at the same torn booster pack about ten times while the agent patched one stroke at a time, misread how the tear works, looked for reference photos only when asked, and recorded no defect or lesson. No new dependency.

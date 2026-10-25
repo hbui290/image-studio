@@ -1,5 +1,5 @@
 {
-  "description": "Image Studio project memory: print the .image-studio brief at session start; at stop, block a completion claim. Both exit 0 when python3, the script, or a project store is missing.",
+  "description": "Image Studio project memory: print the .image-studio brief at session start; on a user complaint, tell the agent to record it with defect add; at stop, block a completion claim. All exit 0 when python3, the script, or a project store is missing.",
   "hooks": {
     "SessionStart": [
       {
@@ -9,6 +9,17 @@
             "type": "command",
             "command": "S=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/skills/image-verify/scripts/studio_state.py\"; P=$(command -v python3 || command -v python); if [ -n \"$P\" ] && [ -f \"$S\" ]; then \"$P\" \"$S\" hook session-start 2>/dev/null; fi; exit 0",
             "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "S=\"${CLAUDE_PLUGIN_ROOT:-$PLUGIN_ROOT}/skills/image-verify/scripts/studio_state.py\"; P=$(command -v python3 || command -v python); if [ -n \"$P\" ] && [ -f \"$S\" ]; then \"$P\" \"$S\" hook prompt 2>/dev/null; fi; exit 0",
+            "timeout": 5
           }
         ]
       }

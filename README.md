@@ -65,7 +65,7 @@ Only the skill that matches is loaded; the others cost a line each.
 | References | 31 | Detailed rules, opened only when a step needs them |
 | Scripts (Python, one Swift helper) | 14 | Measurements the agent runs instead of guessing: `studio_state.py` (memory, gate, defects, `axis-check`, `align-check` with `--auto`, `blend`, `edit-check`, `mask-from-diff`, `shape-check`, `crop-check`), `accel.py` (optional numpy/OpenCV engine), `review.py` and `controller.py` (review rounds), `audit_candidate.py` (pixel audit), `mac_vision.py` (Apple Vision), `compose_layers.py` (text and logo layers) |
 | Agents | 2 | `image-hunter` finds problems, `image-reviewer` judges results; neither is the agent that made the image |
-| Hooks | 2 | Memory card at session start; block "done" until the gate passes |
+| Hooks | 3 | Memory card at session start; record every user complaint as a defect; block "done" until the gate passes |
 
 Runtime needs only Python with Pillow and jsonschema: no local AI model and no GPU. The measuring commands take one to three seconds on a 4K image. With the optional numpy and OpenCV, the pixel work of `blend` and `edit-check` runs about 5x faster and `align-check --auto` can find a patch's position.
 
@@ -94,7 +94,7 @@ Model choice by image type, measured results, and licence notes: [enhancement re
 
 `studio_state.py init --project PATH --brand ID` creates a `.image-studio/` folder in the project. It keeps approved files (by hash), every reported problem with a stable ID (`D1`, `D2`, ...), and decisions. Lessons and taste notes are shared by every task in `~/.image-studio/` (or `$IMAGE_STUDIO_HOME`).
 
-Two hooks run in Codex (trust them once) and Claude Code: **SessionStart** prints a short memory card when the folder has a store, and **Stop** blocks a "done" or "xong" message while a deliverable has not passed the gate. Both stay silent without a store. Details: [project memory](plugins/image-studio/skills/image-verify/references/project-memory.md); how pass, fail, and stop are decided: [decisions](plugins/image-studio/skills/image-verify/references/decisions.md).
+Three hooks run in Codex and Claude Code: **SessionStart** prints a short memory card when the folder has a store; **UserPromptSubmit** spots a complaint ("lỗi", "sai", "chưa đúng", "wrong", or an image with no words) and tells the agent to record it with `defect add --source user` before editing; **Stop** blocks a "done", "xong", or "đã sửa" message while a deliverable has not passed the gate or a complaint was never recorded. All stay silent without a store (a complaint with an attached image suggests creating one). Codex asks you to trust the hooks once, and again after an update changes `hooks.json`. Details: [project memory](plugins/image-studio/skills/image-verify/references/project-memory.md); how pass, fail, and stop are decided: [decisions](plugins/image-studio/skills/image-verify/references/decisions.md).
 
 ## Limits
 

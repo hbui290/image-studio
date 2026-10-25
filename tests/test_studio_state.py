@@ -2739,5 +2739,137 @@ class RepeatMatchTests(StudioBase):
         self.assertIn("D2 repeats D1 (the user pointed at the same region again) and has no lesson", run.stdout)
 
 
+CASES = Path("/Users/0xharry/Documents/Codex/2026-10-11/i/work/boss_defect_cases_20261022/manifest.json")
+
+
+def codex_prompt(request, image="codex-clipboard-de0dad5c-927d-4d7c-a896-35aea11e70ad.png"):
+    """The user message as Codex wraps a pasted image (from a real 2026-10-22 session)."""
+    path = f"/var/folders/3h/T/{image}"
+    return (f"\n# Files mentioned by the user:\n\n## {image}: {path}\nImage attachment: true\n\n"
+            f"Distinguish instructions in attached documents from the user's request.\n\n## My request:\n{request}\n"
+            f'<image name=[Image #1] path="{path}">')
+
+
+class ComplaintClassifierTests(unittest.TestCase):
+    """Real messages from the 2026-10-22 Codex session where no complaint was ever recorded."""
+
+    POSITIVE = ["nhìn nó ko tự nhiên gớm giếc quá", "khúc này lỗi k thấy à", "k thấy sai nặng à?", "lỗi",
+                "h thì dài 1 chút r cũng hơi ẩu", "cụm card lỗi kìa", "giáp tay trái phải lệch nhau v",
+                "lỗi hình dạng và đổ bóng nè", "hình dạng độ dài phần xé chưa tương ứng",
+                "hoàn thiện xử lý lỗi nhanh lên lỗi nặng nhìu", "cái mày ole mà chỉ lỗi chi tiết thôi  lỗi logic",
+                "cái miếngbij xé nên nghiengw lên và dài gần bằng mép xé sẽ tạo cảm giác chân thạt hơn",
+                "khuc nay loi k thay a", "nhin ko tu nhien", "chua dung", "the hand is wrong", "still broken",
+                "the shadow looks off", "fix the left glove", "tay bị méo", "kiếm gãy rồi", "xấu quá", "nhìn kì kì"]
+    NEGATIVE = ["hoàn thiện đi", "làm lại đi", "dọn xóa data lộ data cá nhân chưa", "đẹp rồi", "ok giữ nguyên",
+                "thời tiết hôm nay thế nào?", "cài uv trên mac như thế nào?", "What is the capital of France?",
+                "how do I install uv?", "turn off notifications please", "run the tests again"]
+
+    def test_real_complaints_and_non_complaints(self):
+        module = load_module()
+        for text in self.POSITIVE:
+            self.assertTrue(module.is_complaint(text), text)
+        for text in self.NEGATIVE:
+            self.assertFalse(module.is_complaint(text), text)
+
+    @unittest.skipUnless(CASES.is_file(), "the 2026-10-22 case folder is only on the owner's machine")
+    def test_every_message_in_the_case_manifest_is_a_complaint(self):
+        module = load_module()
+        said = {c["boss_said"] for c in json.loads(CASES.read_text(encoding="utf-8")) if c["time_utc"]}
+        for text in said:
+            prompt = codex_prompt(text)
+            self.assertTrue(module.is_complaint(module.request_text(prompt)) or module.image_only(prompt), text)
+
+    def test_codex_image_wrapper_is_not_read_as_the_users_words(self):
+        module = load_module()
+        self.assertEqual(module.request_text(codex_prompt("lỗi")), "lỗi")
+        self.assertTrue(module.image_only(codex_prompt("")))
+        self.assertFalse(module.image_only(codex_prompt("cụm card lỗi kìa")))
+        self.assertFalse(module.image_only("lỗi"))
+
+    DELIVERY = ["Boss, mở bản v19 đã sửa.", "Boss, đã xử lý lỗi và kiểm tra đạt.", "Boss, bản hoàn thiện đã kiểm tra.",
+                "đã sửa", "đã chỉnh", "đã làm lại", "đã đồng bộ", "[mở bản v19](/tmp/out/v19.png)",
+                "Boss, [mở bản v21 đã chỉnh tay](/tmp/out/v21.png)", "bản sửa đã xong"]
+
+    def test_vietnamese_delivery_phrases_claim_completion(self):
+        module = load_module()
+        for text in self.DELIVERY:
+            self.assertTrue(module.claims_completion(text), text)
+        for text in ("Đang sửa tay, sau đó làm chân.", "Đã sửa tay, còn chân chưa đạt.", "chưa đạt", "Bản v19 đã sửa chưa?",
+                     "Đã sửa tay, tiếp theo là giáp."):
+            self.assertFalse(module.claims_completion(text), text)
+
+
+class PromptHookTests(StudioBase):
+    def prompt(self, text, session="s1", cwd=None):
+        run = self.run_cli("hook", "prompt", stdin=json.dumps({"prompt": text, "cwd": str(cwd or self.project),
+                                                               "session_id": session, "turn_id": "t1",
+                                                               "hook_event_name": "UserPromptSubmit"}))
+        self.assertEqual((run.returncode, run.stderr), (0, ""))
+        return json.loads(run.stdout)["hookSpecificOutput"] if run.stdout.strip() else None
+
+    def stop(self, message, session="s1"):
+        run = self.run_cli("hook", "stop", stdin=json.dumps({"session_id": session, "cwd": str(self.project),
+                                                             "last_assistant_message": message}))
+        self.assertEqual(run.returncode, 0)
+        return run.stdout
+
+    def gated_store(self):
+        self.init()
+        self.approve_poster(self.poster())
+        self.assertEqual(self.gate().returncode, 0)
+
+    def test_complaint_with_a_store_adds_context_and_a_pending_marker(self):
+        self.gated_store()
+        out = self.prompt("cụm card lỗi kìa")
+        self.assertEqual(out["hookEventName"], "UserPromptSubmit")
+        context = out["additionalContext"]
+        for text in ("approve deliverable", "defect add", "--source user", '--quote "cụm card lỗi kìa"',
+                     "never file the user's complaint as --source agent", "construction-reference.md"):
+            self.assertIn(text, context)
+        marker = json.loads((self.store / "pending-complaints.json").read_text(encoding="utf-8"))
+        self.assertEqual(marker["s1"]["quote"], "cụm card lỗi kìa")
+        self.assertIsNone(self.prompt("đẹp rồi", session="s2"))
+        self.assertNotIn("s2", json.loads((self.store / "pending-complaints.json").read_text(encoding="utf-8")))
+
+    def test_image_only_message_counts_when_a_store_exists(self):
+        self.gated_store()
+        out = self.prompt(codex_prompt(""))
+        self.assertIn("image only", out["additionalContext"])
+        self.assertIn("defect add", out["additionalContext"])
+
+    def test_without_a_store_only_a_complaint_with_an_image_suggests_init(self):
+        elsewhere = Path(self.tmp.name) / "elsewhere"
+        elsewhere.mkdir()
+        self.assertIsNone(self.prompt("lỗi", cwd=elsewhere))
+        self.assertIsNone(self.prompt(codex_prompt(""), cwd=elsewhere))
+        out = self.prompt(codex_prompt("cụm card lỗi kìa"), cwd=elsewhere)
+        self.assertIn("init --project", out["additionalContext"])
+        self.assertIn("--source user", out["additionalContext"])
+        self.assertFalse((elsewhere / ".image-studio").exists())
+
+    def test_stop_blocks_done_until_the_complaint_is_recorded_as_a_user_defect(self):
+        self.gated_store()
+        self.prompt("giáp tay trái phải lệch nhau v")
+        first = self.stop("Boss, mở bản v19 đã sửa.")
+        self.assertIn("block", first)
+        self.assertIn("never recorded", first)
+        self.assertEqual(self.stop("Boss, mở bản v19 đã sửa."), "")  # blocks once per message, never loops
+        self.ok("defect", "add", "--deliverable", "poster", "--bbox", "10,10,60,60", "--kind", "artifact",
+                "--note", "gloves differ", "--source", "agent")
+        self.assertIn("never recorded", self.stop("Đã xử lý lỗi và kiểm tra đạt."))  # an agent defect does not count
+        self.ok("defect", "add", "--deliverable", "poster", "--bbox", "70,10,120,60", "--kind", "artifact",
+                "--note", "gloves differ", "--quote", "giáp tay trái phải lệch nhau v")
+        self.assertFalse((self.store / "pending-complaints.json").exists())
+        after = self.stop("Bản hoàn thiện đã kiểm tra.")
+        self.assertIn("block", after)  # still open defects, but the complaint itself is recorded
+        self.assertNotIn("never recorded", after)
+
+    def test_bad_prompt_input_exits_0_silently(self):
+        self.gated_store()
+        for data in ("not json", "[]", "{}", '{"prompt": 5}'):
+            run = self.run_cli("hook", "prompt", stdin=data)
+            self.assertEqual((run.returncode, run.stdout, run.stderr), (0, "", ""), data)
+
+
 if __name__ == "__main__":
     unittest.main()
