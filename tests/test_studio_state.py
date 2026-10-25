@@ -28,6 +28,7 @@ SCRIPT = ROOT / "plugins/image-studio/skills/image-verify/scripts/studio_state.p
 CARD = (120, 40, 170, 110)  # the "dragon card" the user asked to remove (Oct 16-17)
 LOGO_BOX = [20, 20, 80, 80]  # where the logo sits in the poster
 DOTS = ([2, 2, 22, 22], [20, 120, 40, 140], [170, 5, 190, 25])  # D1-D3: small artifacts fixed earlier
+SESSION_ENV = ("CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_CODE_SESSION_ID")
 
 
 def load_module():
@@ -63,7 +64,8 @@ class StudioBase(unittest.TestCase):
         self.tmp.cleanup()
 
     def run_cli(self, *args, stdin=None, cwd=None, home=None, env_extra=None):
-        env = dict(os.environ, IMAGE_STUDIO_HOME=str(home or self.home), **(env_extra or {}))
+        env = {k: v for k, v in os.environ.items() if k not in SESSION_ENV}  # the host's own session must not leak in
+        env.update(IMAGE_STUDIO_HOME=str(home or self.home), **(env_extra or {}))
         run = subprocess.run([sys.executable, str(SCRIPT)] + [str(a) for a in args], input=stdin,
                              capture_output=True, text=True, cwd=str(cwd or self.project), env=env)
         self.assertNotIn("Traceback", run.stderr, run.stderr)
@@ -98,7 +100,7 @@ class StudioBase(unittest.TestCase):
     def defect(self, bbox, kind="scope", note="x", source="user"):
         args = ["defect", "add", "--deliverable", "poster", "--bbox", ",".join(map(str, bbox)),
                 "--kind", kind, "--source", source, "--note", note]
-        return self.ok(*args).stdout.strip().split()[-1]
+        return self.ok(*args).stdout.split("Added defect ", 1)[1].split()[0]
 
     def gate(self, *extra):
         return self.run_cli("gate", "--deliverable", "poster", *extra)
@@ -2483,6 +2485,528 @@ class CropCheckTests(StudioBase):
             self.assertEqual(run.returncode, 2, (extra, run.stdout, run.stderr))
         help_text = subprocess.run([sys.executable, str(SCRIPT), "--help"], capture_output=True, text=True).stdout
         for name in ("crop-check", "shape-check", "--no-align-check", "--accept"): self.assertIn(name, help_text)
+
+
+class ConstructionTests(StudioBase):
+    """The user pointing at the same region again means stroke patching failed: research how the object is built."""
+
+    RULE = "torn top strip stays attached at one end; its length equals the tear edge"
+
+    def setUp(self):
+        super().setUp()
+        self.init()
+        self.approve_poster(self.poster())
+
+    def add(self, bbox, *extra):
+        return self.ok("defect", "add", "--deliverable", "poster", "--bbox", ",".join(map(str, bbox)),
+                       "--kind", "artifact", "--note", "torn pack edge", *extra).stdout
+
+    def construction(self, *extra):
+        return self.run_cli("construction", "add", "--defect", "D2", "--object", "booster pack", "--rule", self.RULE, *extra)
+
+    def test_user_repeat_on_the_same_region_needs_construction_and_a_lesson(self):
+        self.add([10, 10, 60, 60])
+        out = self.add([20, 20, 70, 70])  # IoU 0.47
+        d2 = self.defects()[1]
+        self.assertEqual(d2["repeat_of"], ["D1"])
+        self.assertTrue(d2["needs_construction"])
+        self.assertTrue(d2["needs_lesson"])
+        for text in ("already reported (D1)", "construction-reference.md", "construction add --defect D2", "lesson add --defect D2"):
+            self.assertIn(text, out)
+        self.add([10, 10, 90, 90])    # D3 (21% of the image) overlaps D1 and D2
+        self.assertEqual(self.defects()[2]["repeat_of"], ["D1", "D2"])
+        self.add([55, 55, 75, 75])    # D4: IoU under 0.1 with D2 and D3, but its center is inside both; D1 is missed
+        self.assertEqual(self.defects()[3]["repeat_of"], ["D2", "D3"])
+
+    def test_no_repeat_for_other_regions_agent_defects_or_scope_requests(self):
+        self.add([10, 10, 60, 60])
+        self.add([120, 80, 180, 140])
+        self.add([10, 10, 60, 60], "--source", "agent")
+        out = self.add([10, 10, 60, 60], "--kind", "scope", "--quote", "make the tear longer")
+        self.assertNotIn("already reported", out)
+        self.add([120, 80, 180, 140])  # control: a user defect on D2's region is the only repeat
+        defects = self.defects()
+        for d in defects[:4]:
+            self.assertNotIn("repeat_of", d)
+            self.assertNotIn("needs_construction", d)
+            self.assertNotIn("needs_lesson", d)
+        self.assertEqual(defects[4]["repeat_of"], ["D2"])
+
+    def test_gate_fails_until_the_construction_rule_is_recorded(self):
+        self.add([10, 10, 60, 60])
+        self.add([20, 20, 70, 70])
+        for did in ("D1", "D2"):
+            self.ok("defect", "close", "--id", did, "--status", "wontfix", "--note", "ok", "--quote", "leave it")
+        self.ok("lesson", "add", "--defect", "D2", "--mistake", "patched one stroke at a time", "--cause", "never worked out the tear",
+                "--check", "state the construction before editing")
+        run = self.gate()
+        self.assertEqual(run.returncode, 1)
+        self.assertIn("D2 repeats D1 and has no construction rule", run.stdout)
+        self.assertIn("construction add --defect D2", run.stdout)
+        self.assertEqual(self.construction("--quote", "the strip hangs from the left end").returncode, 0)
+        run = self.gate()
+        self.assertEqual(run.returncode, 0, run.stdout)
+        card = lambda: self.run_cli("hook", "session-start", stdin=json.dumps({"cwd": str(self.project)})).stdout
+        self.assertIn("gate passed", card())
+        (self.store / "construction.jsonl").write_text("")
+        self.assertIn("gate not passed", card())
+
+    def test_construction_add_bad_input_exits_2(self):
+        self.add([10, 10, 60, 60])
+        self.add([20, 20, 70, 70])
+        (self.project / "notes.png").write_text("not an image")
+        for extra in ((), ("--ref", "notes.png"), ("--ref", "missing.png"), ("--quote", " ")):
+            run = self.construction(*extra)
+            self.assertEqual(run.returncode, 2, (extra, run.stdout, run.stderr))
+            self.assertIn("error:", run.stderr)
+        run = self.run_cli("construction", "add", "--defect", "D9", "--object", "pack", "--rule", self.RULE, "--quote", "x")
+        self.assertEqual(run.returncode, 2)
+        self.assertIn("unknown defect", run.stderr)
+        self.assertFalse((self.store / "construction.jsonl").exists())
+
+    def test_rule_with_refs_is_stored_and_shown_in_brief_and_card(self):
+        self.add([10, 10, 60, 60])
+        self.add([20, 20, 70, 70])
+        refs = self.project / "refs"
+        refs.mkdir()
+        Image.new("RGB", (40, 30), (90, 90, 90)).save(refs / "tear-1.jpg")
+        self.assertEqual(self.construction("--ref", "refs/tear-1.jpg").returncode, 0)
+        record = json.loads((self.store / "construction.jsonl").read_text().splitlines()[0])
+        self.assertEqual(record["defect"], "D2")
+        self.assertEqual(record["refs"][0]["path"], "refs/tear-1.jpg")
+        self.assertEqual(len(record["refs"][0]["sha256"]), 64)
+        self.assertIn(self.RULE, self.ok("construction", "list").stdout)
+        self.assertIn(self.RULE, self.ok("brief").stdout)
+        card = self.run_cli("hook", "session-start", stdin=json.dumps({"cwd": str(self.project)})).stdout
+        self.assertIn("booster pack", card)
+        self.assertIn("torn top strip", card)
+
+
+class RepeatMatchTests(StudioBase):
+    """Which earlier reports count, across renamed, re-approved, and rescaled copies of the same artwork."""
+
+    BOX = [100, 80, 150, 130]  # on a 200x150 image
+
+    def setUp(self):
+        super().setUp()
+        self.init()
+
+    def deliverable(self, name, w, h, quote=None, color=None):
+        """One artwork (a ramp with a disc) at any size, or a flat single-color image when color is given."""
+        path = self.project / f"{name}-{w}x{h}.png"
+        img = Image.new("RGB", (200, 150), color or (0, 0, 0))
+        if color is None:
+            draw = ImageDraw.Draw(img)
+            for x in range(200):
+                draw.line([(x, 0), (x, 149)], fill=(x * 255 // 199, 90, 255 - x * 255 // 199))
+            draw.ellipse((120, 20, 180, 80), fill=(250, 220, 40))
+        img.resize((w, h), Image.LANCZOS).save(path)
+        extra = ["--quote", quote] if quote else []
+        self.ok("approve", "deliverable", "--name", name, "--file", path, "--width", w, "--height", h, "--format", "PNG", *extra)
+
+    def add(self, name, box, *extra):
+        out = self.ok("defect", "add", "--deliverable", name, "--bbox", ",".join(map(str, box)), "--kind", "artifact",
+                      "--note", "torn edge", *extra).stdout
+        return self.defects()[-1], out
+
+    def test_size_at_report_time_survives_a_re_approval(self):
+        self.deliverable("illus", 200, 150)
+        d1, _ = self.add("illus", self.BOX)
+        self.assertEqual(d1["image_size"], [200, 150])
+        self.deliverable("illus", 400, 300, quote="make it 400 wide")
+        self.deliverable("other", 400, 300)
+        unrelated, _ = self.add("other", self.BOX)  # same pixels, a different part of a 2x image
+        self.assertNotIn("repeat_of", unrelated)
+        self.deliverable("v9", 200, 150)
+        again, _ = self.add("v9", self.BOX)
+        self.assertEqual(again["repeat_of"], ["D1"])
+
+    def test_renamed_copy_at_the_same_size_ignores_agent_findings(self):
+        self.deliverable("poster", 200, 150)
+        self.add("poster", self.BOX)
+        self.add("poster", self.BOX, "--source", "agent")
+        self.deliverable("poster-v2", 200, 150)
+        again, _ = self.add("poster-v2", self.BOX)
+        self.assertEqual(again["repeat_of"], ["D1"])
+
+    def test_scaled_or_cropped_copy_is_matched_by_fractions_but_not_another_aspect(self):
+        self.deliverable("small", 200, 150)
+        self.add("small", self.BOX)
+        self.deliverable("big", 400, 300)
+        self.assertEqual(self.add("big", [200, 160, 300, 260])[0]["repeat_of"], ["D1"])
+        self.deliverable("crop", 200, 149)  # aspect within 1%
+        self.assertEqual(self.add("crop", self.BOX)[0]["repeat_of"], ["D1", "D2"])
+        self.deliverable("square", 150, 150)
+        self.assertNotIn("repeat_of", self.add("square", self.BOX)[0])
+
+    def test_scope_request_is_not_an_earlier_complaint(self):
+        self.deliverable("poster", 200, 150)
+        self.add("poster", self.BOX, "--kind", "scope", "--quote", "make the strip longer")
+        first, out = self.add("poster", self.BOX)
+        self.assertNotIn("repeat_of", first)
+        self.assertNotIn("already reported", out)
+        self.assertEqual(self.add("poster", self.BOX)[0]["repeat_of"], ["D2"])
+
+    def test_wide_box_around_an_earlier_small_box_is_a_repeat(self):
+        self.deliverable("poster", 200, 150)
+        self.add("poster", [100, 80, 116, 96])
+        wide, _ = self.add("poster", [60, 60, 140, 140])  # 21% of the image; IoU 0.04, center outside, old box fully inside
+        self.assertEqual(wide["repeat_of"], ["D1"])
+
+    def artwork(self, name, size, flip=False, edit=False):
+        """Two different artworks: a dark-to-light ramp with a disc, or its mirror. edit paints a small local patch."""
+        img = Image.new("RGB", (200, 200))
+        draw = ImageDraw.Draw(img)
+        for x in range(200):
+            v = (199 - x if flip else x) * 255 // 199
+            draw.line([(x, 0), (x, 199)], fill=(v, v // 2, 255 - v))
+        draw.ellipse((20, 120, 80, 180) if flip else (120, 20, 180, 80), fill=(250, 220, 40))
+        if edit: draw.rectangle((90, 90, 110, 110), fill=(0, 0, 0))
+        img = img.resize(size, Image.LANCZOS)
+        path = self.project / f"{name}.png"
+        img.save(path)
+        self.ok("approve", "deliverable", "--name", name, "--file", path, "--width", size[0], "--height", size[1], "--format", "PNG")
+
+    def test_different_artworks_of_the_same_aspect_never_match(self):
+        self.artwork("illus", (200, 200))
+        self.add("illus", [100, 80, 150, 130])
+        self.artwork("icon", (100, 100), flip=True)  # another artwork, another size, same region
+        self.assertNotIn("repeat_of", self.add("icon", [50, 40, 75, 65])[0])
+        self.artwork("other", (200, 200), flip=True)  # the icon's artwork at the illustration's size
+        self.assertEqual(self.add("other", [100, 80, 150, 130])[0]["repeat_of"], ["D2"])
+
+    def test_same_artwork_renamed_scaled_or_locally_edited_still_matches(self):
+        self.artwork("illus", (200, 200))
+        self.add("illus", [100, 80, 150, 130])
+        self.artwork("illus-v2", (200, 200), edit=True)
+        self.assertEqual(self.add("illus-v2", [100, 80, 150, 130])[0]["repeat_of"], ["D1"])
+        self.artwork("illus-2x", (400, 400), edit=True)
+        self.assertEqual(self.add("illus-2x", [200, 160, 300, 260])[0]["repeat_of"], ["D1", "D2"])
+        # A record from before fingerprints: the earlier deliverable's current file stands in for it.
+        lines = [json.loads(l) for l in (self.store / "defects.jsonl").read_text().splitlines()]
+        for d in lines: d.pop("fingerprint")
+        (self.store / "defects.jsonl").write_text("".join(json.dumps(d) + "\n" for d in lines))
+        self.artwork("illus-v3", (200, 200))
+        self.assertEqual(self.add("illus-v3", [100, 80, 150, 130])[0]["repeat_of"], ["D1", "D2", "D3"])
+        self.artwork("stranger", (200, 200), flip=True)
+        self.assertNotIn("repeat_of", self.add("stranger", [100, 80, 150, 130])[0])
+
+    def test_whole_image_box_is_not_a_repeat_of_every_earlier_defect(self):
+        self.deliverable("poster", 200, 150)
+        self.add("poster", self.BOX)
+        self.add("poster", [10, 10, 40, 40])
+        whole, _ = self.add("poster", [0, 0, 200, 150])
+        self.assertNotIn("repeat_of", whole)
+
+    def test_an_earlier_whole_image_complaint_does_not_swallow_later_ones(self):
+        self.deliverable("poster", 200, 150)
+        self.add("poster", [0, 0, 200, 150], "--kind", "color")  # "the whole poster is too warm"
+        hand, _ = self.add("poster", [20, 20, 60, 60])
+        self.assertNotIn("repeat_of", hand)
+        self.deliverable("poster-v2", 200, 150)
+        copy, _ = self.add("poster-v2", [120, 80, 170, 130])
+        self.assertNotIn("repeat_of", copy)
+        self.assertEqual(self.add("poster-v2", [125, 85, 165, 125])[0]["repeat_of"], ["D3"])
+
+    def test_flat_images_are_not_the_same_artwork_across_deliverables(self):
+        self.deliverable("white", 200, 150, color=(255, 255, 255))
+        self.add("white", self.BOX)
+        self.deliverable("grey", 200, 150, color=(128, 128, 128))
+        self.assertNotIn("repeat_of", self.add("grey", self.BOX)[0])
+        self.assertEqual(self.add("white", self.BOX)[0]["repeat_of"], ["D1"])  # the same deliverable still matches
+        module = load_module()
+        flat = module.fingerprint(Image.new("RGB", (50, 50), (40, 40, 40)))
+        self.assertGreater(module.fingerprint_distance(flat, flat), module.ARTWORK_DISTANCE)
+
+    def test_a_local_edit_keeps_the_fingerprint_within_the_threshold(self):
+        module = load_module()
+        self.artwork("a", (200, 200))
+        self.artwork("a-edit", (200, 200), edit=True)
+        self.artwork("b", (200, 200), flip=True)
+        fp = {n: module.fingerprint(Image.open(self.project / f"{n}.png")) for n in ("a", "a-edit", "b")}
+        self.assertLess(module.fingerprint_distance(fp["a"], fp["a-edit"]), module.ARTWORK_DISTANCE)
+        self.assertGreater(module.fingerprint_distance(fp["a"], fp["b"]), module.ARTWORK_DISTANCE)
+
+    def test_repeat_has_its_own_wording_on_a_never_gated_deliverable(self):
+        self.deliverable("poster", 200, 150)
+        self.add("poster", self.BOX)
+        _, out = self.add("poster", self.BOX)
+        self.assertNotIn("after delivery", out)
+        self.assertIn("pointed at the same region again", out)
+        for did in ("D1", "D2"):
+            self.ok("defect", "close", "--id", did, "--status", "wontfix", "--note", "ok", "--quote", "leave it")
+        run = self.run_cli("gate", "--deliverable", "poster")
+        self.assertEqual(run.returncode, 1)
+        self.assertNotIn("reported after delivery", run.stdout)
+        self.assertIn("D2 repeats D1 (the user pointed at the same region again) and has no lesson", run.stdout)
+
+
+CASES = Path("/Users/0xharry/Documents/Codex/2026-10-11/i/work/boss_defect_cases_20261022/manifest.json")
+
+
+def codex_prompt(request, image="codex-clipboard-de0dad5c-927d-4d7c-a896-35aea11e70ad.png"):
+    """The user message as Codex wraps a pasted image (from a real 2026-10-22 session)."""
+    path = f"/var/folders/3h/T/{image}"
+    return (f"\n# Files mentioned by the user:\n\n## {image}: {path}\nImage attachment: true\n\n"
+            f"Distinguish instructions in attached documents from the user's request.\n\n## My request:\n{request}\n"
+            f'<image name=[Image #1] path="{path}">\n</image>\n')
+
+
+class ComplaintClassifierTests(unittest.TestCase):
+    """Real messages from the 2026-10-22 Codex session where no complaint was ever recorded."""
+
+    POSITIVE = ["nhìn nó ko tự nhiên gớm giếc quá", "khúc này lỗi k thấy à", "k thấy sai nặng à?", "lỗi",
+                "h thì dài 1 chút r cũng hơi ẩu", "cụm card lỗi kìa", "giáp tay trái phải lệch nhau v",
+                "lỗi hình dạng và đổ bóng nè", "hình dạng độ dài phần xé chưa tương ứng",
+                "hoàn thiện xử lý lỗi nhanh lên lỗi nặng nhìu", "cái mày ole mà chỉ lỗi chi tiết thôi  lỗi logic",
+                "cái miếngbij xé nên nghiengw lên và dài gần bằng mép xé sẽ tạo cảm giác chân thạt hơn",
+                "khuc nay loi k thay a", "nhin ko tu nhien", "chua dung", "the hand is wrong", "still broken",
+                "the shadow looks off", "fix the left glove", "tay bị méo", "kiếm gãy rồi", "xấu quá", "nhìn kì kì"]
+    NEGATIVE = ["hoàn thiện đi", "làm lại đi", "dọn xóa data lộ data cá nhân chưa", "đẹp rồi", "ok giữ nguyên",
+                "thời tiết hôm nay thế nào?", "cài uv trên mac như thế nào?", "What is the capital of France?",
+                "how do I install uv?", "turn off notifications please", "run the tests again"]
+
+    def test_real_complaints_and_non_complaints(self):
+        module = load_module()
+        for text in self.POSITIVE:
+            self.assertTrue(module.is_complaint(text), text)
+        for text in self.NEGATIVE:
+            self.assertFalse(module.is_complaint(text), text)
+
+    @unittest.skipUnless(CASES.is_file(), "the 2026-10-22 case folder is only on the owner's machine")
+    def test_every_message_in_the_case_manifest_is_a_complaint(self):
+        module = load_module()
+        said = {c["boss_said"] for c in json.loads(CASES.read_text(encoding="utf-8")) if c["time_utc"]}
+        for text in said:
+            prompt = codex_prompt(text)
+            self.assertTrue(module.is_complaint(module.request_text(prompt)) or module.image_only(prompt), text)
+
+    def test_codex_image_wrapper_is_not_read_as_the_users_words(self):
+        module = load_module()
+        self.assertEqual(module.request_text(codex_prompt("lỗi")), "lỗi")
+        self.assertTrue(module.image_only(codex_prompt("")))
+        self.assertFalse(module.image_only(codex_prompt("cụm card lỗi kìa")))
+        self.assertFalse(module.image_only("lỗi"))
+
+    DELIVERY = ["Boss, mở bản v19 đã sửa.", "Boss, đã xử lý lỗi và kiểm tra đạt.", "Boss, bản hoàn thiện đã kiểm tra.",
+                "đã sửa", "đã chỉnh", "đã làm lại", "đã đồng bộ", "[mở bản v19](/tmp/out/v19.png)",
+                "Boss, [mở bản v21 đã chỉnh tay](/tmp/out/v21.png)", "bản sửa đã xong"]
+
+    def test_vietnamese_delivery_phrases_claim_completion(self):
+        module = load_module()
+        for text in self.DELIVERY:
+            self.assertTrue(module.claims_completion(text), text)
+        for text in ("Đang sửa tay, sau đó làm chân.", "Đã sửa tay, còn chân chưa đạt.", "chưa đạt", "Bản v19 đã sửa chưa?",
+                     "Đã sửa tay, tiếp theo là giáp."):
+            self.assertFalse(module.claims_completion(text), text)
+
+
+class PromptHookTests(StudioBase):
+    def prompt(self, text, session="s1", cwd=None, turn="t1"):
+        run = self.run_cli("hook", "prompt", stdin=json.dumps({"prompt": text, "cwd": str(cwd or self.project),
+                                                               "session_id": session, "turn_id": turn,
+                                                               "hook_event_name": "UserPromptSubmit"}))
+        self.assertEqual((run.returncode, run.stderr), (0, ""))
+        return json.loads(run.stdout)["hookSpecificOutput"] if run.stdout.strip() else None
+
+    def stop(self, message, session="s1"):
+        run = self.run_cli("hook", "stop", stdin=json.dumps({"session_id": session, "cwd": str(self.project),
+                                                             "last_assistant_message": message}))
+        self.assertEqual(run.returncode, 0)
+        return run.stdout
+
+    def gated_store(self):
+        self.init()
+        self.approve_poster(self.poster())
+        self.assertEqual(self.gate().returncode, 0)
+
+    def test_complaint_with_a_store_adds_context_and_a_pending_marker(self):
+        self.gated_store()
+        out = self.prompt("cụm card lỗi kìa")
+        self.assertEqual(out["hookEventName"], "UserPromptSubmit")
+        context = out["additionalContext"]
+        for text in ("approve deliverable", "defect add", "--source user", '--quote "cụm card lỗi kìa"',
+                     "never file the user's complaint as --source agent", "construction-reference.md"):
+            self.assertIn(text, context)
+        marker = json.loads((self.store / "pending-complaints.json").read_text(encoding="utf-8"))
+        self.assertEqual(marker["s1"]["quote"], "cụm card lỗi kìa")
+        self.assertIsNone(self.prompt("đẹp rồi", session="s2"))
+        self.assertNotIn("s2", json.loads((self.store / "pending-complaints.json").read_text(encoding="utf-8")))
+
+    def test_image_only_message_counts_when_a_store_exists(self):
+        self.gated_store()
+        out = self.prompt(codex_prompt(""))
+        self.assertIn("image only", out["additionalContext"])
+        self.assertIn("defect add", out["additionalContext"])
+
+    def test_without_a_store_only_a_complaint_with_an_image_suggests_init(self):
+        elsewhere = Path(self.tmp.name) / "elsewhere"
+        elsewhere.mkdir()
+        self.assertIsNone(self.prompt("lỗi", cwd=elsewhere))
+        self.assertIsNone(self.prompt(codex_prompt(""), cwd=elsewhere))
+        out = self.prompt(codex_prompt("cụm card lỗi kìa"), cwd=elsewhere)
+        self.assertIn("init --project", out["additionalContext"])
+        self.assertIn("--source user", out["additionalContext"])
+        self.assertFalse((elsewhere / ".image-studio").exists())
+
+    def test_stop_blocks_done_until_the_complaint_is_recorded_as_a_user_defect(self):
+        self.gated_store()
+        self.prompt("giáp tay trái phải lệch nhau v")
+        first = self.stop("Boss, mở bản v19 đã sửa.")
+        self.assertIn("block", first)
+        self.assertIn("never recorded", first)
+        self.assertEqual(self.stop("Boss, mở bản v19 đã sửa."), "")  # blocks once per message, never loops
+        self.ok("defect", "add", "--deliverable", "poster", "--bbox", "10,10,60,60", "--kind", "artifact",
+                "--note", "gloves differ", "--source", "agent")
+        self.assertIn("never recorded", self.stop("Đã xử lý lỗi và kiểm tra đạt."))  # an agent defect does not count
+        self.ok("defect", "add", "--deliverable", "poster", "--bbox", "70,10,120,60", "--kind", "artifact",
+                "--note", "gloves differ", "--quote", "giáp tay trái phải lệch nhau v")
+        after = self.stop("Bản hoàn thiện đã kiểm tra.")
+        self.assertIn("block", after)  # still open defects, but the complaint itself is recorded
+        self.assertNotIn("never recorded", after)
+
+    def test_bad_prompt_input_exits_0_silently(self):
+        self.gated_store()
+        for data in ("not json", "[]", "{}", '{"prompt": 5}'):
+            run = self.run_cli("hook", "prompt", stdin=data)
+            self.assertEqual((run.returncode, run.stdout, run.stderr), (0, "", ""), data)
+
+    # Verifier round on 6904a9b: one regression test per finding.
+
+    def test_1_any_da_sua_is_a_claim_while_a_complaint_is_pending_or_a_user_defect_is_open(self):
+        module = load_module()
+        for text in ("Boss, đã sửa giáp tay và cụm card.", "Boss, em đã sửa giáp tay, xem file v19.png.",
+                     "đã sửa tay. Đã sửa giáp.", "Boss, da sua giap tay va cum card.", "Đã thay viền và cập nhật bóng."):
+            self.assertTrue(module.claims_completion(text, strict=True), text)
+        for text in ("Boss, đã sửa giáp tay và cụm card.", "Đã sửa giao diện của poster."):
+            self.assertFalse(module.claims_completion(text), text)
+        for text in ("Đã sửa tay, tiếp theo là giáp.", "Đã sửa giáp tay chưa?", "chưa sửa giáp tay"):
+            self.assertFalse(module.claims_completion(text, strict=True), text)
+        self.gated_store()
+        self.assertEqual(self.stop("Đã sửa giao diện của poster."), "")  # nothing pending: still a step, not a claim
+        self.prompt("giáp tay trái phải lệch nhau v")
+        self.assertIn("never recorded", self.stop("Boss, đã sửa giáp tay và cụm card."))
+        self.ok("defect", "add", "--deliverable", "poster", "--bbox", "10,10,60,60", "--kind", "artifact", "--note", "gloves")
+        self.assertIn("block", self.stop("Boss, em đã sửa giáp tay, xem file v19.png."))  # an open user defect
+
+    def test_2_marker_lasts_its_turn_and_the_next_and_text_only_needs_an_image_word(self):
+        self.gated_store()
+        self.prompt("giáp tay trái phải lệch nhau v", turn="t1")
+        self.prompt("chạy test đi", turn="t2")
+        self.assertIn("never recorded", self.stop("Done."))  # the next turn still blocks
+        self.prompt("ok", turn="t3")
+        self.assertEqual(self.stop("Done. All good."), "")  # two turns later the marker has expired
+        out = self.prompt("fix the typo in README", session="s9")
+        path = self.store / "pending-complaints.json"
+        self.assertNotIn("s9", json.loads(path.read_text(encoding="utf-8")) if path.exists() else {})
+        self.assertTrue(out is None or "if" in out["additionalContext"].lower())  # at most a conditional reminder
+        self.assertEqual(self.stop("Done.", session="s9"), "")
+
+    def test_3_long_prompts_are_classified_in_linear_time(self):
+        module = load_module()
+        elsewhere = Path(self.tmp.name) / "elsewhere"
+        elsewhere.mkdir()
+        for prompt in ("a" * 200000, "x" * 200000 + ".png", "<image" * 30000, "codex-clipboard-" * 12000,
+                       "## My request:\n" + "lỗi" + "b" * 200000):
+            start = time.time()
+            module.hook_prompt({"prompt": prompt, "cwd": str(elsewhere), "session_id": "s"})
+            module.image_only(prompt)
+            self.assertLess(time.time() - start, 0.5, prompt[:30])
+
+    def test_4_no_store_needs_a_real_attachment_not_a_png_path(self):
+        elsewhere = Path(self.tmp.name) / "elsewhere"
+        elsewhere.mkdir()
+        self.assertIsNone(self.prompt("lỗi build ở /tmp/web/icon.png", cwd=elsewhere))
+        self.assertIsNone(self.prompt("the logo.png import is broken", cwd=elsewhere))
+        self.assertIsNotNone(self.prompt(codex_prompt("lỗi"), cwd=elsewhere))
+
+    def test_5_cli_wrapper_and_pasted_files_are_stripped(self):
+        module = load_module()
+        cli = codex_prompt("cụm card lỗi kìa").replace("## My request:", "## My request for Codex:")
+        self.assertEqual(module.request_text(cli), "cụm card lỗi kìa")
+        pasted = "# Files pasted by the user:\n\n## notes.txt: /tmp/notes.txt\nsai lệch\n\n## My request for Codex:\nđẹp rồi\n"
+        self.assertEqual(module.request_text(pasted), "đẹp rồi")
+        self.assertEqual(module.request_text("# Files pasted by the user:\n\n## notes.txt: /tmp/notes.txt\nlỗi sai\n"), "")
+
+    def test_6_markers_are_per_session_and_invalid_ids_are_skipped(self):
+        self.gated_store()
+        self.prompt("cụm card lỗi kìa", session="../bad")
+        path = self.store / "pending-complaints.json"
+        self.assertFalse(path.exists() and json.loads(path.read_text(encoding="utf-8")))
+        self.prompt("cụm card lỗi kìa", session="sA")
+        self.prompt("giáp tay lệch", session="sB")
+        self.run_cli("defect", "add", "--deliverable", "poster", "--bbox", "10,10,60,60", "--kind", "artifact",
+                     "--note", "gloves", env_extra={"CODEX_THREAD_ID": "sB"})
+        marker = json.loads(path.read_text(encoding="utf-8"))
+        self.assertFalse(marker["sA"].get("done"))
+        self.assertTrue("sB" not in marker or marker["sB"].get("done"))  # dropped or marked done; sA untouched
+
+    # Verifier round on e82232b.
+
+    PENDING_DELIVERIES = [
+        "Boss, đã sửa giáp tay và cụm card.", "Boss, đã kéo dài dải bạc.", "Đã bỏ phần nhọn.", "Boss, đã đổi màu đai lưng.",
+        "Đã làm gọn nếp gấp.", "Boss, đã xóa mẩu tam giác.", "Boss, bản mới ở v20.png.",
+        "Boss, em đã sửa giáp tay và cụm card, xem file v19.png.",
+        # real replies 1, 7, 8, 9 of 2026-10-22 (bold and "còn" kept as sent)
+        "Bản này đã đổi sang dải đầu bao tách rời, nằm sát bàn; phần thân không còn bị ngoác hay rách sâu.",
+        "Boss, đã làm lại: **đầu bao xé ngang, dải bạc gập sang trái và còn dính ở mép**, giữ nguyên thân pack.",
+        "Boss, đã **kéo dài và dựng nghiêng dải bạc lên**, giữ điểm còn dính ở góc trái theo ảnh mẫu.",
+        "Boss, đã bỏ phần bạc nhọn và làm gọn nếp nối còn dính; giữ dải xé dài, nghiêng lên.",
+        "Boss, xem bản mới:\n\n![Cận cảnh điểm nối](/Users/b/work/pov/unbound_pov_five_cards_v9_joint.png)",
+    ]
+    PROBES = [
+        "Em đã xem ảnh, lỗi nằm ở mép trái.", "Em đã ghi lỗi D3, giờ sửa tiếp.", "Đã hiểu, em sẽ làm lại phần xé.",
+        "Boss, đã ghi lỗi D3. Em cần Boss xác nhận vùng này.", "Đã tìm 4 ảnh tham khảo xé bao, Boss xem bảng dưới.",
+        "Em đã tái hiện lỗi: dải bạc bị gãy ở góc trái.", "Đã rõ: Boss muốn dải bạc dính ở góc trái.", "Đã ghi nhận.",
+        "Em đã đọc lại yêu cầu; vùng lỗi là mép xé.", "Boss, em đã khoanh vùng lỗi ở mép trái (D3) và chờ Boss xác nhận.",
+        "Đã lưu ảnh tham khảo vào refs/tear-1.jpg và refs/tear-2.jpg; Boss xác nhận giúp em.",
+        "Boss, em đã so ảnh Boss gửi với bản v18: lệch ở cổ tay trái.", "Em đã xác định nguyên nhân: dải bạc gập sai chiều.",
+    ]
+
+    def test_7_pending_deliveries_block_and_non_delivery_probes_pass(self):
+        module = load_module()
+        for text in self.PENDING_DELIVERIES:
+            self.assertTrue(module.claims_completion(text, strict=True, pending=True), text)
+        for text in self.PROBES:
+            self.assertFalse(module.claims_completion(text, strict=True, pending=True), text)
+        self.assertFalse(module.claims_completion("Boss, bản mới ở v20.png.", strict=True))  # images count only while pending
+        self.assertFalse(module.claims_completion("Đã bỏ phần nhọn."))  # and edit verbs only in the strict branch
+        self.gated_store()
+        self.prompt(codex_prompt("cụm card lỗi kìa"))
+        self.assertIn("never recorded", self.stop(self.PENDING_DELIVERIES[10]))
+
+    def test_8_follow_up_text_complaints_after_an_image_complaint_get_a_marker(self):
+        module = load_module()
+        self.assertTrue(module.is_complaint("ảnh pack bài bị xé còn dính ở mép mà"))
+        self.gated_store()
+        path = self.store / "pending-complaints.json"
+        self.prompt(codex_prompt("cụm card lỗi kìa"), session="s1", turn="t1")
+        for n, text in enumerate(("k thấy sai nặng à?", "h thì dài 1 chút r cũng hơi ẩu", "ảnh pack bài bị xé còn dính ở mép mà"), 2):
+            out = self.prompt(text, session="s1", turn=f"t{n}")
+            self.assertFalse(out["additionalContext"].startswith("image-studio: if "), text)
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["s1"]["quote"], text)
+        out = self.prompt("h thì dài 1 chút r cũng hơi ẩu", session="s2")  # no earlier image complaint, no open defect
+        self.assertTrue(out["additionalContext"].startswith("image-studio: if "))
+        self.assertNotIn("s2", json.loads(path.read_text(encoding="utf-8")))
+        self.ok("defect", "add", "--deliverable", "poster", "--bbox", "10,10,60,60", "--kind", "artifact", "--note", "gloves")
+        self.prompt("k thấy sai nặng à?", session="s3")  # an open user defect makes it about the image
+        self.assertIn("s3", json.loads(path.read_text(encoding="utf-8")))
+
+    def test_9_a_complaint_is_satisfied_only_by_a_defect_from_its_own_session(self):
+        self.gated_store()
+        self.prompt("cụm card lỗi kìa", session="sA")
+        self.run_cli("defect", "add", "--deliverable", "poster", "--bbox", "10,10,60,60", "--kind", "artifact",
+                     "--note", "other chat", env_extra={"CODEX_THREAD_ID": "sB"})
+        self.assertIn("never recorded", self.stop("Boss, đã sửa cụm card.", session="sA"))
+        self.run_cli("defect", "add", "--deliverable", "poster", "--bbox", "70,10,120,60", "--kind", "artifact",
+                     "--note", "cards", env_extra={"CODEX_THREAD_ID": "sA"})
+        self.assertNotIn("never recorded", self.stop("Boss, đã sửa cụm card xong.", session="sA"))
+        self.assertEqual(self.defects()[-1].get("session"), "sA")
+
+    def test_10_context_promises_a_block_only_when_a_marker_was_written(self):
+        self.gated_store()
+        self.assertNotIn("stop hook blocks", self.prompt("cụm card lỗi kìa", session="../bad")["additionalContext"])
+        self.assertIn("stop hook blocks", self.prompt("cụm card lỗi kìa", session="ok1")["additionalContext"])
 
 
 if __name__ == "__main__":

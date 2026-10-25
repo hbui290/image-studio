@@ -2,7 +2,7 @@
 """Project memory and evidence gate for image-studio.
 
 Keeps a per-project store in `<project>/.image-studio/` (approved deliverables,
-user decisions, and every defect ever reported) and a bounded user preference
+user decisions, every defect ever reported, and construction rules) and a bounded user preference
 file in `${IMAGE_STUDIO_HOME:-~/.image-studio}`. The `gate` subcommand is the only way
 to prove a deliverable is done: the file must be the approved one, match its spec,
 every resolved defect must show changed pixels, and every recorded defect needs
@@ -18,6 +18,7 @@ numpy and OpenCV are optional (see accel.py); --engine pillow|fast or IMAGE_STUD
 """
 
 import argparse
+import base64
 import hashlib
 import io
 import json
@@ -78,6 +79,16 @@ FILE_BUDGET = 1000000  # gate: PNG/JPEG/WebP deliverables above this many bytes 
 CARD_LIMIT = 2400
 LESSONS_SHOWN = 5      # lessons printed in the session card and brief
 TASTE_SHOWN = 6        # taste notes printed in the session card and brief
+CONSTRUCTION_SHOWN = 3  # construction rules printed in the session card and brief
+REPEAT_IOU = 0.1       # defect add: a user box this close to an earlier one (or centered in it) is a repeat (bench/score.py's rule)
+REPEAT_INSIDE = 0.6    # defect add: ... or this share of the earlier box lies inside the new one (a wider box around it)
+REPEAT_ASPECT = 0.02   # defect add: images whose w/h differ by at most this share can be copies of one artwork (compared as fractions)
+FINGERPRINT_SIDE = 16  # defect add: whole-image grayscale thumbnail (side x side, aspect squashed) stored on each defect
+FINGERPRINT_FLAT_STD = 2.0  # a fingerprint whose gray values spread less than this (std, 0-255) is flat: artwork unknown
+# Fingerprint distance (mean |difference| after normalizing mean and contrast, 0-255 scale) at or under which two images are
+# one artwork. Calibrated on real data: 8 versions of one 1254x1254 illustration after many local repairs plus 2x, 512 px
+# and 1254x1250 copies scored 0.0-9.8; 12 unrelated square artworks (shared banner template included) scored 34.5-87.5.
+ARTWORK_DISTANCE = 18
 BRAND_CAP = 4000        # characters in one brand.json
 LONG_CHAT_BYTES = 25 << 20  # a transcript this large resends a long history on every step
 HEX_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -121,20 +132,54 @@ COMPLETION_PAT = re.compile(
     r"(?:is|are|now)\s+ready|ready\s+(?:to|for)\s+(?:deliver|delivery|use|ship|download)|"
     r"final\s+(?:file|version|image|poster)|"
     r"xong|hoàn\s+thành|hoàn\s+tất|đã\s+fix|ổn\s+rồi|sẵn\s+sàng|bản\s+cuối|"
-    r"đã\s+giao|bàn\s+giao|giao\s+(?:ảnh|file|poster)"
+    r"đã\s+giao|bàn\s+giao|giao\s+(?:ảnh|file|poster)|"
+    # Delivery phrases from real Codex replies that slipped through: "Boss, mở bản v19 đã sửa.", "[mở bản v21](path)".
+    # A bare "đã sửa" ends the sentence; "Đã sửa giao diện của poster." describes a step and is not a claim.
+    r"đã\s+(?:sửa|chỉnh|làm\s+lại|đồng\s+bộ|xử\s+lý|kiểm\s+tra)(?=[\s.!…)\]]*$)|kiểm\s+tra\s+đạt|bản\s+hoàn\s+thiện|mở\s+bản\s+v\d+"
     r")\b",
     re.I,
 )
 
 
-def claims_completion(text):
+# Strict branch (the user's complaint is unrecorded or a user defect is open): "đã <edit verb> X" anywhere in a
+# sentence is a delivery claim. Real replies: "Boss, đã sửa giáp tay và cụm card.", "Boss, đã **kéo dài và dựng
+# nghiêng dải bạc lên**", "Đã bỏ phần bạc nhọn ... còn dính". Outside it only a bare "đã sửa." ending the sentence is.
+STRICT_CLAIM_PAT = re.compile(
+    r"\bđã\s+(?:sửa|chỉnh|làm\s+lại|xử\s+lý|thay|cập\s+nhật|đồng\s+bộ|kéo\s+dài|kéo|bỏ|đổi|làm\s+gọn|làm\s+mới|xóa|xoá|"
+    r"thêm|dời|di\s+chuyển|nâng|hạ|rút|thu\s+gọn|thu\s+nhỏ|nối|vẽ\s+lại|vẽ|tô|dựng|gập|cắt|ghép|chèn|căn|xoay|phóng|tách|"
+    r"gỡ|bổ\s+sung|tăng|giảm|uốn|nắn|đẩy|làm\s+(?:mờ|nét|sáng|tối|dày|mỏng|ngắn|dài|thẳng|cong))\b"
+    r"|\bda\s+(?:sua|chinh|lam\s+lai|xu\s+ly|thay|cap\s+nhat|dong\s+bo|keo\s+dai|keo|bo|doi|lam\s+gon|lam\s+moi|xoa|"
+    r"them|di\s+chuyen|nang|ha|rut|thu\s+gon|thu\s+nho|noi|ve\s+lai|ve|to|dung|gap|cat|ghep|chen|can|xoay|phong|tach|"
+    r"go|bo\s+sung|tang|giam|uon|nan|day|lam\s+(?:mo|net|sang|toi|day|mong|ngan|dai|thang|cong))\b",
+    re.I,
+)
+# In the strict branch "còn", "vẫn", "still", "then" describe the result ("giữ điểm còn dính"), not unfinished work.
+STRICT_PROGRESS_PAT = re.compile(r"\b(?:đang|sẽ|tiếp|sau\s+đó|chờ|will|next|working\s+on|in\s+progress)\b", re.I)
+MARKDOWN_EMPHASIS = re.compile(r"\*\*|\*|__|`")
+SHOW_IMAGE_PAT = re.compile(r"\bmở\s+(?:bản|ảnh|file)\b", re.I)
+
+
+def shows_image(text):
+    """The reply hands over an image file (a link or a path), other than a reference under refs/ or the user's paste."""
+    for token in text.split():
+        name = token.strip("\"'()[]<>,;:!?.").lower()
+        if name.endswith(IMAGE_SUFFIXES) and "refs/" not in name and "codex-clipboard-" not in name: return True
+    return False
+
+
+def claims_completion(text, strict=False, pending=False):
     """True when any sentence claims the work is done. A question ("Is it done?") claims nothing,
-    but a claim followed by a question ("Done. Anything else?") still counts."""
+    but a claim followed by a question ("Done. Anything else?") still counts. strict (a complaint pending or a user
+    defect open) also counts "đã <edit verb>" with markdown emphasis removed; pending also counts showing an image."""
     text = unicodedata.normalize("NFC", text or "")
+    strict = strict or pending
+    if strict: text = MARKDOWN_EMPHASIS.sub("", text)
+    if pending and (SHOW_IMAGE_PAT.search(text) or shows_image(text)): return True
     for sentence in re.findall(r"[^.!?？\n]+[.!?？\n]?", text):
         if sentence.rstrip().endswith(("?", "？")): continue
         masked = NEGATION_PAT.sub(" ", sentence)
         if COMPLETION_PAT.search(masked) and not PROGRESS_PAT.search(masked): return True
+        if strict and STRICT_CLAIM_PAT.search(masked) and not STRICT_PROGRESS_PAT.search(masked): return True
     return False
 
 
@@ -245,7 +290,7 @@ def pil():
         raise UsageError("Pillow is required: uv run --with pillow python3 ... (or pip install pillow)") from None
     res = getattr(Image, "Resampling", Image)
     return types.SimpleNamespace(Image=Image, ImageChops=ImageChops, ImageDraw=ImageDraw, ImageFilter=ImageFilter, ImageStat=ImageStat,
-                                 PngImagePlugin=PngImagePlugin, NEAREST=res.NEAREST, BILINEAR=res.BILINEAR)
+                                 PngImagePlugin=PngImagePlugin, NEAREST=res.NEAREST, BILINEAR=res.BILINEAR, BOX=res.BOX)
 
 
 # ---------------------------------------------------------------- store
@@ -256,6 +301,7 @@ class Store:
         self.project = self.root.parent
         self.state_path = self.root / "state.json"
         self.defects_path = self.root / "defects.jsonl"
+        self.construction_path = self.root / "construction.jsonl"
         self.state = self._load_state()
 
     def _load_state(self):
@@ -282,6 +328,21 @@ class Store:
 
     def save_defects(self, items):
         atomic_write(self.defects_path, "".join(json.dumps(i, sort_keys=True, ensure_ascii=False) + "\n" for i in items))
+
+    def constructions(self):
+        if not self.construction_path.exists(): return []
+        items = []
+        for n, line in enumerate(self.construction_path.read_text(encoding="utf-8").splitlines(), 1):
+            if not line.strip(): continue
+            try: item = json.loads(line)
+            except ValueError: raise UsageError(f"{self.construction_path}:{n}: not valid JSON") from None
+            if not isinstance(item, dict) or not isinstance(item.get("defect"), str):
+                raise UsageError(f"{self.construction_path}:{n}: construction record must be an object with a defect")
+            items.append(item)
+        return items
+
+    def save_constructions(self, items):
+        atomic_write(self.construction_path, "".join(json.dumps(i, sort_keys=True, ensure_ascii=False) + "\n" for i in items))
 
     def resolve(self, stored):
         path = Path(stored)
@@ -488,6 +549,83 @@ def parse_bbox(values, label="--bbox"):
     return box
 
 
+def same_region(new, old):
+    """IoU >= 0.1; or the new box's center inside an old box that covers at most a quarter of the image (bench/score.py's
+    rule, minus whole-image complaints, which would swallow every later one); or an old box lying mostly inside a wider
+    new box that covers at most a quarter of the image. Boxes are fractions of the image."""
+    w, h = min(new[2], old[2]) - max(new[0], old[0]), min(new[3], old[3]) - max(new[1], old[1])
+    inter = w * h if w > 0 and h > 0 else 0
+    new_area, old_area = (new[2] - new[0]) * (new[3] - new[1]), (old[2] - old[0]) * (old[3] - old[1])
+    union = new_area + old_area - inter
+    cx, cy = (new[0] + new[2]) / 2, (new[1] + new[3]) / 2
+    return ((union > 0 and inter / union >= REPEAT_IOU)
+            or (old_area <= WIDE_BOX_SHARE and old[0] <= cx <= old[2] and old[1] <= cy <= old[3])
+            or (new_area <= WIDE_BOX_SHARE and old_area > 0 and inter / old_area >= REPEAT_INSIDE))
+
+
+def fingerprint(img):
+    """Whole-image grayscale thumbnail as base64 bytes: tells copies of one artwork from different artworks."""
+    small = img.convert("L").resize((FINGERPRINT_SIDE, FINGERPRINT_SIDE), pil().BOX)
+    return base64.b64encode(small.tobytes()).decode("ascii")
+
+
+def fingerprint_distance(a, b):
+    """Mean |difference| of two fingerprints after normalizing each to mean 128 and standard deviation 64. A flat
+    fingerprint (spread under FINGERPRINT_FLAT_STD gray levels) has no shape to compare: the distance is infinite."""
+    def normal(text):
+        values = list(base64.b64decode(text))
+        mean = sum(values) / len(values) if values else 0
+        std = (sum((v - mean) ** 2 for v in values) / len(values)) ** 0.5 if values else 0
+        return [(v - mean) / std * 64 for v in values] if std >= FINGERPRINT_FLAT_STD else None
+    x, y = normal(a), normal(b)
+    if x is None or y is None or len(x) != len(y): return float("inf")
+    return sum(abs(p - q) for p, q in zip(x, y)) / len(x)
+
+
+def defect_size(store, d):
+    """The image size a defect was reported on; older records fall back to their deliverable's current spec."""
+    size = d.get("image_size")
+    if not isinstance(size, list) or len(size) != 2:
+        spec = (store.state["deliverables"].get(d.get("deliverable")) or {}).get("spec") or {}
+        size = [spec.get("width"), spec.get("height")]
+    return size if all(isinstance(v, int) and v > 0 for v in size) else None
+
+
+def defect_fingerprint(store, d, cache):
+    """The fingerprint a defect was reported with; older records use their deliverable's current file, else None."""
+    if isinstance(d.get("fingerprint"), str): return d["fingerprint"]
+    name = d.get("deliverable")
+    if name not in cache:
+        item = store.state["deliverables"].get(name) or {}
+        try: cache[name] = fingerprint(target_image(store.resolve(item.get("path", "")), item.get("spec") or {}, d))
+        except UsageError: raise
+        except Exception: cache[name] = None
+    return cache[name]
+
+
+def repeated(store, name, size, print_, box, defects):
+    """IDs of earlier user complaints (any status) on the same region of the same artwork, compared as fractions of the
+    image. Same artwork: the same deliverable, or another one whose aspect is within 2% (an upscale or a small crop) and
+    whose fingerprint is within ARTWORK_DISTANCE. Agent findings and scope requests with the user's words are not complaints."""
+    w, h = size
+    new = [box[0] / w, box[1] / h, box[2] / w, box[3] / h]
+    out, cache = [], {}
+    for d in defects:
+        if d.get("source") == "agent" or (d.get("kind") == "scope" and d.get("quote")): continue
+        old, old_size = d.get("bbox"), defect_size(store, d)
+        if old_size is None or not isinstance(old, list) or len(old) != 4 or not all(isinstance(v, int) for v in old): continue
+        ow, oh = old_size
+        if abs(ow / oh - w / h) > REPEAT_ASPECT * (w / h): continue
+        if not same_region(new, [old[0] / ow, old[1] / oh, old[2] / ow, old[3] / oh]): continue
+        if d.get("deliverable") != name:
+            old_print = defect_fingerprint(store, d, cache)
+            try: close = old_print is not None and fingerprint_distance(print_, old_print) <= ARTWORK_DISTANCE
+            except ValueError: close = False  # a hand-edited fingerprint that is not base64
+            if not close: continue
+        out.append(d["id"])
+    return out
+
+
 def cmd_defect_add(args):
     store = open_store(args.project)
     item = store.deliverable(args.deliverable)
@@ -510,6 +648,8 @@ def cmd_defect_add(args):
     try:
         image = target_image(path, spec, record)
         record["region_hash"] = region_hash(image, box)
+        record["image_size"] = [image.size[0], image.size[1]]
+        record["fingerprint"] = fingerprint(image)
         reported = region_crop(image, box)
     except UsageError: raise
     except Exception as exc: raise UsageError(f"cannot read the defect region from {path.name}: {exc}") from None
@@ -526,11 +666,15 @@ def cmd_defect_add(args):
                          "--wide for a whole-image problem (overall softness, color cast)")
     if args.wide: record["wide"] = True
     if quote: record["quote"] = quote
+    if host_session(): record["session"] = host_session()  # ties a user defect to the chat whose complaint it records
     defects = store.defects()
     # A requested change (kind scope with the user's words: new text, a removed element) is not a miss, so it needs no lesson.
     request = args.kind == "scope" and bool(quote)
     after_delivery = args.source == "user" and not request and gate_is_valid(store, args.deliverable, defects)
     if after_delivery: record["needs_lesson"] = True
+    # The user pointing at a region again means patching strokes failed: work out how the object is built.
+    repeat = repeated(store, args.deliverable, image.size, record["fingerprint"], box, defects) if args.source == "user" and not request else []
+    if repeat: record.update(repeat_of=repeat, needs_construction=True, needs_lesson=True)
     numbers = [int(m.group(1)) for m in (DEFECT_ID_RE.match(d["id"]) for d in defects) if m]
     record["id"] = f"D{max(numbers, default=0) + 1}"
     (store.root / "defects").mkdir(exist_ok=True)
@@ -541,10 +685,19 @@ def cmd_defect_add(args):
     record["history"] = [{"time": now(), "action": "add", "status": "open", "note": note}]
     defects.append(record)
     store.save_defects(defects)
+    if args.source == "user": clear_pending_for_host_session(store.root)  # the user's complaint is now recorded
     print(f"Added defect {record['id']}")
+    lesson_cmd = f"{SCRIPT_HINT} lesson add --defect {record['id']} --mistake \"...\" --cause \"...\" --check \"...\""
+    if repeat:
+        print(f"Repeat: this region was already reported ({', '.join(repeat)}). Stop patching single strokes. "
+              "Follow image-verify/references/construction-reference.md: state how the object is built, find real reference "
+              "photos of the same action, confirm them with the user, then rebuild the whole part from that rule. Record it:\n"
+              f"{SCRIPT_HINT} construction add --defect {record['id']} --object \"...\" --rule \"...\" --ref FILE   "
+              "(or --quote \"the user's words explaining it\")")
+        print(f"The user pointed at the same region again, so this is a miss. Record what to do differently:\n{lesson_cmd}")
     if after_delivery:
-        print(f"{args.deliverable} had passed the gate, so this is a miss after delivery. Record what to do differently:\n"
-              f"{SCRIPT_HINT} lesson add --defect {record['id']} --mistake \"...\" --cause \"...\" --check \"...\"")
+        print(f"{args.deliverable} had passed the gate, so this is a miss after delivery. Record what to do differently"
+              + (" (the lesson above covers it)." if repeat else f":\n{lesson_cmd}"))
     return 0
 
 
@@ -698,6 +851,52 @@ def cmd_lesson_list(args):
     lessons = [l for l in read_lessons() if args.brand is None or l.get("brand") == args.brand]
     if not lessons: print("No lessons recorded."); return 0
     for item in lessons: print(lesson_line(item) + f" (cause: {short(item.get('cause', ''), 90)})")
+    return 0
+
+
+# ---------------------------------------------------------------- construction rules
+
+def construction_line(item, limit=110):
+    basis = [f"{len(item['refs'])} ref" + ("s" if len(item["refs"]) > 1 else "")] if isinstance(item.get("refs"), list) and item["refs"] else []
+    if isinstance(item.get("quote"), str): basis.append(f'user: "{short(item["quote"], 60)}"')
+    return f"- {item.get('defect')} {short(item.get('object'), 40)}: {short(item.get('rule'), limit)}" + (f" ({'; '.join(basis)})" if basis else "")
+
+
+def construction_linked(constructions, defect_id):
+    return any(c.get("defect") == defect_id for c in constructions)
+
+
+def cmd_construction_add(args):
+    store = open_store(args.project)
+    obj, rule = text_arg(args.object, "--object"), text_arg(args.rule, "--rule")
+    quote = text_arg(args.quote, "--quote", False)
+    defect = next((d for d in store.defects() if d.get("id") == args.defect), None)
+    if defect is None: raise UsageError(f"unknown defect id {args.defect!r}")
+    if not args.ref and not quote:
+        raise UsageError("construction add needs at least one --ref FILE (a real reference photo of the same action) "
+                         "or --quote with the user's own words explaining how it is built")
+    refs = []
+    for value in args.ref or []:
+        path = existing_file(value, "--ref")
+        try:
+            with pil().Image.open(path) as img: img.verify()
+        except UsageError: raise
+        except Exception as exc: raise UsageError(f"--ref {value} is not a readable image ({exc})") from None
+        refs.append({"path": store.relative(path), "sha256": sha256_file(path)})
+    record = {"defect": args.defect, "deliverable": defect.get("deliverable"), "object": obj, "rule": rule, "refs": refs, "time": now()}
+    if quote: record["quote"] = quote
+    store.save_constructions(store.constructions() + [record])
+    print(f"Recorded construction for {args.defect} ({obj}): {rule}")
+    print("Rebuild the whole part from this rule, then check every clause of it on the final pixels before delivery.")
+    return 0
+
+
+def cmd_construction_list(args):
+    items = open_store(args.project).constructions()
+    if not items: print("No construction rules recorded."); return 0
+    for item in items:
+        refs = ", ".join(r.get("path", "") for r in item.get("refs") or [] if isinstance(r, dict))
+        print(construction_line(item, 400) + f" {item.get('time', '')}" + (f"\n  refs: {refs}" if refs else ""))
     return 0
 
 
@@ -916,6 +1115,10 @@ def gate_is_valid(store, name, defects):
     if any(d.get("needs_lesson") for d in mine):
         lessons = read_lessons()
         if any(d.get("needs_lesson") and not lesson_linked(lessons, store.root, d["id"]) for d in mine): return False
+    if any(d.get("needs_construction") for d in mine):
+        try: constructions = store.constructions()
+        except UsageError: return False
+        if any(d.get("needs_construction") and not construction_linked(constructions, d["id"]) for d in mine): return False
     needed = [d for d in mine if d.get("status") != "wontfix"]
     if needed and (verdicts.get("run_id") != checklist.get("run_id") or verdicts.get("nonce") != checklist.get("nonce")):
         return False
@@ -968,7 +1171,11 @@ def shared_sections(store, defects):
     kinds = {d.get("kind") for d in defects if d.get("status") == "open"}
     lessons = [lesson_line(l) for l in relevant_lessons(read_lessons(), state.get("brand"), kinds)]
     taste = brand_card_line(state.get("brand")) + [taste_line(t) for t in newest_taste(state.get("brand"))]
-    return delivs, decs, prefs, conf, lessons, taste
+    built = [construction_line(c) for c in store.constructions()[-CONSTRUCTION_SHOWN:][::-1]]
+    return delivs, decs, prefs, conf, lessons, taste, built
+
+
+BUILT_TITLE = "How these objects are built (rebuild from the rule, never patch single strokes):"
 
 
 def build_brief(store, max_lines):
@@ -983,10 +1190,10 @@ def build_brief(store, max_lines):
     open_items = [d for d in defects if d.get("status") == "open"]
     head.append(f"Open defects ({len(open_items)}, all listed; gate cannot pass while any is open):" if open_items else "Open defects: none")
     if open_items: head += [f"- {defect_line(d)}" for d in open_items]
-    delivs, decs, prefs, conf, lessons, taste = shared_sections(store, defects)
+    delivs, decs, prefs, conf, lessons, taste, built = shared_sections(store, defects)
     prop = sum(1 for st, _ in prefs if st == "proposed")
     if prop: head.append(f"Preferences: {prop} proposed, ask the user to confirm (pref add ... --confirmed).")
-    sections = [("Deliverables:", delivs)]
+    sections = [("Deliverables:", delivs), (BUILT_TITLE, built)]
     sections += [("Your taste (match it):", taste), ("Lessons from earlier tasks (check these):", lessons), ("Confirmed preferences:", conf), ("Recent decisions:", decs), ("Closed defects (resolved ones are re-checked by the gate):", [f"- {defect_line(d)}" for d in [d for d in defects if d.get("status") != "open"][::-1]])]
     lines = list(head)
     budget = max(0, max_lines - len(lines))
@@ -1014,13 +1221,14 @@ def format_session_start_card(store):
     defects = store.defects()
     open_items = [d for d in defects if d.get("status") == "open"]
     resolved_items = [d for d in defects if d.get("status") == "resolved"]
-    delivs, decs, _, conf, lessons, taste = shared_sections(store, defects)
+    delivs, decs, _, conf, lessons, taste, built = shared_sections(store, defects)
 
     for limit in (100, 80, 60, 40, 20, 10, 5, 0):
         lines = [f"image-studio project memory (brand: {state.get('brand')} | store: {store.root}):"]
         lines.append(f"Open defects ({len(open_items)}, all listed; gate cannot pass while any is open):" if open_items else "Open defects: none")
         lines.extend(f"- {defect_line(d, limit=limit)}" for d in open_items)
         if delivs: lines.append("Deliverables:"); lines.extend(delivs)
+        if built: lines.append(BUILT_TITLE); lines.extend(built)
         if decs: lines.append("Recent decisions:"); lines.extend(decs)
         if taste: lines.append("Your taste (match it):"); lines.extend(taste)
         if lessons: lines.append("Lessons from earlier tasks (check these):"); lines.extend(lessons)
@@ -1301,8 +1509,16 @@ def cmd_gate(args):
     lessons = read_lessons()
     for defect in defects:
         if defect.get("needs_lesson") and not lesson_linked(lessons, store.root, defect["id"]):
-            report.fail(f"{defect['id']} was reported after delivery and has no lesson: run lesson add --defect {defect['id']} "
+            why = (f"repeats {', '.join(map(str, defect['repeat_of']))} (the user pointed at the same region again)"
+                   if defect.get("repeat_of") else "was reported after delivery")
+            report.fail(f"{defect['id']} {why} and has no lesson: run lesson add --defect {defect['id']} "
                         "--mistake ... --cause ... --check ...")
+    constructions = store.constructions() if any(d.get("needs_construction") for d in defects) else []
+    for defect in defects:
+        if defect.get("needs_construction") and not construction_linked(constructions, defect["id"]):
+            report.fail(f"{defect['id']} repeats {', '.join(map(str, defect.get('repeat_of') or []))} and has no construction rule: "
+                        "research how the object is built (image-verify/references/construction-reference.md), then run "
+                        f"construction add --defect {defect['id']} --object ... --rule ... --ref FILE (or --quote ...)")
 
     passed = report.passed()
     print(f"Gate: {name} ({store.relative(path)})")
@@ -1491,6 +1707,198 @@ def discover_hook_store(payload):
     return None, None
 
 
+# ---------------------------------------------------------------- complaints (hook prompt)
+
+# Problem words in the user's message. Vietnamese is matched as typed, with diacritics and without (and with chat
+# abbreviations: ko, k, h, r); keep both spellings and the English list when editing.
+COMPLAINT_VI = re.compile(
+    r"\b(?:lỗi|sai|xấu|gớm|lệch|méo|gãy|ẩu|hỏng|kì\s+kì|kỳ\s+kỳ|kì\s+cục|kỳ\s+cục|vẫn\s+còn|lại\s+bị|"
+    r"chưa\s+(?:đúng|đạt|ổn|tương\s+ứng|khớp|giống|chuẩn|đẹp|tự\s+nhiên)|"
+    r"(?:không|ko|k|hông|hok)\s+(?:đúng|tự\s+nhiên|giống|khớp|ổn|đẹp|hợp|chuẩn)|"
+    r"nhìn\s+(?:kì|kỳ|lạ|xấu|giả)|bị\s+(?:mất|cắt|dính|thừa|thiếu|vỡ|mờ))\b"
+    r"|\bnên\b[^.!?\n]{0,100}\bhơn\b"  # "nên nghiêng lên ... chân thật hơn": a correction, not a question
+    r"|\bmà\s*[.!…]*\s*$",  # a message ending in "mà" corrects the agent: "ảnh pack bài bị xé còn dính ở mép mà"
+    re.I)
+COMPLAINT_PLAIN = re.compile(
+    r"\b(?:loi|sai|xau|gom\s+giec|lech|meo\s+mo|bi\s+(?:loi|meo|lech|gay|hong|cat|mat)|van\s+con|"
+    r"chua\s+(?:dung|dat|on|tuong\s+ung|khop|giong|chuan|dep|tu\s+nhien)|"
+    r"(?:khong|ko|k|hong|hok)\s+(?:dung|tu\s+nhien|giong|khop|on|dep|hop|chuan)|nhin\s+(?:ki|ky|la|xau|gia)|"
+    r"wrong|broken|buggy|bug|glitch\w*|artifacts?|ugly|weird|messed\s+up|not\s+right|doesn'?t\s+match|"
+    r"(?:looks?|is|are|seems?|still)\s+off|fix|still\s+(?:wrong|broken|there|bad|ugly|not|looks?)|same\s+(?:problem|issue))\b",
+    re.I)
+# Words that tie a text-only complaint to an image (a complaint with an attached image needs none).
+IMAGE_WORDS = re.compile(
+    r"\b(?:ảnh|hình|card|thẻ|pack|bao|tay|giáp|logo|màu|bóng|viền|mép|chữ|mặt|mắt|tóc|nền|góc|khung|kiếm|xé|rách|"
+    r"poster|banner|hinh|giap|vien|mep|rach|image|picture|photo|render|crop|edge|shadow|colou?r|hand|face|"
+    r"background|sword|glove|armou?r)\b", re.I)
+REQUEST_HEAD = re.compile(r"## My request(?: for Codex)?:")  # the Codex app and CLI wrappers
+FILES_HEADS = ("# Files mentioned by the user", "# Files pasted by the user")
+IMAGE_TAG = re.compile(r"</?image\b[^>]{0,2048}>|\[Image\s*#\d{1,4}\]|Image attachment:\s*true", re.I)  # <image ...>...</image>
+CLASSIFY_CHARS = 4000   # hook prompt: only the first characters of the user's words are classified (linear time)
+PENDING_TURNS = 2       # hook prompt: a complaint marker blocks in its turn and the next; the second later prompt drops it
+PENDING_FILE = "pending-complaints.json"
+SESSION_ENV = ("CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_CODE_SESSION_ID")  # the host's session, seen by defect add
+
+
+def image_token(token):
+    return token.lower().strip("\"'()[]<>,;:").endswith(IMAGE_SUFFIXES)
+
+
+def request_text(prompt):
+    """The user's own words: Codex wraps attachments in a "# Files mentioned (or pasted) by the user" block before
+    "## My request:" (app) or "## My request for Codex:" (CLI). Image tags and image paths are dropped."""
+    text = unicodedata.normalize("NFC", prompt or "")
+    head = REQUEST_HEAD.search(text)
+    if head: text = text[head.end():]
+    elif text.lstrip().startswith(FILES_HEADS): text = ""
+    text = IMAGE_TAG.sub(" ", text[:CLASSIFY_CHARS])
+    return " ".join(t for t in text.split() if not image_token(t))
+
+
+def attached_image(prompt):
+    """A real attachment from the host, not just a file name in the text."""
+    return "Image attachment: true" in prompt or "<image" in prompt
+
+
+def image_only(prompt):
+    """An image (attached, or a pasted image path) with (almost) no words: the user is pointing at something."""
+    prompt = prompt or ""
+    shown = (attached_image(prompt) or "codex-clipboard-" in prompt or "[Image #" in prompt
+             or any(image_token(t) for t in prompt[:CLASSIFY_CHARS].split()))
+    return shown and len(re.sub(r"\W", "", request_text(prompt))) < 3
+
+
+def is_complaint(text):
+    text = unicodedata.normalize("NFC", text or "")[:CLASSIFY_CHARS]
+    return bool(COMPLAINT_VI.search(text) or COMPLAINT_PLAIN.search(text))
+
+
+def about_an_image(root, words):
+    if IMAGE_WORDS.search(words): return True
+    try: names = list(read_json(root / "state.json", "state.json").get("deliverables") or {})
+    except UsageError: return False
+    lower = words.lower()
+    return any(isinstance(n, str) and len(n) > 2 and n.lower() in lower for n in names)
+
+
+def load_pending(root):
+    try: marker = json.loads((root / PENDING_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError): return {}
+    return marker if isinstance(marker, dict) else {}
+
+
+def save_pending(root, marker):
+    path = root / PENDING_FILE
+    try:
+        if marker: atomic_write(path, dump_json(marker))
+        elif path.exists(): path.unlink()
+    except OSError: pass
+
+
+def age_pending(root, session_id):
+    """Count one more prompt for this session's marker; it expires on the second prompt after the complaint.
+    The entry stays (expired) so a later text-only complaint in the session is known to be about the image."""
+    marker = load_pending(root)
+    item = marker.get(session_id)
+    if not isinstance(item, dict) or item.get("expired"): return
+    item["prompts"] = item["prompts"] + 1 if isinstance(item.get("prompts"), int) else 1
+    if item["prompts"] >= PENDING_TURNS: item["expired"] = True
+    save_pending(root, marker)
+
+
+def session_had_image_complaint(root, session_id):
+    item = load_pending(root).get(session_id)
+    return isinstance(item, dict) and item.get("had_image") is True
+
+
+def record_pending(root, session_id, turn_id, quote, image):
+    """Remember that the user complained in this session and turn. Satisfied by a user defect from this session."""
+    marker = load_pending(root)
+    old = marker.get(session_id) if isinstance(marker.get(session_id), dict) else {}
+    marker[session_id] = {"time": now(), "quote": quote, "session_id": session_id, "prompts": 0,
+                          "turn_id": turn_id if isinstance(turn_id, str) else None,
+                          "had_image": bool(image or old.get("had_image"))}
+    keep = sorted(marker.items(), key=lambda kv: str(kv[1].get("time", "") if isinstance(kv[1], dict) else ""))[-20:]
+    save_pending(root, dict(keep))
+
+
+def host_session():
+    """The id of the host session running this command, when the host exports one."""
+    for name in SESSION_ENV:
+        value = os.environ.get(name)
+        if valid_session_id(value): return value
+    return None
+
+
+def clear_pending_for_host_session(root):
+    """defect add --source user: mark the marker of the session running it done (its id from the host's environment).
+    Other sessions keep theirs."""
+    marker = load_pending(root)
+    ids = {os.environ.get(name) for name in SESSION_ENV} - {None, ""}
+    hit = [k for k in ids if isinstance(marker.get(k), dict)]
+    for k in hit: marker[k]["done"] = True
+    if hit: save_pending(root, marker)
+
+
+def pending_complaint(root, session_id, defects):
+    """This session's live complaint marker, else None. A user defect added at or after it satisfies it when it was
+    recorded by the same session (the host's session id); a defect recorded without a session id satisfies any marker."""
+    if not valid_session_id(session_id): return None
+    item = load_pending(root).get(session_id)
+    if not isinstance(item, dict) or not isinstance(item.get("time"), str) or item.get("expired") or item.get("done"): return None
+    for d in defects:
+        added = next((h.get("time") for h in d.get("history") or [] if isinstance(h, dict) and h.get("action") == "add"), "")
+        same = not isinstance(d.get("session"), str) or d["session"] == session_id
+        if d.get("source") != "agent" and isinstance(added, str) and added >= item["time"] and same: return None
+    return item
+
+
+def open_user_defect(root):
+    try: return any(d.get("status") == "open" and d.get("source") != "agent" for d in Store(root).defects())
+    except UsageError: return False
+
+
+def hook_prompt(payload):
+    if not isinstance(payload, dict) or not isinstance(payload.get("prompt"), str): return ""
+    prompt = payload["prompt"]
+    words = request_text(prompt)
+    complaint, only_image = is_complaint(words), image_only(prompt)
+    root, _ = discover_hook_store(payload)
+    session_id = payload.get("session_id") if valid_session_id(payload.get("session_id")) else None
+    if root is not None and session_id: age_pending(root, session_id)
+    quote = short(words.replace('"', "'"), 200) if words else "(image only)"
+    add = (f'{SCRIPT_HINT} defect add --deliverable N --bbox x0,y0,x1,y1 --kind artifact|seam|color|logo|other '
+           f'--source user --note "..." --quote "{quote}"')
+    image = only_image or attached_image(prompt)
+    # A text-only complaint is about the image when it names something visual, follows an image complaint in this
+    # session ("k thấy sai nặng à?" after a screenshot), or comes while a user defect is open.
+    visual = root is not None and (image or about_an_image(root, words)
+                                   or (session_id and session_had_image_complaint(root, session_id)) or open_user_defect(root))
+    if root is not None and complaint and not visual:
+        # Text-only and about nothing visual ("fix the typo in README"): a reminder, no marker, nothing blocks.
+        text = (f'image-studio: if the user\'s message ("{quote}") is about an image in this project, record it before '
+                f"editing: {add} (never --source agent). Otherwise ignore this note.")
+    elif root is not None and (complaint or only_image):
+        if session_id: record_pending(root, session_id, payload.get("turn_id"), quote, image)
+        text = (f'image-studio: the user is reporting a problem with the image ("{quote}"). Before you edit anything:\n'
+                + ("- They sent an image without words (image only): the region it shows is the complaint; box that region.\n"
+                   if only_image and not complaint else "")
+                + f"- Approve the exact file the user is looking at: {SCRIPT_HINT} approve deliverable --name N --file F "
+                "(first time: --width W --height H --format PNG).\n"
+                f"- Record the complaint in their words: {add}\n"
+                "- never file the user's complaint as --source agent.\n"
+                '- If defect add prints "Repeat", stop patching strokes and follow image-verify/references/construction-reference.md.'
+                + ("\nThe stop hook blocks any claim that the work is done until this complaint is recorded." if session_id else ""))
+    elif root is None and complaint and attached_image(prompt):
+        text = (f'image-studio: the user is reporting a problem with an image ("{quote}") and no project store tracks it. '
+                f"Before editing: {SCRIPT_HINT} init --project <the image's folder> --brand <brand>; then approve deliverable "
+                f"--name N --file F --width W --height H --format PNG; then {add}. "
+                "If defect add prints \"Repeat\", follow image-verify/references/construction-reference.md.")
+    else: return ""
+    # ASCII escapes keep the JSON valid whatever the hook's stdout encoding is.
+    return json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text}})
+
+
 def hook_stop(payload):
     if not isinstance(payload, dict) or payload.get("stop_hook_active") is True: return ""
     root, _ = discover_hook_store(payload)
@@ -1499,21 +1907,34 @@ def hook_stop(payload):
     if not isinstance(message, str):
         tr = payload.get("transcript_path")
         message = last_message_from_transcript(tr) if isinstance(tr, str) and tr else ""
-    if not message.strip() or admits_unfinished(message) or not claims_completion(message):
-        return ""
+    if not message.strip() or admits_unfinished(message): return ""
+    corrupt = ("image-studio: project store is corrupt: {}. Repair or restore " + str(root) + " (state.json, defects.jsonl) "
+               "before claiming anything; meanwhile tell the user plainly that the work is not verified.")
     try:
         store = Store(root)
-        missing = ungated(store)
-        open_defects = [d for d in store.defects() if d.get("status") == "open"]
-        fingerprint = store_fingerprint(store)
+        defects = store.defects()
     except UsageError as exc:
-        reason = (f"image-studio: project store is corrupt: {exc}. Repair or restore {root} (state.json, "
-                  "defects.jsonl) before claiming anything; meanwhile tell the user plainly that the work is not verified.")
-        return block_once(root, payload, message, "corrupt:" + str(exc), reason)
+        if not claims_completion(message): return ""
+        return block_once(root, payload, message, "corrupt:" + str(exc), corrupt.format(exc))
+    # Pending and open state first: while the user's complaint is unrecorded or a user defect is open, any "đã sửa X" claims.
+    pending = pending_complaint(root, payload.get("session_id"), defects)
+    open_defects = [d for d in defects if d.get("status") == "open"]
+    strict = bool(pending) or any(d.get("source") != "agent" for d in open_defects)
+    if not claims_completion(message, strict, pending=bool(pending)): return ""
+    try:
+        missing = ungated(store)
+        fingerprint = store_fingerprint(store)
+    except UsageError as exc: return block_once(root, payload, message, "corrupt:" + str(exc), corrupt.format(exc))
 
-    if not (missing or open_defects): return ""
+    if not (missing or open_defects or pending): return ""
 
-    problems = [f"{short(d.get('note', ''), limit=80)} ({d.get('id')})" for d in open_defects]
+    problems = []
+    if pending:
+        problems.append(f'the user\'s complaint "{short(pending.get("quote"), 80)}" was never recorded: approve the file they '
+                        f'are looking at and run {SCRIPT_HINT} defect add ... --source user --quote "their words" before '
+                        "editing or claiming anything")
+        fingerprint += ":pending:" + pending["time"]
+    problems += [f"{short(d.get('note', ''), limit=80)} ({d.get('id')})" for d in open_defects]
     problems += [f"{name} has not passed the final check" for name in missing if name not in {d.get('deliverable') for d in open_defects}]
     reason = ("image-studio: you said the work is done, but it is not yet: " + "; ".join(problems) + ". "
               "Tell the user in their language and plain words what is still wrong (defect IDs only in parentheses) "
@@ -1544,7 +1965,10 @@ def run_hook(argv):
         raw = "" if sys.stdin is None or sys.stdin.isatty() else sys.stdin.read()
         try: payload = json.loads(raw) if raw.strip() else {}
         except ValueError: payload = None
-        out = hook_stop(payload) if (mode == "stop" and payload is not None) else (hook_session_start(payload or {}) if mode == "session-start" else "")
+        if mode == "stop": out = hook_stop(payload) if payload is not None else ""
+        elif mode == "session-start": out = hook_session_start(payload or {})
+        elif mode == "prompt": out = hook_prompt(payload)
+        else: out = ""
         if out: sys.stdout.write(out + "\n"); sys.stdout.flush()
     except BaseException: pass
     return 0
@@ -2536,6 +2960,13 @@ subcommands:
   approve deliverable --name N --file F [--width W --height H --format PNG|JPEG|WEBP|ZIP] [--alpha required|forbidden|any] [--quote T]
                                          example: python3 studio_state.py approve deliverable --name poster --file poster.png --width 1200 --height 800 --format PNG
   defect add --deliverable N --bbox x0,y0,x1,y1 --kind logo|seam|artifact|scope|color|other --note T [--source user|agent] [--quote T] [--wide]
+                                         records image_size and a 16x16 gray fingerprint; a user box on the region of an earlier user
+                                         complaint (any status) on the same artwork is a repeat: it records repeat_of and needs a lesson and
+                                         a construction rule. Same artwork: the same deliverable, or w/h within 2% and fingerprints within 18
+                                         (a flat, single-color fingerprint matches nothing). Same region, as fractions of the image:
+                                         IoU >= 0.1, its center inside an old box of at most 25% of the image, or (new box at most 25%
+                                         of the image) 60% of the old box inside it. Agent defects and scope requests with
+                                         --quote never are repeats, nor earlier complaints
                                          example: python3 studio_state.py defect add --deliverable poster --bbox 100,50,200,150 --kind seam --note "visible seam"
   defect close --id D1 --status resolved|wontfix --note T [--quote T]
                                          example: python3 studio_state.py defect close --id D1 --status resolved --note "feathered seam"
@@ -2549,6 +2980,11 @@ subcommands:
   lesson add --mistake T --cause T --check T [--worked T] [--defect D1] [--kind K] [--brand B]
                                          example: python3 studio_state.py lesson add --defect D4 --mistake "delivered a soft poster" --cause "upscaled a generated patch" --check "compare at 100% before delivery"
   lesson list [--brand B]                example: python3 studio_state.py lesson list --brand acme
+  construction add --defect D1 --object T --rule T (--ref FILE [--ref FILE ...] | --quote T)
+                                         how an object is physically built, from real reference photos or the user's words; stored in the
+                                         store's construction.jsonl with each ref's path and sha256; the gate fails a repeat defect without one
+                                         example: python3 studio_state.py construction add --defect D7 --object "booster pack" --rule "torn top strip stays attached at one end; its length equals the tear edge" --ref refs/tear-1.jpg --ref refs/tear-2.jpg
+  construction list                      example: python3 studio_state.py construction list
   taste add --note T [--aspect color|line|composition|detail|lighting|text|style|other] [--quote T] [--deliverable N] [--brand B]
                                          example: python3 studio_state.py taste add --aspect color --note "deep blue night palette with warm gold accents" --quote "love this palette"
   taste list [--brand B]                 example: python3 studio_state.py taste list --brand acme
@@ -2615,9 +3051,14 @@ subcommands:
                                          focus share of the crop, "focus does not fit", or "image too small for this ratio"; --display: the image must be 2x WxH on both axes;
                                          --out-dir writes crop-16x9.png, crop-4x5.png, crop-1x1.png, crop-9x16.png; exit 1 on any problem
                                          example: python3 studio_state.py crop-check --image hero.png --focus 820,300,1240,900 --display 1440x810 --out-dir crops
-  hook session-start | hook stop         example: python3 studio_state.py hook session-start < payload.json
+  hook session-start | hook prompt | hook stop
+                                         example: python3 studio_state.py hook session-start < payload.json
+                                         hook prompt (UserPromptSubmit): a complaint (Vietnamese or English problem words, or an image
+                                         with no words) where a store exists prints {"hookSpecificOutput": {"hookEventName":
+                                         "UserPromptSubmit", "additionalContext": ...}} and writes pending-complaints.json; hook stop
+                                         then blocks a completion claim until defect add --source user records it
 
-approve, defect, brief, gate and verdict find the store by walking up from --project or the current folder.
+approve, defect, construction, brief, gate and verdict find the store by walking up from --project or the current folder.
 init creates it; pref add does not use the project store; lessons (lessons.jsonl) and taste notes (brands/<brand>/taste.jsonl, taste.jsonl) live in ${IMAGE_STUDIO_HOME:-~/.image-studio}, shared by every task; hooks use the cwd from the hook input.
 gate fails a wrong size and says whether the aspect matches (w/h within 0.025); a PNG/JPEG/WebP over 1 MB gets a warning, not a fail.
 engine (axis-check, blend, edit-check, shape-check, mask-from-diff): --engine auto|pillow|fast, else IMAGE_STUDIO_ENGINE, else auto.
@@ -2750,6 +3191,15 @@ def build_parser():
     p.add_argument("--brand")
     p.set_defaults(func=cmd_lesson_list)
 
+    construction = sub.add_parser("construction").add_subparsers(dest="what", metavar="add|list", required=True)
+    p = construction.add_parser("add", parents=[common])
+    p.add_argument("--defect", required=True); p.add_argument("--object", required=True); p.add_argument("--rule", required=True)
+    p.add_argument("--ref", action="append", help="a real reference photo of the same action (repeat for more)")
+    p.add_argument("--quote", help="the user's own words explaining how the object is built")
+    p.set_defaults(func=cmd_construction_add)
+    p = construction.add_parser("list", parents=[common])
+    p.set_defaults(func=cmd_construction_list)
+
     taste = sub.add_parser("taste").add_subparsers(dest="what", metavar="add|list", required=True)
     p = taste.add_parser("add", parents=[common])
     p.add_argument("--note", required=True); p.add_argument("--aspect", choices=ASPECTS, default="other")
@@ -2772,13 +3222,13 @@ def build_parser():
     p.set_defaults(func=cmd_brand_show)
 
     p = sub.add_parser("hook")
-    p.add_argument("mode", choices=("session-start", "stop"))
+    p.add_argument("mode", choices=("session-start", "prompt", "stop"))
     return parser
 
 
 def store_lock(args):
     """Serialize commands that rewrite one store, so parallel agents do not overwrite each other's defects or verdicts."""
-    if fcntl is None or getattr(args, "command", None) not in ("approve", "defect", "gate", "verdict"): return None
+    if fcntl is None or getattr(args, "command", None) not in ("approve", "defect", "gate", "verdict", "construction"): return None
     try:
         root = find_store(getattr(args, "project", None) or os.getcwd())
         if root is None: return None

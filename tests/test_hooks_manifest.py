@@ -32,10 +32,10 @@ def run_command(command, root, path=None, stdin='{"stop_hook_active": false}'):
 
 
 class HooksManifestTest(unittest.TestCase):
-    def test_hooks_file_has_session_start_and_stop_calling_the_state_script(self):
+    def test_hooks_file_has_session_start_prompt_and_stop_calling_the_state_script(self):
         commands = hook_commands()
-        self.assertEqual(sorted(commands), ["SessionStart", "Stop"])
-        for event, mode in (("SessionStart", "hook session-start"), ("Stop", "hook stop")):
+        self.assertEqual(sorted(commands), ["SessionStart", "Stop", "UserPromptSubmit"])
+        for event, mode in (("SessionStart", "hook session-start"), ("UserPromptSubmit", "hook prompt"), ("Stop", "hook stop")):
             self.assertEqual(len(commands[event]), 1, event)
             self.assertIn(SCRIPT, commands[event][0])
             self.assertIn(mode, commands[event][0])

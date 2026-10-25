@@ -23,7 +23,7 @@ The model is trained on photos: a hand it finds is never a pass, and a painted h
 
 ## 2. Hunt
 
-Start a fresh hunter for each hunt, never one that carried an earlier task, and do not reopen the views yourself. In Claude Code, give the `image-hunter` agent (Agent tool) the `views` folder path with the file names and image size that `prepare-review` printed, and the lessons and taste lines from `brief`: it opens the tiles in its own context, so the main chat receives only the table. On Codex or elsewhere, give the instructions below to a fresh subagent or session; otherwise follow them yourself and say the hunt was a self-review.
+Start a fresh hunter for each hunt, never one that carried an earlier task, and do not reopen the views yourself. In Claude Code, give the `image-hunter` agent (Agent tool) the `views` folder path with the file names and image size that `prepare-review` printed, and the lessons and taste lines from `brief`: it opens the tiles in its own context, so the main chat receives only the table. That agent exists only in Claude Code. On Codex, spawn a fresh sub-agent with the host's agent tool (`spawn_agent`) whose task is the instructions in the plugin's `agents/image-hunter.md` (`../../../agents/image-hunter.md` from this file; the same text is below), plus the same inputs; elsewhere, give the instructions below to a fresh subagent or session. Never review your own edit in the same context when a fresh agent is available; when none is, follow the instructions yourself and label the hunt a self-review.
 
 You are a strict art director hunting defects in one image. You did not make it. Your task is to find problems, not to approve it.
 
