@@ -15,6 +15,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 import zipfile
 from pathlib import Path
 
@@ -70,6 +71,13 @@ class StudioBase(unittest.TestCase):
                              capture_output=True, text=True, cwd=str(cwd or self.project), env=env)
         self.assertNotIn("Traceback", run.stderr, run.stderr)
         self.assertNotIn("Traceback", run.stdout, run.stdout)
+        if [str(a) for a in args[:2]] == ["hook", "session-start"] and run.stdout.strip():
+            # The card arrives as {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": card}};
+            # check that shape here, then hand the card text to the assertions below.
+            out = json.loads(run.stdout)
+            self.assertEqual(list(out), ["hookSpecificOutput"])
+            self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "SessionStart")
+            run.stdout = out["hookSpecificOutput"]["additionalContext"] + "\n"
         return run
 
     def ok(self, *args, **kw):
@@ -3007,6 +3015,505 @@ class PromptHookTests(StudioBase):
         self.gated_store()
         self.assertNotIn("stop hook blocks", self.prompt("cụm card lỗi kìa", session="../bad")["additionalContext"])
         self.assertIn("stop hook blocks", self.prompt("cụm card lỗi kìa", session="ok1")["additionalContext"])
+
+
+class ScopeAndRetireTests(StudioBase):
+    """2026-11-05..07: one Codex workspace held 41 deliverables and 9 open defects from 5-6 abandoned jobs; the stop hook
+    blocked every reply on a new banner with 30+ old card deliverables, and nothing could retire them."""
+
+    OLD = "2026-01-01T00:00:00Z"
+
+    def setUp(self):
+        super().setUp()
+        self.init()
+        self.turn = 0
+
+    def approve(self, name, session=None, card=True):
+        path = self.poster(f"{name}.png", card=card)
+        env = {"CODEX_THREAD_ID": session} if session else None
+        return self.ok("approve", "deliverable", "--name", name, "--file", path, "--width", 200, "--height", 150,
+                       "--format", "PNG", env_extra=env)
+
+    def add_defect(self, name, note, session=None):
+        env = {"CODEX_THREAD_ID": session} if session else None
+        out = self.ok("defect", "add", "--deliverable", name, "--bbox", "10,10,60,60", "--kind", "artifact",
+                      "--note", note, env_extra=env).stdout
+        return out.split("Added defect ", 1)[1].split()[0]
+
+    def age_everything(self):
+        """Move every recorded event (state and defects) to an old date, as if the work were weeks old."""
+        def walk(value):
+            if isinstance(value, dict):
+                return {k: (self.OLD if k == "time" else walk(v)) for k, v in value.items()}
+            if isinstance(value, list): return [walk(v) for v in value]
+            return value
+        state = walk(self.state())
+        for item in state["deliverables"].values():
+            if isinstance(item.get("touched"), dict): item["touched"] = {k: self.OLD for k in item["touched"]}
+        (self.store / "state.json").write_text(json.dumps(state))
+        (self.store / "defects.jsonl").write_text("".join(json.dumps(walk(d)) + "\n" for d in self.defects()))
+
+    def stop(self, message="Done.", session="sNew"):
+        self.turn += 1
+        payload = {"cwd": str(self.project), "last_assistant_message": message, "turn_id": f"t{self.turn}"}
+        if session: payload["session_id"] = session
+        out = self.run_cli("hook", "stop", stdin=json.dumps(payload)).stdout.strip()
+        return json.loads(out)["reason"] if out else ""
+
+    def old_cards(self):
+        for n in range(3):
+            self.approve(f"card-{n}", session="sOld")
+        self.add_defect("card-0", "old glove seam", session="sOld")
+        self.age_everything()
+
+    def test_old_work_from_another_chat_never_blocks_a_new_task(self):
+        self.old_cards()
+        self.assertEqual(self.stop("Done."), "")  # nothing touched in this chat: no block at all
+        self.approve("banner", session="sNew")
+        reason = self.stop("Done, banner is ready.")
+        self.assertIn("banner has not passed the final check", reason)
+        self.assertNotIn("card-", reason.split("older")[0])
+        self.assertNotIn("old glove seam", reason)
+        self.assertIn("3 older deliverables are unchecked", reason)
+        self.assertIn("retire", reason)
+
+    def test_work_this_chat_touched_blocks_even_when_old(self):
+        self.old_cards()
+        self.add_defect("card-1", "new complaint", session="sNew")
+        reason = self.stop("Đã sửa xong.")
+        self.assertIn("new complaint (D2)", reason)
+        self.assertNotIn("old glove seam", reason)
+        self.assertNotIn("card-2", reason.split("older")[0])
+
+    def test_without_a_session_id_recent_work_still_blocks(self):
+        self.old_cards()
+        self.approve("banner")  # no host session in the environment
+        reason = self.stop("Done.", session=None)
+        self.assertIn("banner has not passed", reason)
+        self.assertNotIn("card-0 has not passed", reason)
+        reason = self.stop("Finished.", session="other")  # a record with no session counts within 12 hours
+        self.assertIn("banner has not passed", reason)
+
+    def test_another_chats_recent_work_does_not_block_this_chat(self):
+        self.approve("banner", session="sA")
+        self.assertEqual(self.stop("Done.", session="sB"), "")
+        self.assertIn("banner has not passed", self.stop("Done.", session="sA"))
+
+    def test_a_gate_record_belongs_to_its_session(self):
+        self.approve("clean", session="sA", card=False)
+        self.assertEqual(self.run_cli("gate", "--deliverable", "clean", env_extra={"CODEX_THREAD_ID": "sA"}).returncode, 0)
+        self.assertEqual(self.state()["gates"]["clean"].get("session"), "sA")
+        self.approve("clean", session="sA", card=True)  # a new file: the old gate no longer counts
+        self.assertEqual(self.stop("Done.", session="sB"), "")
+        self.assertIn("clean has not passed", self.stop("Done.", session="sA"))
+
+    def test_events_record_the_host_session(self):
+        self.approve("banner", session="sA")
+        self.assertIn("sA", self.state()["deliverables"]["banner"]["touched"])
+        did = self.add_defect("banner", "seam", session="sA")
+        self.ok("defect", "close", "--id", did, "--status", "resolved", "--note", "fixed", env_extra={"CODEX_THREAD_ID": "sC"})
+        self.assertEqual(self.defects()[0]["history"][-1].get("session"), "sC")
+        self.run_cli("gate", "--deliverable", "banner", env_extra={"CLAUDE_CODE_SESSION_ID": "sG"})
+        self.assertIn("sG", self.state()["deliverables"]["banner"]["touched"])
+
+    def test_session_start_card_lists_current_work_and_counts_older_work(self):
+        self.old_cards()
+        self.approve("banner", session="sNew")
+        out = self.run_cli("hook", "session-start", stdin=json.dumps({"cwd": str(self.project), "session_id": "sNew"})).stdout
+        self.assertIn("- banner:", out)
+        self.assertNotIn("- card-1:", out)
+        self.assertNotIn("old glove seam", out)
+        self.assertIn("Older work", out)
+        self.assertIn("3 deliverables", out)
+        self.assertIn("D1", out)  # older open defect IDs are never dropped
+
+    def test_retire_named_deliverables(self):
+        self.old_cards()
+        run = self.ok("retire", "--deliverable", "card-0", "--deliverable", "card-1", "--note", "abandoned card job",
+                      "--quote", "bỏ job card cũ")
+        self.assertIn("card-0", run.stdout)
+        state = self.state()
+        self.assertEqual(state["deliverables"]["card-0"]["retired"]["note"], "abandoned card job")
+        self.assertNotIn("retired", state["deliverables"]["card-2"])
+        d1 = self.defects()[0]
+        self.assertEqual(d1["status"], "wontfix")
+        self.assertEqual(d1["history"][-1]["note"], "retired: abandoned card job")
+        module = load_module()
+        self.assertEqual(module.ungated(module.Store(self.store)), ["card-2"])
+        brief = self.ok("brief", "--max-lines", 200).stdout
+        self.assertNotIn("- card-0:", brief)
+        self.assertIn("Retired deliverables: 2", brief)
+        listed = self.ok("retire", "--list").stdout
+        self.assertIn("card-1", listed)
+        self.assertIn("abandoned card job", listed)
+        self.approve("card-0")  # re-approving un-retires it
+        self.assertNotIn("retired", self.state()["deliverables"]["card-0"])
+
+    def test_retire_before_a_date(self):
+        self.old_cards()
+        self.approve("banner", session="sNew")
+        run = self.ok("retire", "--before", "2026-06-01", "--note", "old jobs", "--quote", "dọn đồ cũ")
+        self.assertIn("3", run.stdout)
+        delivs = self.state()["deliverables"]
+        self.assertTrue(all("retired" in delivs[f"card-{n}"] for n in range(3)))
+        self.assertNotIn("retired", delivs["banner"])
+        out = self.run_cli("hook", "session-start", stdin=json.dumps({"cwd": str(self.project), "session_id": "sX"})).stdout
+        self.assertIn("1 deliverable,", out)  # only sNew's banner is left, as older work for this other chat
+        self.assertEqual(self.stop("Done.", session="sX"), "")
+        out = self.run_cli("hook", "session-start", stdin=json.dumps({"cwd": str(self.project), "session_id": "sNew"})).stdout
+        self.assertNotIn("Older work", out)
+
+    def test_retire_bad_input_exits_2(self):
+        self.approve("banner")
+        for args in (("--deliverable", "nope", "--note", "x"), ("--note", "x"), ("--deliverable", "banner"),
+                     ("--before", "June 1", "--note", "x"), ("--before", "2026-06-01", "--deliverable", "banner", "--note", "x")):
+            run = self.run_cli("retire", *args)
+            self.assertEqual(run.returncode, 2, args)
+            self.assertIn("error", run.stderr + run.stdout, args)
+        self.assertNotIn("retired", self.state()["deliverables"]["banner"])
+
+    # Review round: Claude Code launched from a Codex terminal sees both CODEX_THREAD_ID and CLAUDE_CODE_SESSION_ID.
+
+    def test_records_carry_every_host_id_and_the_hook_matches_any(self):
+        both = {"CODEX_THREAD_ID": "cx1", "CLAUDE_CODE_SESSION_ID": "cl1"}
+        self.ok("approve", "deliverable", "--name", "banner", "--file", self.poster("banner.png"), "--width", 200,
+                "--height", 150, "--format", "PNG", env_extra=both)
+        payload = {"cwd": str(self.project), "session_id": "cl1", "turn_id": "p1", "prompt": "logo lỗi kìa, sai màu"}
+        self.run_cli("hook", "prompt", stdin=json.dumps(payload))
+        self.assertIn("cl1", json.loads((self.store / "pending-complaints.json").read_text(encoding="utf-8")))
+        self.ok("defect", "add", "--deliverable", "banner", "--bbox", "10,10,60,60", "--kind", "logo",
+                "--note", "logo color wrong", env_extra=both)
+        self.assertEqual(self.defects()[0]["sessions"], ["cx1", "cl1"])
+        reason = self.stop("Đã sửa xong.", session="cl1")
+        self.assertNotIn("never recorded", reason)
+        self.assertIn("logo color wrong", reason)
+        self.assertEqual(self.stop("Done.", session="other"), "")
+
+    def test_open_user_defect_without_a_session_never_ages_out_when_the_hook_has_no_session(self):
+        self.approve("old")
+        self.add_defect("old", "user complaint with no session")
+        self.age_everything()
+        self.assertIn("user complaint with no session", self.stop("Done.", session=None))
+        out = self.run_cli("hook", "session-start", stdin=json.dumps({"cwd": str(self.project)})).stdout
+        self.assertIn("user complaint with no session", out)
+        # With a session id the same record is legacy: the 12-hour window applies and it does not block.
+        self.assertEqual(self.stop("Finished.", session="sNew"), "")
+        out = self.run_cli("hook", "session-start", stdin=json.dumps({"cwd": str(self.project), "session_id": "sNew"})).stdout
+        self.assertNotIn("user complaint with no session", out)
+        self.assertIn("Older work", out)
+
+    def test_retire_needs_the_users_words_to_close_a_user_complaint(self):
+        self.old_cards()  # card-0 holds D1, an open user defect
+        run = self.run_cli("retire", "--deliverable", "card-0", "--note", "abandoned")
+        self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+        self.assertIn("D1", run.stderr)
+        self.assertEqual(self.defects()[0]["status"], "open")
+        self.assertNotIn("retired", self.state()["deliverables"]["card-0"])
+        self.ok("retire", "--deliverable", "card-2", "--note", "no defects there")  # nothing to close: no quote needed
+        self.ok("retire", "--deliverable", "card-0", "--note", "abandoned", "--quote", "bỏ mấy card cũ đi")
+        self.assertEqual(self.state()["deliverables"]["card-0"]["retired"]["closed"], ["D1"])
+
+    def test_retire_refuses_this_chats_current_work_without_the_users_words(self):
+        self.old_cards()
+        self.approve("banner", session="sA")
+        env = {"CODEX_THREAD_ID": "sA"}
+        run = self.run_cli("retire", "--deliverable", "banner", "--note", "done with it", env_extra=env)
+        self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+        self.assertNotIn("retired", self.state()["deliverables"]["banner"])
+        self.age_everything()  # old, but this chat touched it: still current for sA
+        run = self.ok("retire", "--before", "2026-06-01", "--note", "old", "--quote", "dọn hết đồ cũ", env_extra=env)
+        self.assertNotIn("retired", self.state()["deliverables"]["banner"])
+        self.assertIn("banner", run.stdout)  # named as skipped
+        self.ok("retire", "--deliverable", "banner", "--note", "user dropped it", "--quote", "thôi bỏ banner", env_extra=env)
+        self.assertIn("retired", self.state()["deliverables"]["banner"])
+
+    def test_retire_before_a_future_date_exits_2(self):
+        self.approve("banner")
+        run = self.run_cli("retire", "--before", "2999-01-01", "--note", "x")
+        self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+        self.assertIn("future", run.stderr)
+
+    def test_unretire_reopens_the_defects_retire_closed_and_reretire_keeps_the_time(self):
+        self.old_cards()
+        self.ok("retire", "--deliverable", "card-0", "--note", "first", "--quote", "bỏ đi")
+        first = self.state()["deliverables"]["card-0"]["retired"]["time"]
+        time.sleep(1.1)
+        self.ok("retire", "--deliverable", "card-0", "--note", "second", "--quote", "bỏ đi")
+        self.assertEqual(self.state()["deliverables"]["card-0"]["retired"]["time"], first)
+        self.approve("card-0")
+        self.assertEqual(self.defects()[0]["status"], "open")
+        self.assertEqual(self.defects()[0]["history"][-1]["action"], "reopen")
+
+    def test_retire_writes_state_before_defects(self):
+        self.old_cards()
+        module = load_module()
+        module.Store.save = lambda store: (_ for _ in ()).throw(OSError("disk full"))
+        old_home = os.environ.get("IMAGE_STUDIO_HOME")
+        os.environ["IMAGE_STUDIO_HOME"] = str(self.home)
+        try:
+            with unittest.mock.patch("sys.stderr", io.StringIO()):
+                code = module.main(["retire", "--project", str(self.project), "--deliverable", "card-0", "--note", "x",
+                                    "--quote", "bỏ"])
+        finally:
+            if old_home is None: os.environ.pop("IMAGE_STUDIO_HOME", None)
+            else: os.environ["IMAGE_STUDIO_HOME"] = old_home
+        self.assertEqual(code, 2)
+        self.assertEqual(self.defects()[0]["status"], "open")  # a failed state write never leaves the complaint closed
+
+    # Last review round.
+
+    def test_malformed_defect_fields_block_as_a_corrupt_store(self):
+        self.approve("banner")
+        self.add_defect("banner", "seam")
+        good = self.defects()[0]
+        bad = {"history_int": {"history": 5}, "history_str_items": {"history": ["x"]},
+               "deliverable_list": {"deliverable": ["leg"]}, "sessions_str": {"sessions": "abc"},
+               "note_none": {"note": None}, "time_int": {"history": [{"time": 5, "action": "add"}]},
+               "status_int": {"status": 3}, "source_list": {"source": ["user"]}, "session_int": {"session": 7}}
+        for label, change in bad.items():
+            (self.store / "defects.jsonl").write_text(json.dumps(dict(good, **change)) + "\n")
+            for session in (None, "sNew"):
+                self.assertIn("corrupt", self.stop(f"Done {label}.", session=session), (label, session))
+            run = self.run_cli("brief")
+            self.assertEqual(run.returncode, 2, label)
+
+    def test_closing_a_closed_defect_exits_2_and_unretire_still_reopens(self):
+        self.old_cards()
+        self.ok("retire", "--deliverable", "card-0", "--note", "old", "--quote", "bỏ đi")
+        run = self.run_cli("defect", "close", "--id", "D1", "--status", "resolved", "--note", "sneaky")
+        self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+        self.assertIn("not open", run.stderr)
+        d1 = self.defects()[0]  # a hand edit of the last note must not stop un-retire either
+        d1["history"][-1]["note"] = "edited"
+        (self.store / "defects.jsonl").write_text(json.dumps(d1) + "\n")
+        self.approve("card-0")
+        self.assertEqual(self.defects()[0]["status"], "open")
+
+    WRAPPED_PROMPTS = [
+        '<agent-message from="a93a116f3e42c3468">\n[Subagent hand-back] The text below is the final report of a subagent '
+        "this session delegated to. The logo is wrong and the edge is broken; fix the banner image.\n</agent-message>",
+        '<agent-message from="a93a116f3e42c3468">\n[Subagent hand-back] The text below is the final report of a subagent. '
+        "Hooks docs NOT retrieved; the image looks off.",  # never closed
+        "<task-notification>\n<task-id>b0rvest5x</task-id>\n<status>failed</status>\n<summary>logo test broken, image "
+        "wrong</summary>\n</task-notification>",
+        "<system-reminder>The banner image still looks wrong.</system-reminder>",
+        "<local-command-caveat>Caveat: the messages below were generated by the user while running local commands."
+        "</local-command-caveat>\n<command-name>/fix-logo</command-name>\n<local-command-stdout>image broken"
+        "</local-command-stdout>",
+    ]
+
+    def test_harness_and_agent_wrappers_are_not_user_complaints(self):
+        self.approve("banner")
+        for n, prompt in enumerate(self.WRAPPED_PROMPTS):
+            run = self.run_cli("hook", "prompt", stdin=json.dumps({"cwd": str(self.project), "session_id": f"w{n}",
+                                                                    "turn_id": "t", "prompt": prompt}))
+            self.assertEqual(run.stdout.strip(), "", prompt[:40])
+        path = self.store / "pending-complaints.json"
+        self.assertFalse(path.exists() and json.loads(path.read_text(encoding="utf-8")))
+        # The user's own words after a wrapper are still read.
+        prompt = self.WRAPPED_PROMPTS[3] + "\nlogo trên banner bị lỗi kìa"
+        run = self.run_cli("hook", "prompt", stdin=json.dumps({"cwd": str(self.project), "session_id": "u1",
+                                                                "turn_id": "t", "prompt": prompt}))
+        self.assertIn("UserPromptSubmit", run.stdout)
+        self.assertIn("u1", json.loads(path.read_text(encoding="utf-8")))
+
+    def test_help_lists_retire(self):
+        run = subprocess.run([sys.executable, str(SCRIPT), "--help"], capture_output=True, text=True)
+        self.assertIn("retire --deliverable N", run.stdout)
+
+
+def textured(size=(240, 180), seed=0):
+    """Line-art-like image with fine detail: thin lines and small shapes on a mid-gray ground."""
+    img = Image.new("RGB", size, (128, 128, 128))
+    draw = ImageDraw.Draw(img)
+    w, h = size
+    for i in range(0, w, 7):
+        draw.line((i, 0, (i * 3 + seed) % w, h), fill=(20 + i % 200, 30, 60), width=1)
+    for j in range(0, h, 11):
+        draw.rectangle((j % w, j, j % w + 5, j + 3), fill=(240, 230 - j % 100, 200))
+    return img
+
+
+class ChainDetailTests(StudioBase):
+    """Edit-of-edit chains: approve --from/--master records lineage; detail-check and the gate compare with the master."""
+
+    def save(self, img, name):
+        path = self.project / name
+        img.save(path)
+        return path
+
+    def approve(self, name, path, *extra):
+        with Image.open(path) as img:
+            w, h = img.size
+        return self.ok("approve", "deliverable", "--name", name, "--file", path, "--width", w, "--height", h,
+                       "--format", "PNG", *extra)
+
+    def state(self):
+        return json.loads((self.store / "state.json").read_text(encoding="utf-8"))
+
+    def chain(self, last_img, depth=3):
+        """master -> e1 -> e2 -> ... (depth edits); the last one holds last_img."""
+        self.init()
+        sharp = textured()
+        self.approve("master", self.save(sharp, "master.png"), "--master")
+        parent = "master"
+        for n in range(1, depth + 1):
+            img = last_img if n == depth else sharp
+            run = self.approve(f"e{n}", self.save(img, f"e{n}.png"), "--from", parent)
+            parent = f"e{n}"
+        return run
+
+    def test_lineage_depth_and_warning_at_three(self):
+        run = self.chain(textured(), depth=3)
+        d = self.state()["deliverables"]
+        self.assertEqual((d["master"]["chain_depth"], d["master"]["root"]), (0, "master"))
+        self.assertNotIn("parent", d["master"])
+        self.assertEqual((d["e1"]["parent"], d["e1"]["root"], d["e1"]["chain_depth"]), ("master", "master", 1))
+        self.assertEqual((d["e3"]["parent"], d["e3"]["root"], d["e3"]["chain_depth"]), ("e2", "master", 3))
+        self.assertIn("Chain depth: 3", run.stdout)
+        self.assertIn("Warning", run.stdout)
+        self.assertIn("master", run.stdout.split("Warning", 1)[1])
+
+    def test_depth_below_three_has_no_warning(self):
+        self.init()
+        img = textured()
+        first = self.approve("a", self.save(img, "a.png"))
+        self.assertIn("Chain depth: 0", first.stdout)
+        run = self.approve("b", self.save(img, "b.png"), "--from", "a")
+        run = self.approve("c", self.save(img, "c.png"), "--from", "b")
+        self.assertIn("Chain depth: 2", run.stdout)
+        self.assertNotIn("Warning", run.stdout)
+        self.assertEqual(self.state()["deliverables"]["c"]["root"], "a")
+
+    def test_from_itself_counts_an_edit_and_plain_reapproval_keeps_lineage(self):
+        self.init()
+        img = textured()
+        self.approve("poster", self.save(img, "v1.png"), "--master")
+        self.approve("poster", self.save(textured(seed=1), "v2.png"), "--from", "poster")
+        self.approve("poster", self.save(textured(seed=2), "v3.png"), "--from", "poster")
+        item = self.state()["deliverables"]["poster"]
+        self.assertEqual((item["chain_depth"], item["root"], item["parent"]), (2, "poster", "poster"))
+        self.assertEqual(item["master"]["path"], "v1.png")
+        self.approve("poster", self.save(textured(seed=3), "v4.png"))
+        self.assertEqual(self.state()["deliverables"]["poster"]["chain_depth"], 2)
+        self.approve("poster", self.save(textured(seed=3), "v5.png"), "--master")
+        item = self.state()["deliverables"]["poster"]
+        self.assertEqual((item["chain_depth"], item["master"]["path"]), (0, "v5.png"))
+
+    def test_detail_check_identical_blurred_and_aspect(self):
+        from PIL import ImageFilter
+        sharp = textured()
+        master = self.save(sharp, "m.png")
+        same = self.save(sharp, "same.png")
+        soft = self.save(sharp.filter(ImageFilter.GaussianBlur(1.5)), "soft.png")
+        big = self.save(sharp.resize((480, 360), Image.NEAREST), "big.png")  # same pixels at twice the size
+        wide = self.save(textured(size=(300, 180)), "wide.png")
+        run = self.ok("detail-check", "--image", same, "--master", master, "--min-ratio", 0.93)
+        self.assertIn("100.0%", run.stdout)
+        self.assertIn("Result: PASS", run.stdout)
+        run = self.run_cli("detail-check", "--image", soft, "--master", master, "--min-ratio", 0.93)
+        self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+        self.assertIn("Result: FAIL", run.stdout)
+        run = self.ok("detail-check", "--image", soft, "--master", master)  # report-only by default
+        self.assertIn("Result: LOW", run.stdout)
+        self.assertIn("report-only", run.stdout)
+        run = self.ok("detail-check", "--image", big, "--master", master, "--min-ratio", 0.93)  # resolution does not fake it
+        self.assertIn("Result: PASS", run.stdout)
+        run = self.run_cli("detail-check", "--image", wide, "--master", master)
+        self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+        self.assertIn("not comparable", run.stderr)
+
+    def test_detail_check_bad_input_exits_2(self):
+        master = self.save(textured(), "m.png")
+        flat = self.save(Image.new("RGB", (240, 180), (90, 90, 90)), "flat.png")
+        (self.project / "notimage.png").write_text("x")
+        cases = ((("--image", self.project / "missing.png", "--master", master)),
+                 (("--image", self.project / "notimage.png", "--master", master)),
+                 (("--image", master, "--master", master, "--min-ratio", 0)),
+                 (("--image", master, "--master", master, "--min-ratio", "abc")),
+                 (("--image", master, "--master", flat)))
+        for args in cases:
+            run = self.run_cli("detail-check", *args)
+            self.assertEqual(run.returncode, 2, (args, run.stdout, run.stderr))
+            self.assertIn("error", run.stderr)
+
+    def test_approve_lineage_bad_input_exits_2(self):
+        self.init()
+        img = self.save(textured(), "a.png")
+        for extra in (("--from", "nope"), ("--from", "x", "--master")):
+            run = self.run_cli("approve", "deliverable", "--name", "a", "--file", img, "--width", 240, "--height", 180,
+                               "--format", "PNG", *extra)
+            self.assertEqual(run.returncode, 2, extra)
+        self.assertNotIn("a", self.state()["deliverables"])
+
+    def test_gate_at_depth_three_warns_by_default_and_fails_with_min_detail(self):
+        from PIL import ImageFilter
+        self.chain(textured().filter(ImageFilter.GaussianBlur(1.5)), depth=3)
+        run = self.run_cli("gate", "--deliverable", "e3")
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertIn("edited 3 times in a chain; detail is", run.stdout)
+        self.assertIn("of master master", run.stdout)
+        self.assertIn("regenerate from the master", run.stdout)
+        run = self.run_cli("gate", "--deliverable", "e3", "--min-detail", 0.93)
+        self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+        failing = run.stdout.split("Still failing:", 1)[1]
+        self.assertIn("edited 3 times in a chain; detail is", failing)
+
+    def test_gate_at_depth_three_passes_when_detail_is_kept(self):
+        self.chain(textured(), depth=3)
+        run = self.run_cli("gate", "--deliverable", "e3", "--min-detail", 0.93)
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertIn("detail: 100.0% of master master", run.stdout)
+
+    def test_gate_below_depth_three_never_runs_the_detail_check(self):
+        from PIL import ImageFilter
+        self.chain(textured().filter(ImageFilter.GaussianBlur(1.5)), depth=2)
+        run = self.run_cli("gate", "--deliverable", "e2", "--min-detail", 0.93)
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertNotIn("detail", run.stdout)
+
+    def test_gate_reports_missing_master(self):
+        from PIL import ImageFilter
+        self.chain(textured().filter(ImageFilter.GaussianBlur(1.5)), depth=3)
+        (self.project / "master.png").unlink()
+        shutil.rmtree(self.store / "masters", ignore_errors=True)  # the store's copy too
+        run = self.run_cli("gate", "--deliverable", "e3", "--min-detail", 0.93)
+        self.assertIn("detail check skipped", run.stdout)
+
+    def test_master_edited_in_place_is_still_compared_from_the_stores_copy(self):
+        from PIL import ImageFilter
+        self.chain(textured().filter(ImageFilter.GaussianBlur(1.5)), depth=3)
+        master = self.state()["deliverables"]["e3"]["master"]
+        self.assertTrue((self.store / master["copy"]).is_file(), master)
+        self.save(textured(seed=5), "master.png")  # the user edits the master file in place
+        run = self.run_cli("gate", "--deliverable", "e3", "--min-detail", 0.93)
+        self.assertNotIn("detail check skipped", run.stdout)
+        self.assertIn("edited 3 times in a chain; detail is", run.stdout.split("Still failing:", 1)[1])
+
+    def test_first_from_without_a_master_copies_the_parent(self):
+        self.init()
+        self.approve("a", self.save(textured(), "a.png"))
+        self.approve("b", self.save(textured(), "b.png"), "--from", "a")
+        master = self.state()["deliverables"]["b"]["master"]
+        self.assertTrue((self.store / master["copy"]).is_file(), master)
+        self.assertTrue(master["copy"].startswith("masters/"))
+
+    def test_gate_min_detail_range_and_zero_fine_band(self):
+        self.chain(textured(), depth=3)
+        for bad in ("0", "-1", "3", "nan", "inf"):
+            run = self.run_cli("gate", "--deliverable", "e3", "--min-detail", bad)
+            self.assertEqual(run.returncode, 2, (bad, run.stdout, run.stderr))
+            self.assertIn("--min-detail", run.stderr)
+        module = load_module()
+        module.detail_bands = lambda gray, side: [0.0, 5.0]  # a master whose fine band is exactly zero
+        with self.assertRaises(module.UsageError) as ctx:
+            module.detail_ratio(textured(), textured())
+        self.assertIn("not comparable", str(ctx.exception))
+
+    def test_help_lists_detail_check_and_lineage(self):
+        run = subprocess.run([sys.executable, str(SCRIPT), "--help"], capture_output=True, text=True)
+        self.assertIn("detail-check --image A --master B", run.stdout)
+        self.assertIn("--from PARENT", run.stdout)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -61,6 +62,56 @@ class HooksManifestTest(unittest.TestCase):
                                    ({"CLAUDE_PLUGIN_ROOT": str(PLUGIN)}, tmp)):  # PATH without python3
                     run = run_command(command, root, path)
                     self.assertEqual((run.returncode, run.stdout, run.stderr), (0, "", ""), (command, root, path))
+
+    @unittest.skipUnless(Path("/bin/sh").exists(), "needs a POSIX shell")
+    def test_every_mode_prints_one_json_object_both_hosts_accept(self):
+        # Claude Code (code.claude.com/docs/en/hooks) and Codex (the output schemas embedded in codex-cli) both take
+        # {"hookSpecificOutput": {"hookEventName": E, "additionalContext": T}} for SessionStart and UserPromptSubmit,
+        # and {"decision": "block", "reason": T} for Stop. Codex's schemas forbid any other key.
+        try:
+            from PIL import Image
+        except ImportError:
+            self.skipTest("Pillow is not installed")
+        script = PLUGIN / SCRIPT
+        with tempfile.TemporaryDirectory() as tmp:
+            project, home = Path(tmp) / "project", Path(tmp) / "home"
+            project.mkdir()
+            env = {k: v for k, v in os.environ.items() if k not in ("CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_CODE_SESSION_ID")}
+            env["IMAGE_STUDIO_HOME"] = str(home)
+            Image.new("RGB", (40, 30), (9, 9, 9)).save(project / "a.png")
+            for args in (["init", "--project", str(project), "--brand", "acme"],
+                         ["approve", "deliverable", "--name", "a", "--file", str(project / "a.png"), "--width", "40",
+                          "--height", "30", "--format", "PNG"]):
+                subprocess.run([sys.executable, str(script)] + args, check=True, capture_output=True, env=env, cwd=str(project))
+            env["CLAUDE_PLUGIN_ROOT"] = str(PLUGIN)
+            base = {"cwd": str(project), "session_id": "s1", "turn_id": "t1", "transcript_path": "", "model": "m",
+                    "permission_mode": "default"}
+            cases = {"SessionStart": dict(base, hook_event_name="SessionStart", source="startup"),
+                     "UserPromptSubmit": dict(base, hook_event_name="UserPromptSubmit", prompt="logo bị lỗi ở ảnh a.png"),
+                     "Stop": dict(base, hook_event_name="Stop", stop_hook_active=False, last_assistant_message="Done.")}
+            for event, payload in cases.items():
+                run = subprocess.run(["/bin/sh", "-c", hook_commands()[event][0]], input=json.dumps(payload),
+                                     capture_output=True, text=True, env=env, cwd=str(project))
+                self.assertEqual((run.returncode, run.stderr), (0, ""), event)
+                out = json.loads(run.stdout)  # one JSON object, nothing else
+                if event == "Stop":
+                    self.assertEqual(sorted(out), ["decision", "reason"], out)
+                    self.assertEqual(out["decision"], "block")
+                    self.assertTrue(out["reason"].startswith("image-studio: "))
+                else:
+                    self.assertEqual(list(out), ["hookSpecificOutput"], out)
+                    self.assertEqual(sorted(out["hookSpecificOutput"]), ["additionalContext", "hookEventName"])
+                    self.assertEqual(out["hookSpecificOutput"]["hookEventName"], event)
+                    self.assertTrue(out["hookSpecificOutput"]["additionalContext"].startswith("image-studio"), out)
+                    self.assertLessEqual(len(out["hookSpecificOutput"]["additionalContext"]), 10000)  # Claude Code's cap
+
+    def test_commands_share_one_form_and_timeout(self):
+        events = json.loads(HOOKS.read_text(encoding="utf-8"))["hooks"]
+        handlers = {event: groups[0]["hooks"][0] for event, groups in events.items()}
+        forms = {h["command"].replace(mode, "MODE") for h, mode in (
+            (handlers["SessionStart"], "hook session-start"), (handlers["UserPromptSubmit"], "hook prompt"), (handlers["Stop"], "hook stop"))}
+        self.assertEqual(len(forms), 1, forms)
+        self.assertEqual({h.get("timeout") for h in handlers.values()}, {10})
 
     def test_script_exists_in_the_plugin(self):
         # Fails until studio_state.py is shipped; the hooks would then silently do nothing.

@@ -13,7 +13,7 @@ hooks; they always exit 0 and print nothing on errors.
 Exit codes: 0 success or gate pass, 1 gate fail, edit-check found changes outside the box or mask
 (or a mask with no effect), axis-check found a bend, blend wrote a color-mismatched result, shape-check found a
 changed silhouette, crop-check found a crop or size problem, align-check --auto found no reliable match or a scale to
-fix, or mask-from-diff found no change, 2 bad input or missing store.
+fix, mask-from-diff found no change, or detail-check --min-ratio found less detail than the master, 2 bad input or missing store.
 numpy and OpenCV are optional (see accel.py); --engine pillow|fast or IMAGE_STUDIO_ENGINE picks the engine.
 """
 
@@ -34,7 +34,7 @@ import unicodedata
 import zipfile
 try: import fcntl
 except ImportError: fcntl = None  # Windows: no lock; lessons are added one at a time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 
 if str(Path(__file__).resolve().parent) not in sys.path: sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -77,6 +77,8 @@ CROP_DISPLAY_FACTOR = 2  # crop-check --display: the image must be this many tim
 ASPECT_LIMIT = 0.025   # gate: largest absolute w/h difference that a resize keeping aspect can fix
 FILE_BUDGET = 1000000  # gate: PNG/JPEG/WebP deliverables above this many bytes get a warning
 CARD_LIMIT = 2400
+SCOPE_HOURS = 12       # stop hook and card: an event without this chat's session id counts as current work this long
+TOUCH_CAP = 20         # sessions remembered per deliverable in its "touched" map
 LESSONS_SHOWN = 5      # lessons printed in the session card and brief
 TASTE_SHOWN = 6        # taste notes printed in the session card and brief
 CONSTRUCTION_SHOWN = 3  # construction rules printed in the session card and brief
@@ -89,6 +91,15 @@ FINGERPRINT_FLAT_STD = 2.0  # a fingerprint whose gray values spread less than t
 # one artwork. Calibrated on real data: 8 versions of one 1254x1254 illustration after many local repairs plus 2x, 512 px
 # and 1254x1250 copies scored 0.0-9.8; 12 unrelated square artworks (shared banner template included) scored 34.5-87.5.
 ARTWORK_DISTANCE = 18
+CHAIN_WARN_DEPTH = 3    # approve/gate: an edit this many steps from its clean master gets the detail check
+DETAIL_ASPECT = 0.02    # detail-check: images whose w/h differ by more than this share are not comparable
+DETAIL_SIDE_CAP = 2048  # detail-check: both images are measured at the smaller short side, at most this many px
+DETAIL_FLAT = 0.5       # detail-check: a master whose mid-band edge energy (rms, 0-255) is under this has no detail to compare
+# Detail ratio under which a deep edit chain is flagged. Report-only by default (gate --min-detail / detail-check --min-ratio
+# make it fail): on real data the edit-of-edit regenerations of one card the user had rebuilt for "accumulated redraw
+# artifacts" scored 0.88-0.91 against their first version, earlier versions 0.97-0.99, local-patch chains 1.00, and the
+# accepted crisp rebuild 1.13 against the soft one; one artwork is too little evidence to fail a gate on.
+DETAIL_MIN_RATIO = 0.93
 BRAND_CAP = 4000        # characters in one brand.json
 LONG_CHAT_BYTES = 25 << 20  # a transcript this large resends a long history on every step
 HEX_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -295,6 +306,28 @@ def pil():
 
 # ---------------------------------------------------------------- store
 
+def defect_shape_problem(d):
+    """Why a defect record has fields of the wrong type, else None. A malformed record must read as a corrupt store
+    (the stop hook then blocks), never crash the hook into silence."""
+    if not isinstance(d.get("deliverable"), str): return "deliverable must be a string"
+    if not isinstance(d.get("status"), str): return "status must be a string"
+    for key in ("source", "note", "kind", "session", "quote"):
+        if key in d and not isinstance(d[key], str): return f"{key} must be a string"
+    if "sessions" in d and not (isinstance(d["sessions"], list) and all(isinstance(s, str) for s in d["sessions"])):
+        return "sessions must be a list of strings"
+    if "bbox" in d and not (isinstance(d["bbox"], list) and len(d["bbox"]) == 4 and all(isinstance(v, int) for v in d["bbox"])):
+        return "bbox must be 4 integers"
+    history = d.get("history", [])
+    if not isinstance(history, list): return "history must be a list"
+    for h in history:
+        if not isinstance(h, dict): return "history entries must be objects"
+        for key in ("time", "action", "status", "note", "session", "quote"):
+            if key in h and not isinstance(h[key], str): return f"history {key} must be a string"
+        if "sessions" in h and not (isinstance(h["sessions"], list) and all(isinstance(s, str) for s in h["sessions"])):
+            return "history sessions must be a list of strings"
+    return None
+
+
 class Store:
     def __init__(self, root):
         self.root = Path(root)
@@ -323,6 +356,8 @@ class Store:
             except ValueError: raise UsageError(f"{self.defects_path}:{n}: not valid JSON") from None
             if not isinstance(item, dict) or not isinstance(item.get("id"), str):
                 raise UsageError(f"{self.defects_path}:{n}: defect must be an object with an id")
+            problem = defect_shape_problem(item)
+            if problem: raise UsageError(f"{self.defects_path}:{n}: defect {item['id']}: {problem}")
             items.append(item)
         return items
 
@@ -354,7 +389,8 @@ class Store:
         except ValueError: return str(path)
 
     def decide(self, text, quote):
-        self.state["decisions"].append({"time": now(), "text": text, "quote": quote or ""})
+        record = {"time": now(), "text": text, "quote": quote or ""}
+        self.state["decisions"].append(tag_session(record))
 
     def deliverable(self, name):
         item = self.state["deliverables"].get(name)
@@ -362,6 +398,22 @@ class Store:
             known = ", ".join(sorted(self.state["deliverables"])) or "none"
             raise UsageError(f"unknown deliverable {name!r} (known: {known}); run approve deliverable first")
         return item
+
+    def retired(self, name):
+        item = self.state["deliverables"].get(name)
+        return isinstance(item, dict) and isinstance(item.get("retired"), dict)
+
+    def live(self):
+        """Deliverable names that are not retired, sorted."""
+        return [n for n in sorted(self.state["deliverables"]) if not self.retired(n)]
+
+    def touch(self, name):
+        """Record that this command, run by the host session if it exports one, worked on deliverable NAME."""
+        item = self.state["deliverables"].get(name)
+        if not isinstance(item, dict): return
+        touched = item.get("touched") if isinstance(item.get("touched"), dict) else {}
+        for sid in host_sessions() or [""]: touched[sid] = now()
+        item["touched"] = dict(sorted(touched.items(), key=lambda kv: str(kv[1]))[-TOUCH_CAP:])
 
 
 def find_store(start):
@@ -453,6 +505,50 @@ def changed_share(before, after):
     return count_on(changed_mask(before, after)) / float(before.size[0] * before.size[1] or 1)
 
 
+def detail_luma(img):
+    """8-bit luminance, transparent pixels flattened on white."""
+    P = pil()
+    if has_alpha(img):
+        rgba = img.convert("RGBA")
+        flat = P.Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+        flat.alpha_composite(rgba)
+        img = flat
+    return img.convert("L")
+
+
+def detail_bands(gray, side):
+    """(fine, mid) edge energy of GRAY scaled to short side SIDE: rms of |g - blur(1)| and |g - blur(4)|."""
+    P = pil()
+    w, h = gray.size
+    scale = side / float(min(w, h))
+    size = (max(1, round(w * scale)), max(1, round(h * scale)))
+    if size != gray.size: gray = gray.resize(size, P.BOX)
+    bands = []
+    for radius in (1, 4):
+        high = P.ImageChops.difference(gray, gray.filter(P.ImageFilter.GaussianBlur(radius)))
+        bands.append(P.ImageStat.Stat(high).rms[0])
+    return bands
+
+
+def detail_ratio(image, master):
+    """Sharpness of IMAGE relative to MASTER: (fine/mid edge energy of image) / (same of master), measured at one scale.
+
+    The fine-to-mid ratio follows edge crispness, not how much texture an image has, so a cleaner redraw with fewer
+    strokes is not called soft. Returns (ratio, side); raises UsageError when the two cannot be compared."""
+    a, b = detail_luma(image), detail_luma(master)
+    ra, rb = a.size[0] / float(a.size[1]), b.size[0] / float(b.size[1])
+    if abs(ra - rb) / rb > DETAIL_ASPECT:
+        raise UsageError(f"not comparable: aspect {ra:.3f} vs master {rb:.3f} differs by more than {DETAIL_ASPECT:.0%} "
+                         "(a different crop or layout; compare by eye)")
+    side = min(min(a.size), min(b.size), DETAIL_SIDE_CAP)
+    fine_b, mid_b = detail_bands(b, side)
+    if mid_b < DETAIL_FLAT: raise UsageError("not comparable: the master is flat (no detail to compare)")
+    if fine_b <= 0: raise UsageError("not comparable: the master has no fine detail to compare")
+    fine_a, mid_a = detail_bands(a, side)
+    if mid_a < DETAIL_FLAT: return 0.0, side  # every edge is gone
+    return (fine_a / mid_a) / (fine_b / mid_b), side
+
+
 def alpha_problem(img, rule):
     transparent = has_alpha(img) and (img.convert("RGBA").getchannel("A").getextrema()[0] < 255)
     if rule == "required" and not transparent: return "alpha required but the image has no transparent pixels"
@@ -506,6 +602,21 @@ def existing_file(value, label):
     return path
 
 
+def copy_master(store, path, digest):
+    """Keep a copy of a clean master in the store as masters/<sha256><ext>, so a master edited in place later still
+    gives the gate its reference. Returns the store-relative path, or None when it cannot be written."""
+    suffix = Path(path).suffix.lower()
+    if not re.match(r"^\.[a-z0-9]{1,8}$", suffix): suffix = ".img"
+    rel = f"masters/{digest}{suffix}"
+    target = store.root / rel
+    try:
+        if not (target.is_file() and sha256_file(target) == digest):
+            target.parent.mkdir(exist_ok=True)
+            atomic_write(target, Path(path).read_bytes())
+    except OSError: return None
+    return rel
+
+
 def cmd_approve_deliverable(args):
     store = open_store(args.project)
     name = ident(args.name, "--name")
@@ -527,16 +638,58 @@ def cmd_approve_deliverable(args):
     missing = [k for k in ("width", "height", "format") if k not in spec]
     if missing: raise UsageError(f"first approval of {name!r} needs --{' --'.join(missing)}")
     quote = text_arg(args.quote, "--quote", False)
+    lineage = {k: previous[k] for k in ("parent", "root", "chain_depth", "master") if k in previous}
+    if args.from_parent is not None:
+        parent_name = ident(args.from_parent, "--from")
+        parent = previous if parent_name == name and previous else store.deliverable(parent_name)
+        depth = parent.get("chain_depth") if isinstance(parent.get("chain_depth"), int) else 0
+        master = dict(parent["master"]) if isinstance(parent.get("master"), dict) else {"path": parent.get("path"), "sha256": parent.get("current_sha256")}
+        if not master.get("copy") and isinstance(master.get("path"), str) and isinstance(master.get("sha256"), str):
+            source = store.resolve(master["path"])
+            if source.is_file() and sha256_file(source) == master["sha256"]:
+                copy = copy_master(store, source, master["sha256"])
+                if copy: master["copy"] = copy
+        lineage = {"parent": parent_name, "root": parent.get("root") or parent_name, "chain_depth": depth + 1, "master": master}
     changed = bool(old_spec) and spec != old_spec
     if changed and not quote:
         raise UsageError(f"changing the spec of {name!r} ({spec_text(old_spec)} → {spec_text(spec)}) needs --quote with the user's words")
     digest = sha256_file(path)
-    store.state["deliverables"][name] = {"spec": spec, "current_sha256": digest, "path": store.relative(path)}
+    if args.master:
+        lineage = {"root": name, "chain_depth": 0, "master": {"path": store.relative(path), "sha256": digest}}
+        copy = copy_master(store, path, digest)
+        if copy: lineage["master"]["copy"] = copy
+    store.state["deliverables"][name] = dict({"spec": spec, "current_sha256": digest, "path": store.relative(path)}, **lineage)
+    if isinstance(previous.get("touched"), dict): store.state["deliverables"][name]["touched"] = previous["touched"]
+    store.touch(name)
     text = f"approved deliverable {name} = {path.name} ({spec_text(spec)})"
+    if args.master: text += "; clean master"
+    elif args.from_parent is not None: text += f"; edit of {lineage['parent']} (chain depth {lineage['chain_depth']})"
     if changed: text += f"; spec changed {spec_text(old_spec)} → {spec_text(spec)}"
+    reopened = []
+    if isinstance(previous.get("retired"), dict):
+        text += "; un-retired"
+        closed = set(previous["retired"].get("closed") or [])
+        defects = store.defects() if closed else []
+        for d in defects:  # every defect retire closed comes back, whatever happened to it since
+            if d.get("id") in closed and d.get("status") != "open":
+                d["status"] = "open"
+                d.setdefault("history", []).append(tag_session({"time": now(), "action": "reopen", "status": "open",
+                                                 "note": f"un-retired by approve deliverable {name}"}))
+                reopened.append(d["id"])
+        # Defects first: if the state write then fails, the deliverable stays retired with its defects open (visible).
+        if reopened: store.save_defects(defects); text += f"; reopened {', '.join(reopened)}"
     store.decide(text, quote)
     store.save()
+    if reopened: print(f"Reopened the defects retire had closed: {', '.join(reopened)}")
     print(f"Approved deliverable {name}: {store.relative(path)} sha256 {digest}")
+    depth = lineage.get("chain_depth") if isinstance(lineage.get("chain_depth"), int) else 0
+    root = lineage.get("root") or name
+    print(f"Chain depth: {depth}" + (f" (edit of {lineage['parent']}; master {root})" if lineage.get("parent") else ""))
+    if depth >= CHAIN_WARN_DEPTH:
+        master_path = (lineage.get("master") or {}).get("path") or "?"
+        print(f"Warning: edited {depth} times in a chain from master {root} ({master_path}); repeated edits turn detail soft. "
+              f"Compare: {SCRIPT_HINT} detail-check --image {shlex.quote(str(path))} --master {shlex.quote(master_path)}; "
+              "if it is softer, regenerate from the master instead of editing this file again.")
     return 0
 
 
@@ -666,7 +819,7 @@ def cmd_defect_add(args):
                          "--wide for a whole-image problem (overall softness, color cast)")
     if args.wide: record["wide"] = True
     if quote: record["quote"] = quote
-    if host_session(): record["session"] = host_session()  # ties a user defect to the chat whose complaint it records
+    tag_session(record)  # ties a user defect to the chat whose complaint it records
     defects = store.defects()
     # A requested change (kind scope with the user's words: new text, a removed element) is not a miss, so it needs no lesson.
     request = args.kind == "scope" and bool(quote)
@@ -710,14 +863,81 @@ def cmd_defect_close(args):
     defects = store.defects()
     for item in defects:
         if item["id"] == args.id:
+            if item.get("status") != "open":
+                raise UsageError(f"{args.id} is not open (it is {item.get('status')}); a closed defect is not closed again. "
+                                 "If the problem is back, add a new defect")
             item["status"] = args.status
             entry = {"time": now(), "action": "close", "status": args.status, "note": note}
             if quote: entry["quote"] = quote
-            item.setdefault("history", []).append(entry)
+            item.setdefault("history", []).append(tag_session(entry))
             store.save_defects(defects)
             print(f"{args.id} -> {args.status}")
             return 0
     raise UsageError(f"unknown defect id {args.id!r}")
+
+
+def cmd_retire(args):
+    """Retire abandoned deliverables: they leave the stop hook, the card, brief's list and ungated; their open defects
+    close as wontfix. approve deliverable on the same name brings one back."""
+    store = open_store(args.project)
+    items = store.state["deliverables"]
+    if args.list:
+        if args.deliverable or args.before or args.note: raise UsageError("--list takes no other option")
+        rows = [f"- {n}: retired {i['retired'].get('time')}: {i['retired'].get('note')}" for n, i in sorted(items.items()) if store.retired(n)]
+        print("\n".join(["Retired deliverables:"] + rows) if rows else "Retired deliverables: none")
+        return 0
+    if bool(args.deliverable) == bool(args.before):
+        raise UsageError("give --deliverable NAME (repeatable) or --before YYYY-MM-DD, or --list")
+    note = text_arg(args.note, "--note")
+    quote = text_arg(args.quote, "--quote", False)
+    defects = store.defects()
+    current, _, _, _ = current_scope(store, defects, host_sessions())  # this chat's work (or the last 12 hours')
+    skipped = []
+    if args.deliverable:
+        for name in args.deliverable: store.deliverable(name)  # unknown name: exit 2
+        names = sorted(set(args.deliverable))
+        mine = [n for n in names if n in current]
+        if mine and not quote:
+            raise UsageError(f"{', '.join(mine)} is work of this chat (or of the last {SCOPE_HOURS} hours); retire it only "
+                             "when the user drops it: add --quote with their words")
+    else:
+        try: cutoff = datetime.strptime(args.before, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        except ValueError: raise UsageError(f"--before {args.before!r} must be a date YYYY-MM-DD (UTC)") from None
+        if cutoff > datetime.now(timezone.utc): raise UsageError(f"--before {args.before} is in the future (dates are UTC)")
+        events = deliverable_events(store, defects)
+        old = [n for n in store.live() if (last_event(events.get(n, [])) or cutoff - timedelta(days=1)) < cutoff]
+        names = [n for n in old if n not in current]
+        skipped = [n for n in old if n in current]
+        if skipped: print(f"Skipped (work of this chat; retire by name with --quote): {', '.join(skipped)}")
+        if not names:
+            print(f"No other deliverable has its last event before {args.before} UTC; nothing retired.")
+            return 0
+    to_close = [d for d in defects if d.get("deliverable") in names and d.get("status") == "open"]
+    complaints = [d["id"] for d in to_close if d.get("source") != "agent"]
+    if complaints and not quote:
+        raise UsageError(f"retiring closes the user's open complaints {', '.join(complaints)} as wontfix; ask the user and "
+                         "add --quote with their words (or fix or close them first)")
+    stamp = now()
+    for name in names:
+        old_entry = items[name].get("retired") if isinstance(items[name].get("retired"), dict) else {}
+        entry = tag_session({"time": old_entry.get("time") or stamp, "note": note})  # re-retiring keeps the first time
+        if quote: entry["quote"] = quote
+        closed_here = [d["id"] for d in to_close if d.get("deliverable") == name]
+        entry["closed"] = sorted(set(old_entry.get("closed") or []) | set(closed_here), key=lambda i: (len(i), i))
+        items[name]["retired"] = entry
+    for d in to_close:
+        d["status"] = "wontfix"
+        entry = {"time": stamp, "action": "close", "status": "wontfix", "note": f"retired: {note}"}
+        if quote: entry["quote"] = quote
+        d.setdefault("history", []).append(tag_session(entry))
+    store.decide(f"retired {len(names)} deliverable(s): {', '.join(names)}: {note}", quote)
+    # State first: if the defects write then fails, the deliverables are retired with their complaints still open
+    # (visible, and a second retire finishes the job), never closed complaints on live work.
+    store.save()
+    if to_close: store.save_defects(defects)
+    print(f"Retired {len(names)} deliverable(s): {', '.join(names)}")
+    if to_close: print(f"Closed their open defects as wontfix: {', '.join(d['id'] for d in to_close)}")
+    return 0
 
 
 # ---------------------------------------------------------------- preferences
@@ -1153,10 +1373,12 @@ def is_self_verified(run_dir):
     except (OSError, ValueError): return False
 
 
-def shared_sections(store, defects):
+def shared_sections(store, defects, names=None):
+    """names: the deliverables to list (default: every one not retired)."""
     state = store.state
     delivs = []
-    for name, item in sorted(state.get("deliverables", {}).items()):
+    for name in (store.live() if names is None else names):
+        item = state["deliverables"][name]
         gate = state.get("gates", {}).get(name) or {}
         if gate_is_valid(store, name, defects):
             rid = gate.get("run_id")
@@ -1193,6 +1415,8 @@ def build_brief(store, max_lines):
     delivs, decs, prefs, conf, lessons, taste, built = shared_sections(store, defects)
     prop = sum(1 for st, _ in prefs if st == "proposed")
     if prop: head.append(f"Preferences: {prop} proposed, ask the user to confirm (pref add ... --confirmed).")
+    gone = len(state["deliverables"]) - len(store.live())
+    if gone: head.append(f"Retired deliverables: {gone} (not listed; retire --list shows them, approve deliverable brings one back)")
     sections = [("Deliverables:", delivs), (BUILT_TITLE, built)]
     sections += [("Your taste (match it):", taste), ("Lessons from earlier tasks (check these):", lessons), ("Confirmed preferences:", conf), ("Recent decisions:", decs), ("Closed defects (resolved ones are re-checked by the gate):", [f"- {defect_line(d)}" for d in [d for d in defects if d.get("status") != "open"][::-1]])]
     lines = list(head)
@@ -1216,17 +1440,25 @@ def cmd_brief(args):
     return 0
 
 
-def format_session_start_card(store):
+def format_session_start_card(store, session=None):
+    """The session-start card: current work in full (this session's, or the last 12 hours'), older work as one line."""
     state = store.state
     defects = store.defects()
-    open_items = [d for d in defects if d.get("status") == "open"]
+    current, older, open_items, old_open = current_scope(store, defects, session)
     resolved_items = [d for d in defects if d.get("status") == "resolved"]
-    delivs, decs, _, conf, lessons, taste, built = shared_sections(store, defects)
+    delivs, decs, _, conf, lessons, taste, built = shared_sections(store, defects, current)
+    old_line = []
+    if older or old_open:
+        text = (f"Older work (not touched in this chat or the last {SCOPE_HOURS} hours; does not block): {len(older)} deliverable{'' if len(older) == 1 else 's'}, "
+                f"{len(ungated(store, older))} not passed the final check")
+        if old_open: text += f", open defects {', '.join(str(d.get('id')) for d in old_open)}"
+        old_line = [text + ". Run brief to see them; retire abandoned ones: retire --before YYYY-MM-DD --note \"why\"."]
 
     for limit in (100, 80, 60, 40, 20, 10, 5, 0):
         lines = [f"image-studio project memory (brand: {state.get('brand')} | store: {store.root}):"]
         lines.append(f"Open defects ({len(open_items)}, all listed; gate cannot pass while any is open):" if open_items else "Open defects: none")
         lines.extend(f"- {defect_line(d, limit=limit)}" for d in open_items)
+        lines.extend(old_line)
         if delivs: lines.append("Deliverables:"); lines.extend(delivs)
         if built: lines.append(BUILT_TITLE); lines.extend(built)
         if decs: lines.append("Recent decisions:"); lines.extend(decs)
@@ -1239,10 +1471,12 @@ def format_session_start_card(store):
         card = "\n".join(lines)
         if len(card) <= CARD_LIMIT: return card
     # Too many open defects for notes: list every open ID (never dropped) and cut the rest.
-    head = [lines[0], f"Open defects ({len(open_items)}; run brief for details): " + ", ".join(str(d.get("id")) for d in open_items)]
+    head = [lines[0], (f"Open defects ({len(open_items)}; run brief for details): " + ", ".join(str(d.get("id")) for d in open_items))
+            if open_items else "Open defects: none"]
+    head += old_line  # older open defect IDs are never dropped either
     tail = lines[-2:]  # the taste reminder and the commands line always stay
     body = []
-    for line in lines[2 + len(open_items):-2]:
+    for line in lines[2 + len(open_items) + len(old_line):-2]:
         if len("\n".join(head + body + [line] + tail)) > CARD_LIMIT: break
         body.append(line)
     return "\n".join(head + body + tail)
@@ -1476,6 +1710,8 @@ def disappeared(store, name, defects):
 
 
 def cmd_gate(args):
+    if args.min_detail is not None and not 0 < args.min_detail <= 2:  # NaN and infinity fail this too
+        raise UsageError("--min-detail must be a number above 0 and at most 2")
     store = open_store(args.project)
     name = args.deliverable
     item = store.deliverable(name)
@@ -1488,6 +1724,7 @@ def cmd_gate(args):
         report.fail(f"{path.name} is not the approved current file — run approve deliverable (file sha256 {digest[:12]}, approved {str(item.get('current_sha256'))[:12]})")
     else: report.ok(f"{path.name} is the approved current file (sha256 {digest[:12]})")
     spec_checks(path, spec, report)
+    chain_detail(store, item, path, spec, args.min_detail, report)
 
     all_defects = store.defects()
     defects = [d for d in all_defects if d.get("deliverable") == name]
@@ -1525,11 +1762,14 @@ def cmd_gate(args):
     print(f"Run: {run_id} (crops and checklist in {run_dir})")
     print("\n".join(report.lines()))
     self_verified = is_self_verified(run_dir)
+    store.touch(name)  # a gate run, pass or fail, is work on this deliverable in this session
     if passed:
         gate_rec = {"deliverable": name, "sha256": digest, "run_id": run_id, "time": now()}
         if self_verified: gate_rec["self_verified"] = True
+        tag_session(gate_rec)
         store.state.setdefault("gates", {})[name] = gate_rec
-        store.save()
+    store.save()
+    if passed:
         result_label = "Result: PASS (self-verified — not independently reviewed)" if self_verified else "Result: PASS"
         try: print(result_label)
         except UnicodeEncodeError: print("Result: PASS (self-verified - not independently reviewed)")
@@ -1537,6 +1777,34 @@ def cmd_gate(args):
         print("Result: FAIL\nNext:")
         for line in next_steps(name, path, digest, item, defects, run_id, stale, pending): print(f"- {line}")
     return 0 if passed else 1
+
+
+def chain_detail(store, item, path, spec, min_ratio, report):
+    """Gate: a deliverable edited CHAIN_WARN_DEPTH+ times in a chain is compared with its clean master's detail."""
+    depth = item.get("chain_depth")
+    if not isinstance(depth, int) or depth < CHAIN_WARN_DEPTH: return
+    root = item.get("root") or "?"
+    master = item.get("master") if isinstance(item.get("master"), dict) else {}
+    master_path = store.resolve(master["path"]) if isinstance(master.get("path"), str) and master["path"] else None
+    copy = master.get("copy")
+    if isinstance(copy, str) and re.match(r"^masters/[0-9a-f]{64}\.[a-z0-9]{1,8}$", copy) and (store.root / copy).is_file():
+        master_path = store.root / copy  # the store's own copy survives the master file being edited in place
+    skipped = f"detail: warning, edited {depth} times in a chain from master {root}, but "
+    if spec.get("format") == "ZIP":
+        report.ok(skipped + "a ZIP deliverable is not compared; detail check skipped (compare by eye with the master)"); return
+    if master_path is None or not master_path.is_file() or sha256_file(master_path) != master.get("sha256"):
+        report.ok(skipped + f"the master file {master.get('path') or '?'} is missing or changed; detail check skipped "
+                  "(compare by eye with the master)"); return
+    try: ratio, _ = detail_ratio(open_image(path), open_image(master_path))
+    except UsageError as exc: report.ok(skipped + f"{exc}; detail check skipped"); return
+    except Exception as exc: report.ok(skipped + f"the images could not be read ({exc}); detail check skipped"); return
+    threshold = DETAIL_MIN_RATIO if min_ratio is None else min_ratio
+    if ratio >= threshold:
+        report.ok(f"detail: {ratio:.1%} of master {root} (chain depth {depth}, threshold {threshold:.0%})"); return
+    text = (f"edited {depth} times in a chain; detail is {ratio:.1%} of master {root} ({master['path']}); "
+            "regenerate from the master")
+    if min_ratio is None: report.ok(f"detail: warning, {text} (report-only; gate --min-detail R makes it fail)")
+    else: report.fail(text)
 
 
 def next_steps(name, path, digest, item, defects, run_id, stale, pending):
@@ -1594,6 +1862,8 @@ def cmd_verdict(args):
     data.update({"run_id": checklist["run_id"], "nonce": checklist["nonce"], "deliverable": checklist.get("deliverable")})
     data.setdefault("verdicts", {}).update(records)
     atomic_write(path, dump_json(data))
+    if isinstance(checklist.get("deliverable"), str) and checklist["deliverable"] in store.state["deliverables"]:
+        store.touch(checklist["deliverable"]); store.save()
     if len(records) == 1 and not args.from_file: print(f"{args.id} {args.status} recorded in {path}")
     else: print(f"{len(records)} verdicts recorded in {path}: " + ", ".join(f"{k} {v['status']}" for k, v in records.items()))
     return 0
@@ -1625,13 +1895,89 @@ def last_message_from_transcript(path):
 def store_fingerprint(store):
     try: defects = store.defects_path.read_bytes()
     except OSError: defects = b""
-    current = sorted((n, str(i.get("current_sha256"))) for n, i in store.state["deliverables"].items() if isinstance(i, dict))
+    current = sorted((n, str(i.get("current_sha256")), store.retired(n)) for n, i in store.state["deliverables"].items() if isinstance(i, dict))
     return sha256_bytes(defects + json.dumps([current, store.state.get("gates")], sort_keys=True, default=str).encode("utf-8"))
 
 
-def ungated(store):
+def ungated(store, names=None):
+    """Live (not retired) deliverables, or those of NAMES, whose gate is not valid for the current file."""
     defects = store.defects()
-    return [name for name in sorted(store.state["deliverables"]) if not gate_is_valid(store, name, defects)]
+    return [name for name in (store.live() if names is None else names) if not gate_is_valid(store, name, defects)]
+
+
+APPROVED_RE = re.compile(r"^approved deliverable (\S+) = ")
+
+
+def parse_time(value):
+    try: return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError): return None
+
+
+def defect_events(d):
+    """[(time, session ids)] of one defect's history; an add carries the defect's own session ids."""
+    return [(h.get("time"), record_sessions(h) or (record_sessions(d) if h.get("action") == "add" else []))
+            for h in d.get("history") or [] if isinstance(h, dict)]
+
+
+def deliverable_events(store, defects):
+    """name -> [(time, [session ids])]: approvals, gate runs and verdicts ("touched"), gate records, approval decisions,
+    and every defect history entry."""
+    events = {}
+    for name, item in store.state["deliverables"].items():
+        out = events.setdefault(name, [])
+        if isinstance(item, dict) and isinstance(item.get("touched"), dict):
+            out += [(t, [s] if s else []) for s, t in item["touched"].items()]
+        gate = store.state.get("gates", {}).get(name)
+        if isinstance(gate, dict): out.append((gate.get("time"), record_sessions(gate)))
+    for d in defects:
+        events.setdefault(str(d.get("deliverable")), []).extend(defect_events(d))
+    for dec in store.state.get("decisions", []):
+        m = APPROVED_RE.match(str(dec.get("text") or "")) if isinstance(dec, dict) else None
+        if m and m.group(1) in events: events[m.group(1)].append((dec.get("time"), record_sessions(dec)))
+    return events
+
+
+def last_event(events):
+    times = [t for t in (parse_time(t) for t, _ in events) if t is not None]
+    return max(times) if times else None
+
+
+def in_scope(events, sessions, since):
+    """An event carrying one of SESSIONS counts; an event without a session id (or any event, when SESSIONS is empty)
+    counts only after SINCE; an event of other sessions only never counts."""
+    for t, ids in events:
+        if sessions and ids:
+            if sessions & set(ids): return True
+            continue
+        when = parse_time(t)
+        if when is not None and when >= since: return True
+    return False
+
+
+def current_scope(store, defects, sessions):
+    """Split the work into what this chat works on and older work. SESSIONS: this chat's session id, or a list of ids
+    (any match counts). Returns (current deliverables, older deliverables, current open defects, older open defects).
+    Retired deliverables are in neither list. Without any session id here (the host exports none), an open user defect
+    recorded without a session id is always current until it is closed or retired; with one, it uses the 12-hour window."""
+    if isinstance(sessions, str) or sessions is None: sessions = [sessions]
+    sessions = {s for s in sessions if valid_session_id(s)}
+    since = datetime.now(timezone.utc) - timedelta(hours=SCOPE_HOURS)
+    events = deliverable_events(store, defects)
+    live = store.live()
+    current = [n for n in live if in_scope(events.get(n, []), sessions, since)]
+    older = [n for n in live if n not in current]
+    cur_open, old_open = [], []
+    for d in defects:
+        if d.get("status") != "open": continue
+        name = d.get("deliverable")
+        # Only a session-less view (the host exports no id) keeps a session-less user complaint current forever; with a
+        # session id it is a legacy record and uses the 12-hour window like any other event without a session.
+        unowned_user = not sessions and d.get("source") != "agent" and not record_sessions(d) and not store.retired(name)
+        if name in current or unowned_user: cur_open.append(d)
+        elif name in older: old_open.append(d)
+        elif in_scope(defect_events(d), sessions, since): cur_open.append(d)
+        else: old_open.append(d)
+    return current, older, cur_open, old_open
 
 
 def block_once(root, payload, message, fingerprint, reason):
@@ -1740,6 +2086,26 @@ PENDING_FILE = "pending-complaints.json"
 SESSION_ENV = ("CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_CODE_SESSION_ID")  # the host's session, seen by defect add
 
 
+# Blocks the host or another agent puts in a prompt: never the user's own words (a relayed subagent report once read
+# as a complaint). An unclosed block runs to the end of the prompt.
+WRAPPER_TAGS = ("agent-message", "task-notification", "system-reminder", "local-command-caveat", "command-name",
+                "command-message", "command-args", "local-command-stdout", "local-command-stderr")
+WRAPPER_OPEN = re.compile(r"<(" + "|".join(WRAPPER_TAGS) + r")\b[^>]{0,2048}>")
+
+
+def strip_wrappers(prompt):
+    """PROMPT without host and agent wrapper blocks (linear: each block's close tag is found with one str.find)."""
+    out, pos = [], 0
+    while True:
+        m = WRAPPER_OPEN.search(prompt, pos)
+        if m is None: out.append(prompt[pos:]); break
+        out.append(prompt[pos:m.start()])
+        end = prompt.find(f"</{m.group(1)}>", m.end())
+        if end < 0: break
+        pos = end + len(m.group(1)) + 3
+    return "".join(out)
+
+
 def image_token(token):
     return token.lower().strip("\"'()[]<>,;:").endswith(IMAGE_SUFFIXES)
 
@@ -1822,12 +2188,35 @@ def record_pending(root, session_id, turn_id, quote, image):
     save_pending(root, dict(keep))
 
 
-def host_session():
-    """The id of the host session running this command, when the host exports one."""
+def host_sessions():
+    """Every host session id this command sees, in SESSION_ENV order. Claude Code started from a Codex terminal sees both
+    CODEX_THREAD_ID (the terminal's) and CLAUDE_CODE_SESSION_ID (its own), so a record must keep all of them."""
+    ids = []
     for name in SESSION_ENV:
         value = os.environ.get(name)
-        if valid_session_id(value): return value
-    return None
+        if valid_session_id(value) and value not in ids: ids.append(value)
+    return ids
+
+
+def host_session():
+    """The first host session id (kept as "session" for older readers), when the host exports one."""
+    ids = host_sessions()
+    return ids[0] if ids else None
+
+
+def tag_session(record):
+    """Record the host session ids on RECORD: "session" (first id) and "sessions" (all of them)."""
+    ids = host_sessions()
+    if ids: record["session"], record["sessions"] = ids[0], ids
+    return record
+
+
+def record_sessions(record):
+    """The session ids a record carries ("sessions" and the older single "session")."""
+    if not isinstance(record, dict): return []
+    ids = [s for s in record.get("sessions") or [] if isinstance(s, str) and s] if isinstance(record.get("sessions"), list) else []
+    if isinstance(record.get("session"), str) and record["session"] and record["session"] not in ids: ids.append(record["session"])
+    return ids
 
 
 def clear_pending_for_host_session(root):
@@ -1842,13 +2231,15 @@ def clear_pending_for_host_session(root):
 
 def pending_complaint(root, session_id, defects):
     """This session's live complaint marker, else None. A user defect added at or after it satisfies it when it was
-    recorded by the same session (the host's session id); a defect recorded without a session id satisfies any marker."""
+    recorded by the same session (any of the host session ids it carries); a defect recorded without a session id
+    satisfies any marker."""
     if not valid_session_id(session_id): return None
     item = load_pending(root).get(session_id)
     if not isinstance(item, dict) or not isinstance(item.get("time"), str) or item.get("expired") or item.get("done"): return None
     for d in defects:
         added = next((h.get("time") for h in d.get("history") or [] if isinstance(h, dict) and h.get("action") == "add"), "")
-        same = not isinstance(d.get("session"), str) or d["session"] == session_id
+        ids = record_sessions(d)
+        same = not ids or session_id in ids
         if d.get("source") != "agent" and isinstance(added, str) and added >= item["time"] and same: return None
     return item
 
@@ -1860,7 +2251,8 @@ def open_user_defect(root):
 
 def hook_prompt(payload):
     if not isinstance(payload, dict) or not isinstance(payload.get("prompt"), str): return ""
-    prompt = payload["prompt"]
+    prompt = strip_wrappers(payload["prompt"])  # host and agent wrappers are not the user's words
+    if not prompt.strip(): return ""
     words = request_text(prompt)
     complaint, only_image = is_complaint(words), image_only(prompt)
     root, _ = discover_hook_store(payload)
@@ -1895,8 +2287,13 @@ def hook_prompt(payload):
                 f"--name N --file F --width W --height H --format PNG; then {add}. "
                 "If defect add prints \"Repeat\", follow image-verify/references/construction-reference.md.")
     else: return ""
-    # ASCII escapes keep the JSON valid whatever the hook's stdout encoding is.
-    return json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": text}})
+    return context_output("UserPromptSubmit", text)
+
+
+def context_output(event, text):
+    """The one context shape both hosts accept for SessionStart and UserPromptSubmit (Claude Code's hooks reference and
+    the output schemas embedded in codex-cli). ASCII escapes keep the JSON valid whatever the stdout encoding is."""
+    return json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}})
 
 
 def hook_stop(payload):
@@ -1918,11 +2315,13 @@ def hook_stop(payload):
         return block_once(root, payload, message, "corrupt:" + str(exc), corrupt.format(exc))
     # Pending and open state first: while the user's complaint is unrecorded or a user defect is open, any "đã sửa X" claims.
     pending = pending_complaint(root, payload.get("session_id"), defects)
-    open_defects = [d for d in defects if d.get("status") == "open"]
+    # Only this chat's work blocks: what this session touched, or (no session id, or records without one) the last 12 h.
+    session = [payload["session_id"]] if valid_session_id(payload.get("session_id")) else host_sessions()
+    current, older, open_defects, _ = current_scope(store, defects, session)
     strict = bool(pending) or any(d.get("source") != "agent" for d in open_defects)
     if not claims_completion(message, strict, pending=bool(pending)): return ""
     try:
-        missing = ungated(store)
+        missing = ungated(store, current)
         fingerprint = store_fingerprint(store)
     except UsageError as exc: return block_once(root, payload, message, "corrupt:" + str(exc), corrupt.format(exc))
 
@@ -1940,6 +2339,12 @@ def hook_stop(payload):
               "Tell the user in their language and plain words what is still wrong (defect IDs only in parentheses) "
               "and ask whether to fix it, regenerate, or accept it; or run the gate to a pass: "
               f"{SCRIPT_HINT} gate --deliverable NAME")
+    try: stale = len(ungated(store, older))
+    except UsageError: stale = 0
+    if stale:
+        reason += (f"\n{stale} older deliverable{'s are' if stale > 1 else ' is'} unchecked (not touched in this chat or the "
+                   f"last {SCOPE_HOURS} hours, so not blocking); see brief, or retire them: "
+                   f"{SCRIPT_HINT} retire --deliverable NAME --note \"why\"")
     return block_once(root, payload, message, fingerprint, reason)
 
 
@@ -1948,14 +2353,15 @@ def hook_session_start(payload):
     if root is None: return ""
     session_id = payload.get("session_id") if isinstance(payload, dict) else None
     write_session_pointer(session_id, root, base)
-    try: card = format_session_start_card(Store(root))
-    except UsageError as exc: return f"image-studio: project store is corrupt: {exc}"
+    session = [session_id] if valid_session_id(session_id) else host_sessions()
+    try: card = format_session_start_card(Store(root), session)
+    except UsageError as exc: return context_output("SessionStart", f"image-studio: project store is corrupt: {exc}")
     try: size = Path(str(payload.get("transcript_path") or "")).stat().st_size
     except (OSError, ValueError): size = 0
     if size > LONG_CHAT_BYTES:
         card += (f"\nThis chat is long ({size >> 20} MB of history, resent on every step). For a new image task, "
                  "suggest the user start a new chat: this store, lessons, and taste carry the memory.")
-    return card
+    return context_output("SessionStart", card)
 
 
 def run_hook(argv):
@@ -2823,6 +3229,26 @@ def cmd_shape_check(args):
     return 1 if problems else 0
 
 
+def cmd_detail_check(args):
+    if args.min_ratio is not None and not 0 < args.min_ratio <= 2: raise UsageError("--min-ratio must be above 0 and at most 2")
+    images = []
+    for label, value in (("--image", args.image), ("--master", args.master)):
+        path = existing_file(value, label)
+        try: images.append(open_image(path))
+        except Exception as exc: raise UsageError(f"{label} {value}: cannot open as an image ({exc.__class__.__name__})") from None
+    ratio, side = detail_ratio(*images)
+    threshold = DETAIL_MIN_RATIO if args.min_ratio is None else args.min_ratio
+    print(f"Detail: {ratio:.1%} of master (ratio {ratio:.3f}; fine/mid edge energy at {side} px short side)")
+    if ratio >= threshold:
+        print(f"Result: PASS (threshold {threshold:.0%})"); return 0
+    if args.min_ratio is None:
+        print(f"Result: LOW (below {threshold:.0%}; report-only: pass --min-ratio R to fail). "
+              "Open both at 100%; if the image is softer, regenerate from the master instead of editing it again.")
+        return 0
+    print(f"Result: FAIL (below {threshold:.0%}); regenerate from the master instead of editing this file again")
+    return 1
+
+
 def cmd_crop_check(args):
     path = existing_file(args.image, "--image")
     image = open_8bit(path, "--image")
@@ -2958,6 +3384,11 @@ EPILOG = """\
 subcommands:
   init --project PATH --brand ID         example: python3 studio_state.py init --project . --brand acme
   approve deliverable --name N --file F [--width W --height H --format PNG|JPEG|WEBP|ZIP] [--alpha required|forbidden|any] [--quote T]
+                      [--from PARENT | --master]
+                                         --from: this file was edited from deliverable PARENT (its own name: from its current file);
+                                         records parent, root (the chain's master) and chain_depth (parent's + 1); --master marks a clean
+                                         master (depth 0); neither keeps the deliverable's lineage (0 when new). Prints "Chain depth: N"
+                                         and, at 3 or more, a warning naming the master
                                          example: python3 studio_state.py approve deliverable --name poster --file poster.png --width 1200 --height 800 --format PNG
   defect add --deliverable N --bbox x0,y0,x1,y1 --kind logo|seam|artifact|scope|color|other --note T [--source user|agent] [--quote T] [--wide]
                                          records image_size and a 16x16 gray fingerprint; a user box on the region of an earlier user
@@ -2970,8 +3401,20 @@ subcommands:
                                          example: python3 studio_state.py defect add --deliverable poster --bbox 100,50,200,150 --kind seam --note "visible seam"
   defect close --id D1 --status resolved|wontfix --note T [--quote T]
                                          example: python3 studio_state.py defect close --id D1 --status resolved --note "feathered seam"
+  retire --deliverable N [--deliverable N ...] --note T [--quote T] | retire --before YYYY-MM-DD --note T | retire --list
+                                         abandoned work: a retired deliverable leaves the stop hook, the session card and brief's list;
+                                         its open defects close as wontfix ("retired: T"). --before takes every deliverable whose last
+                                         event is before that UTC date (not in the future), skipping this chat's current work.
+                                         Exit 2 without --quote (the user's words) when it would close a user complaint or retire
+                                         this chat's current work by name. approve deliverable on the name brings it back and
+                                         reopens the defects retire closed
+                                         example: python3 studio_state.py retire --before 2026-11-01 --note "old card job, user moved on"
   brief [--max-lines 40]                 example: python3 studio_state.py brief
-  gate --deliverable N [--file F] [--run RUN]
+  gate --deliverable N [--file F] [--run RUN] [--min-detail R]
+                                         at chain depth 3+ with the master file unchanged, also runs detail-check against the master:
+                                         under 0.93 a warning ("edited N times in a chain; detail is X% of master M; regenerate from
+                                         the master"); with --min-detail R (above 0, at most 2) a failure under R. The master
+                                         is the store's copy (masters/<sha256>.<ext>, kept by approve --master or the first --from)
                                          example: python3 studio_state.py gate --deliverable poster
   verdict --run RUN (--id D1 --status pass|fail|uncertain --evidence T | --from verdicts.json) [--reviewer self|independent] [--crop 100|200]
                                          example: python3 studio_state.py verdict --run 20261018T000000Z-abc --id D1 --status pass --evidence "seam gone at 100%"
@@ -3046,6 +3489,13 @@ subcommands:
                                          engines), then grown --grow px (square). Writes an 8-bit gray PNG of 0/255; refuses to
                                          overwrite --before or --after; exit 1 and no file when nothing changed (or nothing is left)
                                          example: python3 studio_state.py mask-from-diff --before v6.png --after edited.png --out mask.png
+  detail-check --image A --master B [--min-ratio R]
+                                         edge crispness of A relative to its clean master B (Pillow only): both luminances at the smaller
+                                         short side (at most 2048 px), (rms |g - blur 1| / rms |g - blur 4|) of A over that of B; prints
+                                         "Detail: X% of master". Default report-only: under 0.93 "Result: LOW", exit 0; with --min-ratio
+                                         "Result: FAIL", exit 1 under R. Exit 2 when w/h differ by more than 2% or the master is flat
+                                         ("not comparable")
+                                         example: python3 studio_state.py detail-check --image v9.png --master v1.png --min-ratio 0.93
   crop-check --image F --focus x0,y0,x1,y1 [--display WxH] [--out-dir D]
                                          largest 16:9, 4:5, 1:1 and 9:16 crops centered on the focus and kept inside the image: ok with the
                                          focus share of the crop, "focus does not fit", or "image too small for this ratio"; --display: the image must be 2x WxH on both axes;
@@ -3053,12 +3503,16 @@ subcommands:
                                          example: python3 studio_state.py crop-check --image hero.png --focus 820,300,1240,900 --display 1440x810 --out-dir crops
   hook session-start | hook prompt | hook stop
                                          example: python3 studio_state.py hook session-start < payload.json
+                                         every mode prints one JSON object or nothing; session-start prints {"hookSpecificOutput":
+                                         {"hookEventName": "SessionStart", "additionalContext": card}} (current work only; older
+                                         work as one line); hook stop prints {"decision": "block", "reason": ...} only for work this
+                                         session touched (else events without a session id in the last 12 hours)
                                          hook prompt (UserPromptSubmit): a complaint (Vietnamese or English problem words, or an image
                                          with no words) where a store exists prints {"hookSpecificOutput": {"hookEventName":
                                          "UserPromptSubmit", "additionalContext": ...}} and writes pending-complaints.json; hook stop
                                          then blocks a completion claim until defect add --source user records it
 
-approve, defect, construction, brief, gate and verdict find the store by walking up from --project or the current folder.
+approve, defect, retire, construction, brief, gate and verdict find the store by walking up from --project or the current folder.
 init creates it; pref add does not use the project store; lessons (lessons.jsonl) and taste notes (brands/<brand>/taste.jsonl, taste.jsonl) live in ${IMAGE_STUDIO_HOME:-~/.image-studio}, shared by every task; hooks use the cwd from the hook input.
 gate fails a wrong size and says whether the aspect matches (w/h within 0.025); a PNG/JPEG/WebP over 1 MB gets a warning, not a fail.
 engine (axis-check, blend, edit-check, shape-check, mask-from-diff): --engine auto|pillow|fast, else IMAGE_STUDIO_ENGINE, else auto.
@@ -3067,6 +3521,7 @@ line says "Engine: numpy/opencv" or "Engine: pillow". Both engines give the same
 uv run --with pillow --with jsonschema --with numpy==2.0.2 --with opencv-python-headless==4.11.0.86 python3 studio_state.py ...
 exit codes: 0 ok / gate pass, 1 gate fail, edit-check found changes outside the box or mask (or a mask with no effect), axis-check found a bend,
 blend found a color mismatch (output still written), shape-check found a changed silhouette, crop-check found a crop or size problem,
+detail-check --min-ratio found less detail than the master,
 align-check --auto found no reliable match or a scale to fix, or mask-from-diff found no change,
 2 bad input or no store (blend without an accepted align record also exits 2)
 """
@@ -3088,6 +3543,9 @@ def build_parser():
     p.add_argument("--name", required=True); p.add_argument("--file", required=True)
     p.add_argument("--width", type=int); p.add_argument("--height", type=int)
     p.add_argument("--format"); p.add_argument("--alpha", choices=ALPHA_RULES); p.add_argument("--quote")
+    lineage = p.add_mutually_exclusive_group()
+    lineage.add_argument("--from", dest="from_parent", metavar="PARENT", help="the deliverable this file was edited from (its own name: an edit of its current file)")
+    lineage.add_argument("--master", action="store_true", help="this file is a clean master: chain depth 0")
     p.set_defaults(func=cmd_approve_deliverable)
 
     defect = sub.add_parser("defect").add_subparsers(dest="what", metavar="add|close", required=True)
@@ -3103,12 +3561,18 @@ def build_parser():
     p.add_argument("--note", required=True); p.add_argument("--quote")
     p.set_defaults(func=cmd_defect_close)
 
+    p = sub.add_parser("retire", parents=[common])
+    p.add_argument("--deliverable", action="append"); p.add_argument("--before", metavar="YYYY-MM-DD")
+    p.add_argument("--note"); p.add_argument("--quote"); p.add_argument("--list", action="store_true")
+    p.set_defaults(func=cmd_retire)
+
     p = sub.add_parser("brief", parents=[common])
     p.add_argument("--max-lines", type=int, default=40)
     p.set_defaults(func=cmd_brief)
 
     p = sub.add_parser("gate", parents=[common])
     p.add_argument("--deliverable", required=True); p.add_argument("--file"); p.add_argument("--run")
+    p.add_argument("--min-detail", type=float, metavar="R", help=f"fail (not only warn) when a chain of {CHAIN_WARN_DEPTH}+ edits keeps under R of the master's detail")
     p.set_defaults(func=cmd_gate)
 
     p = sub.add_parser("verdict", parents=[common])
@@ -3172,6 +3636,11 @@ def build_parser():
     p.add_argument("--min-area", type=int, default=16)
     p.set_defaults(func=cmd_mask_from_diff)
 
+    p = sub.add_parser("detail-check")
+    p.add_argument("--image", required=True); p.add_argument("--master", required=True)
+    p.add_argument("--min-ratio", type=float, metavar="R")
+    p.set_defaults(func=cmd_detail_check)
+
     p = sub.add_parser("crop-check")
     p.add_argument("--image", required=True); p.add_argument("--focus", required=True); p.add_argument("--display"); p.add_argument("--out-dir")
     p.set_defaults(func=cmd_crop_check)
@@ -3228,7 +3697,7 @@ def build_parser():
 
 def store_lock(args):
     """Serialize commands that rewrite one store, so parallel agents do not overwrite each other's defects or verdicts."""
-    if fcntl is None or getattr(args, "command", None) not in ("approve", "defect", "gate", "verdict", "construction"): return None
+    if fcntl is None or getattr(args, "command", None) not in ("approve", "defect", "retire", "gate", "verdict", "construction"): return None
     try:
         root = find_store(getattr(args, "project", None) or os.getcwd())
         if root is None: return None

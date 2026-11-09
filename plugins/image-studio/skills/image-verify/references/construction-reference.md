@@ -4,7 +4,8 @@ Read by [image-repair](../../image-repair/SKILL.md), [image-loop](../../image-lo
 
 ## When
 
-- Before editing an object whose shape depends on a physical mechanism (a tear, fold, or peel; a grip on a tool or weapon; stacked or fanned cards; worn armor or straps; a hinge; cloth drape; a liquid) when you cannot state its construction in one sentence.
+- On the first image of a new pose, held object, mechanism, creature, or theme, before generating: do not wait for a failure or a repeat. This covers any object whose shape depends on a physical mechanism (a tear, fold, or peel; a grip on a tool or weapon, including which side of a shield faces out; stacked or fanned cards; worn armor or straps; a hinge; cloth drape; a liquid). With no defect yet, keep the kept references under `refs/` with their source URLs and write the rule into the prompt; run `construction add` once a defect exists.
+- Before editing such an object when you cannot state its construction in one sentence.
 - When the user rejects the same region a second time: `defect add` prints "Repeat: this region was already reported (D<n>)" and the gate will not pass until a construction rule and a lesson are recorded.
 - When the user asks whether you researched references.
 

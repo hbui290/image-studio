@@ -1,6 +1,6 @@
 ---
 name: image-enhance
-description: "Upscale, sharpen, blurry, soft, pixelated, low resolution, 4K, enhance, clean edges, SVG logo, remove background: improve whole image, prove visible gain with compare_display.py. Not for local fixes (image-repair)."
+description: "Upscale, sharpen, blurry, soft, pixelated, low resolution, 4K, enhance, clean edges, SVG logo, remove background, export for X/social post size (16:9, square, 4:5), NFT 2:3, strip metadata before posting: improve whole image, prove visible gain with compare_display.py. Not for local fixes (image-repair)."
 ---
 
 # Whole-image enhancement
@@ -43,5 +43,5 @@ Run scripts; do not read their source - use `--help` for usage.
    Run: `uv run --with pillow python3 <skills>/image-enhance/scripts/compare_display.py ...` ([uv](https://docs.astral.sh/uv/)) (fallback: `python3 -m pip install pillow`). Stop if `visible_improvement` is false; show `before-after.png`. Outputs: `--out/metrics.json` (`visible_improvement`, `failures`, `metrics`, `limits`), `before-after.png`, `before-after-light.png` (transparent images only), `crop-N.png`. Exit codes: 0 (ran), 2 on bad input (`--width` 1..16384, float/aspect/crop error). Read [recipes.md](references/recipes.md#proving-the-gain) only when evaluating metrics, including the transparent-image edge and alpha metrics. Read [cutouts.md](references/cutouts.md#background-removal) only when checking backdrops.
 7. **Cutout edges:** For transparent PNG with halos, read [cutouts.md](references/cutouts.md#cutout-edges) only when fixing cutout edges. Stop if shrinking leaves noise or drops `alpha_iou` below 0.97; regenerate edge via [image-repair](../image-repair/SKILL.md).
 8. **Handoff:** If soft from missing detail, hand regions to [image-repair](../image-repair/SKILL.md).
-9. **Export:** Read [web-export.md](references/web-export.md) only when exporting for web.
+9. **Export:** Read [web-export.md](references/web-export.md) only when exporting for web. For a post on X or an NFT listing (post size, logo and subject margins, metadata removal), read [social-export.md](references/social-export.md) and run `python3 <skills>/image-enhance/scripts/export_social.py`.
 10. **Gate before claiming done:** In a project with a store, run `gate --deliverable` once before claiming done; follow [using the store in a skill](../image-verify/references/project-memory.md#using-the-store-in-a-skill).

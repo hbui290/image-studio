@@ -1,5 +1,53 @@
 # Changelog
 
+## 2.26.0-local.1 (2026-11-09)
+
+Fixes from a 4-week Codex session (2026-10-11 to 2026-11-07, about 480 user messages). From 2026-11-05 to 2026-11-07 the stop hook blocked nearly every reply on a new banner with 44 items from abandoned work. The user also repeated the same complaints many times: 3D/photoreal drift, mushy detail after edit-of-edit, missing arms, wrong finger counts, held objects not attached, references only researched when asked, and X post sizes and metadata cleanup. No new dependency.
+
+- **Stop hook scope:**
+  - The hook blocks only on this chat's pending complaint, and on open defects and ungated deliverables that this chat touched. Touching means `approve`, `gate`, `verdict`, `defect add` or `defect close`, recorded with every host session id the command sees (`sessions`; Claude Code started from a Codex terminal sees two), and any of them matches the hook's session.
+  - Without a session id, the hook blocks on work touched in the last 12 hours.
+  - When the host exports no session id, an open user complaint recorded without one stays current until it is closed or retired. When the hook has a session id, such a record (for example one from before session ids were kept) follows the 12-hour window like any other event without a session id.
+  - Older work never blocks. It shows as one count line in the block reason and in the session-start card.
+  - Replay on a copy of the real store, from a new chat that approved one banner: before, 9 open defects and 35 "has not passed" lines; after, only that banner, plus "40 older deliverables are unchecked".
+- **`retire`:** `retire --deliverable N ... --note T`, `retire --before YYYY-MM-DD --note T`, and `retire --list`. `--before` takes a UTC date and refuses a future one.
+  - A retired deliverable leaves the gate lists, the card and the stop hook. Its open defects close as `wontfix` with the note "retired: ..." and their IDs are kept in `retired.closed`.
+  - It exits 2 without `--quote` (the user's words) when it would close a user complaint or retire this chat's current work by name; `--before` skips current work.
+  - Approving it again un-retires it and reopens every defect it closed, even if one was edited since. Retiring again keeps the first time.
+- **`defect close`** exits 2 on a defect that is not open.
+- **Malformed defect records:** a defect whose fields have the wrong type (for example `history` not a list, or `deliverable` not a string) makes the store read as corrupt. Commands exit 2 and the stop hook blocks a completion claim, instead of crashing silently and letting it pass.
+- **Prompt hook ignores agent and harness text:** `<agent-message>`, `<task-notification>`, `<system-reminder>`, `<local-command-caveat>`, `<command-name>`, `<command-message>`, `<command-args>`, `<local-command-stdout>` and `<local-command-stderr>` blocks are removed before classifying. A prompt that is only such blocks (for example a relayed subagent report, seen live in Claude Code) gets no context and no complaint marker.
+- **Hook contract:** all three hooks print one JSON object or nothing, and all three time out after 10 s.
+  - SessionStart now prints `hookSpecificOutput.additionalContext` instead of plain text.
+  - Checked against the Claude Code hooks docs and the JSON schemas embedded in codex-cli 0.167.
+  - Codex asks the user to trust the hooks again.
+- **Edit chains:** `approve deliverable --master` marks a clean original and `--from PARENT` marks an edit; the store records `parent`, `root` and `chain_depth`.
+  - From depth 3, `approve` prints a warning and `gate` runs the new `detail-check` against the master. `detail-check` compares fine-to-mid detail on luminance at a common scale.
+  - `approve --master` (or the first `--from` without a master) keeps a copy in the store as `masters/<sha256>.<ext>`, so editing the master in place does not turn the check off.
+  - Below 0.93 of the master, the gate only warns by default; `gate --min-detail R` and `detail-check --min-ratio R` turn it into a failure. `R` must be above 0 and at most 2.
+  - Calibrated on the user's real version chains. The known mushy chain scored 0.877-0.906 against its master; its earlier versions scored 0.966-0.988; local-patch chains scored about 1.00. Only one chain carries a label, so the default is warn only.
+- **Reviewer checklist (`image-hunter`, `image-reviewer`, designer-review, independent-review):** reviewers must give evidence for each of these:
+  - arms and hands per character, and five fingers per hand unless the brand rules say otherwise;
+  - held objects attached to the hand, with the right grip side;
+  - blades and poles straight, with no missing or duplicated body segments;
+  - every character and the background in the brand's style, with 3D or photoreal drift named;
+  - no mush compared with the master;
+  - the logo identical to the logo file, never redrawn, with a margin from the edges;
+  - text legible at display size.
+- **image-create:**
+  - Start with a style-lock sentence written from `brand show` and the style references, and reuse it for secondary characters and the background.
+  - Research references by default for any new composition, pose, held object, creature, or theme, with Agent Reach first, and show the user a reference board.
+  - Prefer regenerating from the master over editing an edit.
+- **construction-reference:** now applies to the first image of a new pose, object, or mechanism, not only to a repeat complaint.
+- **`image-enhance/scripts/export_social.py` (new):**
+  - Presets `x-landscape` 1600x900, `x-square` 1080x1080, `x-portrait` 1080x1350 and `nft-portrait` 1024x1536, or `--size WxH`.
+  - `--fit cover` keeps a `--focus` box; `--fit pad` adds bars.
+  - Each `--safe` box (logo, text, face) must stay `--margin` inside every edge.
+  - Every export rebuilds the file from pixels without EXIF, XMP, IPTC, PNG text chunks, comments or ICC (converted to sRGB first), lists the removed metadata names (never their values), and re-reads the output to confirm it is clean.
+  - This is privacy cleanup only: no pixel changes and no claims about detection.
+  - The aspect ratios come from X's official ad specs; the exact pixel sizes are common third-party sizes. See `references/social-export.md`.
+- **Docs:** README and project-memory describe the scoped hook, `retire`, edit chains and the export script; the image-enhance description lists X sizes and metadata cleanup.
+
 ## 2.25.0-local.1 (2026-10-25)
 
 The host can no longer skip the defect loop silently. On 2026-10-22 the user complained about 12 times in one Codex session with the store in the session's folder, and `defect add` was never called. No new dependency.
